@@ -10,10 +10,10 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Search, Filter, Edit, ExternalLink, FileText } from 'lucide-react';
-import { db, articles, domains } from '@/lib/db';
-import { eq, desc, like, or } from 'drizzle-orm';
+import { db, articles } from '@/lib/db';
+import { desc, like, or } from 'drizzle-orm';
 
 interface PageProps {
     searchParams: Promise<{ q?: string; status?: string; page?: string }>;
@@ -24,7 +24,6 @@ export const dynamic = 'force-dynamic';
 export default async function ArticlesPage({ searchParams }: PageProps) {
     const params = await searchParams;
     const query = params.q || '';
-    const status = params.status || 'all';
     const page = Number(params.page) || 1;
     const limit = 20;
     const offset = (page - 1) * limit;
@@ -37,7 +36,7 @@ export default async function ArticlesPage({ searchParams }: PageProps) {
             like(articles.targetKeyword, `%${query}%`)
         );
     }
-    // TODO: Add status filter when using proper where composition
+
 
     const allArticles = await db.query.articles.findMany({
         where: whereClause,
@@ -59,12 +58,12 @@ export default async function ArticlesPage({ searchParams }: PageProps) {
                     </p>
                 </div>
                 <div className="flex gap-2">
-                    <Link href="/content/duplicates">
+                    <Link href="/dashboard/content/duplicates">
                         <Button variant="outline">
                             Check Duplicates
                         </Button>
                     </Link>
-                    <Link href="/content/new">
+                    <Link href="/dashboard/content/new">
                         <Button>
                             <FileText className="mr-2 h-4 w-4" />
                             New Article
@@ -131,7 +130,7 @@ export default async function ArticlesPage({ searchParams }: PageProps) {
                                         </TableCell>
                                         <TableCell className="text-right">
                                             <div className="flex justify-end gap-2">
-                                                <Link href={`/content/articles/${article.id}`}>
+                                                <Link href={`/dashboard/content/articles/${article.id}`}>
                                                     <Button variant="ghost" size="icon">
                                                         <Edit className="h-4 w-4" />
                                                     </Button>

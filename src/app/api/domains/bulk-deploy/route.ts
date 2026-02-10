@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
                         domain: domain.domain,
                         createRepo,
                         triggerBuild,
-                        addCustomDomain: false,
+                        addCustomDomain: true,
                     },
                     status: 'pending' as const,
                     scheduledFor: new Date(),

@@ -5,8 +5,8 @@ import { InterlinkManager } from '@/components/content/InterlinkManager';
 import { ContentEditor } from '@/components/content/ContentEditor';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+
 import { ArrowLeft, ExternalLink } from 'lucide-react';
 import Link from 'next/link';
 
@@ -32,7 +32,7 @@ export default async function ArticlePage({ params }: PageProps) {
         <div className="space-y-6">
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
-                    <Link href="/content/articles">
+                    <Link href="/dashboard/content/articles">
                         <Button variant="ghost" size="icon">
                             <ArrowLeft className="h-5 w-5" />
                         </Button>

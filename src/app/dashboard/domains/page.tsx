@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/table';
 import { Plus, Search, Filter, ExternalLink, MoreHorizontal } from 'lucide-react';
 import { db, domains } from '@/lib/db';
+import { DeployAllButton } from '@/components/dashboard/DeployAllButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -71,6 +72,7 @@ export default async function DomainsPage() {
                     </p>
                 </div>
                 <div className="flex gap-2">
+                    <DeployAllButton domainIds={allDomains.filter(d => !d.isDeployed).map(d => d.id)} />
                     <Link href="/dashboard/domains/import">
                         <Button variant="outline">
                             Import CSV

@@ -20,14 +20,14 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 
 const navigation = [
-    { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-    { name: 'Domains', href: '/domains', icon: Globe },
-    { name: 'Content', href: '/content', icon: FileText },
-    { name: 'Keywords', href: '/keywords', icon: Search },
-    { name: 'Analytics', href: '/analytics', icon: BarChart3 },
-    { name: 'Revenue', href: '/revenue', icon: DollarSign },
-    { name: 'Research', href: '/research', icon: Beaker },
-    { name: 'Settings', href: '/settings', icon: Settings },
+    { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+    { name: 'Domains', href: '/dashboard/domains', icon: Globe },
+    { name: 'Content', href: '/dashboard/content', icon: FileText },
+    { name: 'Keywords', href: '/dashboard/keywords', icon: Search },
+    { name: 'Analytics', href: '/dashboard/analytics', icon: BarChart3 },
+    { name: 'Revenue', href: '/dashboard/revenue', icon: DollarSign },
+    { name: 'Research', href: '/dashboard/research', icon: Beaker },
+    { name: 'Settings', href: '/dashboard/settings', icon: Settings },
 ];
 
 export function Sidebar() {
@@ -43,7 +43,7 @@ export function Sidebar() {
         >
             {/* Logo */}
             <div className="flex h-16 items-center border-b px-4">
-                <Link href="/" className="flex items-center gap-2">
+                <Link href="/dashboard" className="flex items-center gap-2">
                     <Globe className="h-8 w-8 text-primary" />
                     {!collapsed && (
                         <span className="text-xl font-bold">Domain Empire</span>

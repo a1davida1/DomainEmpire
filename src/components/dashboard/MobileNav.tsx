@@ -20,14 +20,14 @@ import {
 } from 'lucide-react';
 
 const navigation = [
-    { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-    { name: 'Domains', href: '/domains', icon: Globe },
-    { name: 'Content', href: '/content', icon: FileText },
-    { name: 'Keywords', href: '/keywords', icon: Search },
-    { name: 'Analytics', href: '/analytics', icon: BarChart3 },
-    { name: 'Revenue', href: '/revenue', icon: DollarSign },
-    { name: 'Research', href: '/research', icon: Beaker },
-    { name: 'Settings', href: '/settings', icon: Settings },
+    { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+    { name: 'Domains', href: '/dashboard/domains', icon: Globe },
+    { name: 'Content', href: '/dashboard/content', icon: FileText },
+    { name: 'Keywords', href: '/dashboard/keywords', icon: Search },
+    { name: 'Analytics', href: '/dashboard/analytics', icon: BarChart3 },
+    { name: 'Revenue', href: '/dashboard/revenue', icon: DollarSign },
+    { name: 'Research', href: '/dashboard/research', icon: Beaker },
+    { name: 'Settings', href: '/dashboard/settings', icon: Settings },
 ];
 
 export function MobileNav() {
@@ -36,7 +36,7 @@ export function MobileNav() {
 
     return (
         <div className="md:hidden flex items-center justify-between p-4 border-b bg-card">
-            <Link href="/" className="flex items-center gap-2">
+            <Link href="/dashboard" className="flex items-center gap-2">
                 <Globe className="h-6 w-6 text-primary" />
                 <span className="text-lg font-bold">Domain Empire</span>
             </Link>
