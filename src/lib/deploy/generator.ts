@@ -2,8 +2,9 @@
  * Site Generator - Creates static site content for deployment
  */
 
-import { db, articles, domains } from '@/lib/db';
+import { db, articles, domains, monetizationProfiles } from '@/lib/db';
 import { eq, and } from 'drizzle-orm';
+import { getMonetizationScripts } from '@/lib/monetization/scripts';
 
 interface SiteConfig {
     domain: string;
@@ -12,6 +13,7 @@ interface SiteConfig {
     niche: string;
     subNiche?: string;
     template: string;
+    scripts: { head: string; body: string };
 }
 
 interface GeneratedFile {
@@ -27,6 +29,12 @@ export async function generateSiteFiles(domainId: string): Promise<GeneratedFile
     if (domainResult.length === 0) throw new Error('Domain not found');
     const domain = domainResult[0];
 
+    const monProfile = await db.select().from(monetizationProfiles).where(eq(monetizationProfiles.domainId, domainId)).limit(1);
+    const scripts = getMonetizationScripts({
+        adNetwork: monProfile[0]?.adNetwork || 'none',
+        adNetworkId: monProfile[0]?.adNetworkId,
+    });
+
     const publishedArticles = await db
         .select()
         .from(articles)
@@ -34,11 +42,12 @@ export async function generateSiteFiles(domainId: string): Promise<GeneratedFile
 
     const config: SiteConfig = {
         domain: domain.domain,
-        title: domain.domain.split('.')[0].replaceAll(/-/g, ' '),
+        title: domain.domain.split('.')[0].replaceAll('-', ' '),
         description: `Expert guides about ${domain.niche || 'various topics'}`,
         niche: domain.niche || 'general',
         subNiche: domain.subNiche || undefined,
         template: domain.siteTemplate || 'authority',
+        scripts,
     };
 
     return [
@@ -58,7 +67,7 @@ export async function generateSiteFiles(domainId: string): Promise<GeneratedFile
 
 function generatePackageJson(config: SiteConfig): string {
     return JSON.stringify({
-        name: config.domain.replace(/\./g, '-'),
+        name: config.domain.replaceAll('.', '-'),
         type: 'module',
         version: '1.0.0',
         scripts: { dev: 'astro dev', build: 'astro build', preview: 'astro preview' },
@@ -82,10 +91,12 @@ const { title, description = "${config.description}" } = Astro.props;
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content={description}><title>{title} | ${config.title}</title>
   <link rel="stylesheet" href="/src/styles/global.css">
+  <Fragment set:html={${JSON.stringify(config.scripts.head)}} />
 </head>
 <body><header><nav><a href="/" class="logo">${config.title}</a></nav></header>
 <main><slot /></main>
 <footer><p>&copy; ${new Date().getFullYear()} ${config.title}</p></footer>
+<Fragment set:html={${JSON.stringify(config.scripts.body)}} />
 </body></html>`;
 }
 

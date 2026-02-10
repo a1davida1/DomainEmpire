@@ -56,7 +56,7 @@ async function parseError(response: Response, operation: string): Promise<string
     try {
         const data = await response.json() as GoDaddyErrorResponse;
         const fieldErrors = data.fields?.map(f => `${f.path}: ${f.message}`).join('; ');
-        return `${operation}: ${data.message || data.code}${fieldErrors ? ` (${fieldErrors})` : ''} [HTTP ${response.status}]`;
+        return `${operation}: ${data.message || data.code}${fieldErrors ? ' (' + fieldErrors + ')' : ''} [HTTP ${response.status}]`;
     } catch {
         const text = await response.text().catch(() => 'Unknown error');
         return `${operation}: ${text} [HTTP ${response.status}]`;

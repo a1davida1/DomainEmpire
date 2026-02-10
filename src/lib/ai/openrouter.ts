@@ -19,6 +19,10 @@ export const MODEL_CONFIG = {
 
     // Fallback for bulk operations
     bulkOperations: 'x-ai/grok-3-fast',
+    voiceSeedGeneration: 'anthropic/claude-sonnet-4-5-20250929',
+
+    // Deep Research (Online)
+    research: 'perplexity/llama-3.1-sonar-large-128k-online',
 } as const;
 
 // Pricing per 1K tokens (approximate, check OpenRouter for current)

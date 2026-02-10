@@ -10,7 +10,7 @@
  * 6. Meta Generation (Claude Haiku)
  */
 
-import { db, articles, contentQueue, apiCallLogs, keywords } from '@/lib/db';
+import { db, articles, contentQueue, apiCallLogs, keywords, domains } from '@/lib/db';
 import { getAIClient } from './openrouter';
 import { eq } from 'drizzle-orm';
 
@@ -18,134 +18,29 @@ import { eq } from 'drizzle-orm';
 // PROMPTS FOR EACH STAGE
 // ===========================================
 
-const PROMPTS = {
-    outline: (keyword: string, secondaryKeywords: string[], domainContext: string) => `
-You are an expert SEO content strategist. Create a detailed article outline for the following:
+import { PROMPTS } from './prompts';
+import { getOrCreateVoiceSeed } from './voice-seed';
 
-PRIMARY KEYWORD: ${keyword}
-SECONDARY KEYWORDS: ${secondaryKeywords.join(', ') || 'None specified'}
-WEBSITE CONTEXT: ${domainContext}
-
-Create an outline that:
-1. Has a compelling H1 title that includes the primary keyword naturally
-2. Has 5-8 H2 sections that comprehensively cover the topic
-3. Each H2 should have 2-4 H3 subsections
-4. Include a clear introduction and conclusion section
-5. Suggest FAQ questions (3-5) based on "People Also Ask" style queries
-6. Include notes on where to add statistics, examples, or expert quotes
-
-Respond with a JSON object:
-{
-  "title": "The optimized H1 title",
-  "metaDescription": "155 character meta description",
-  "outline": [
-    {
-      "heading": "H2 heading text",
-      "level": 2,
-      "subheadings": [
-        { "heading": "H3 heading", "level": 3, "notes": "Content notes" }
-      ],
-      "notes": "What to cover in this section"
-    }
-  ],
-  "faqs": [
-    { "question": "FAQ question", "answerHint": "Key points to cover" }
-  ],
-  "estimatedWordCount": 2500
+// Helper to slugify string
+function slugify(text: string) {
+    return text.toString().toLowerCase()
+        .replace(/\s+/g, '-')           // Replace spaces with -
+        .replace(/[^\w\-]+/g, '')       // Remove all non-word chars
+        .replace(/\-\-+/g, '-')         // Replace multiple - with single -
+        .replace(/^-+/, '')             // Trim - from start of text
+        .replace(/-+$/, '');            // Trim - from end of text
 }
-`,
 
-    draft: (outline: object, keyword: string, domainName: string) => `
-You are an expert content writer specializing in SEO-optimized, genuinely helpful articles.
-
-Write a complete, publication-ready article based on this outline:
-
-${JSON.stringify(outline, null, 2)}
-
-PRIMARY KEYWORD: ${keyword}
-WEBSITE: ${domainName}
-
-CRITICAL WRITING GUIDELINES:
-1. Write in a conversational but authoritative tone
-2. Use the primary keyword naturally 3-5 times (not forced)
-3. Include specific examples, statistics, and actionable advice
-4. Make the content genuinely helpful - not keyword-stuffed garbage
-5. Use short paragraphs (2-3 sentences max) for readability
-6. Include transition sentences between sections
-7. Write a compelling introduction that hooks the reader
-8. End with a clear conclusion and call-to-action
-9. Format using Markdown with proper headings (## for H2, ### for H3)
-
-DO NOT:
-- Use phrases like "in this article" or "as we discussed"
-- Start sentences with "So," or "Well,"
-- Use clichés like "game-changer" or "dive into"
-- Over-promise or make claims without backing them up
-
-Write the complete article in Markdown format.
-`,
-
-    humanize: (draft: string) => `
-You are an expert editor who makes AI-generated content sound more natural and human.
-
-Review and refine this article to make it sound like it was written by a knowledgeable human expert:
-
-${draft}
-
-REFINEMENT TASKS:
-1. Vary sentence structure and length naturally
-2. Add personality through word choice (without being unprofessional)
-3. Include subtle imperfections that humans would write (parenthetical asides, rhetorical questions)
-4. Replace any remaining robotic phrases
-5. Ensure the article flows naturally when read aloud
-6. Add authentic-sounding personal touches or opinions where appropriate
-7. Make sure transitions between sections feel natural
-
-Keep all the factual content, structure, and SEO elements intact.
-Return the refined article in Markdown format.
-`,
-
-    seoOptimize: (article: string, keyword: string, secondaryKeywords: string[]) => `
-You are an SEO specialist. Optimize this article for search engines while maintaining readability.
-
-ARTICLE:
-${article}
-
-PRIMARY KEYWORD: ${keyword}
-SECONDARY KEYWORDS: ${secondaryKeywords.join(', ')}
-
-OPTIMIZATION TASKS:
-1. Ensure primary keyword appears in first 100 words
-2. Check keyword density (aim for 1-2% naturally)
-3. Add secondary keywords where they fit naturally
-4. Optimize headings for featured snippets
-5. Add internal linking placeholders: [INTERNAL_LINK: anchor text | suggested topic]
-6. Add external linking placeholders for authoritative sources: [EXTERNAL_LINK: anchor text | suggested source type]
-7. Ensure proper heading hierarchy (H2 -> H3, no skipped levels)
-8. Add alt text suggestions for any images: [IMAGE: description | alt text]
-
-Return the optimized article in Markdown format with all placeholders included.
-`,
-
-    meta: (article: string, keyword: string) => `
-Generate SEO metadata for this article.
-
-ARTICLE (first 1000 chars):
-${article.slice(0, 1000)}
-
-PRIMARY KEYWORD: ${keyword}
-
-Return a JSON object with:
-{
-  "title": "60-character SEO title with keyword near the start",
-  "metaDescription": "155-character compelling meta description with keyword",
-  "ogTitle": "Open Graph title for social sharing",
-  "ogDescription": "Open Graph description for social sharing",
-  "schemaType": "Article" | "HowTo" | "FAQ",
-  "suggestedSlug": "url-slug-here"
+// Helper to detect content type from keyword
+function getContentType(keyword: string): 'article' | 'comparison' | 'calculator' | 'costGuide' | 'leadCapture' | 'healthDecision' {
+    const lower = keyword.toLowerCase();
+    if (lower.includes(' vs ') || lower.includes(' versus ')) return 'comparison';
+    if (lower.includes('calculator') || lower.includes('estimator') || lower.includes('tool')) return 'calculator';
+    if (lower.includes('cost') || lower.includes('price') || lower.includes('how much')) return 'costGuide';
+    if (lower.includes('case') || lower.includes('lawyer') || lower.includes('attorney') || lower.includes('claim')) return 'leadCapture';
+    if (lower.includes('safe') || lower.includes('side effects') || lower.includes('treatment') || lower.includes('symptom')) return 'healthDecision';
+    return 'article';
 }
-`,
-};
 
 // ===========================================
 // PIPELINE PROCESSOR
@@ -174,8 +69,42 @@ export async function processOutlineJob(jobId: string): Promise<void> {
         .set({ status: 'processing', startedAt: new Date() })
         .where(eq(contentQueue.id, jobId));
 
+    // Fetch article to get research data
+    const articleRecord = await db.select().from(articles).where(eq(articles.id, job.articleId!)).limit(1);
+    const researchData = articleRecord[0]?.researchData;
+
     try {
         // Generate outline
+        // (We use a simple inline prompt for outline or export one in PROMPTS if preferred)
+        // For now, retaining a simplified inline prompt or using a new one if added to PROMPTS.
+        // Actually, let's keep the outline prompt inline for now as it wasn't replaced by Antigravity prompts yet.
+        const outlinePrompt = `
+You are an expert SEO content strategist. Create a detailed outline for:
+KEYWORD: ${payload.targetKeyword}
+CONTEXT: ${payload.domainName}
+
+RESEARCH DATA (Use these facts):
+${JSON.stringify(researchData || {})}
+
+Requirements:
+1. Compelling H1 (with keyword)
+2. 5-8 H2 sections (comprehensive)
+3. 2-4 H3 subsections per H2
+4. Intro & Conclusion
+5. 3-5 FAQs (People Also Ask style)
+6. Notes on where to add stats/examples from the research data
+
+Respond with JSON:
+{
+  "title": "H1 title",
+  "metaDescription": "155 char description",
+  "outline": [
+    { "heading": "H2", "level": 2, "subheadings": [{ "heading": "H3", "level": 3 }], "notes": "Notes" }
+  ],
+  "faqs": [{ "question": "Q", "answerHint": "A" }],
+  "estimatedWordCount": 2500
+}`;
+
         const response = await ai.generateJSON<{
             title: string;
             metaDescription: string;
@@ -184,7 +113,7 @@ export async function processOutlineJob(jobId: string): Promise<void> {
             estimatedWordCount: number;
         }>(
             'outlineGeneration',
-            PROMPTS.outline(payload.targetKeyword, payload.secondaryKeywords, payload.domainName)
+            outlinePrompt
         );
 
         // Log API call
@@ -265,9 +194,33 @@ export async function processDraftJob(jobId: string): Promise<void> {
     await db.update(contentQueue).set({ status: 'processing', startedAt: new Date() }).where(eq(contentQueue.id, jobId));
 
     try {
+        // Fetch domain for voice seed
+        const domainRecord = await db.select().from(domains).where(eq(domains.id, job.domainId!)).limit(1);
+        const domain = domainRecord[0];
+        // Lazily generate voice seed if not present
+        const voiceSeed = await getOrCreateVoiceSeed(job.domainId!, domain.domain, domain.niche || 'general');
+
+        const contentType = getContentType(payload.targetKeyword);
+        let prompt = '';
+
+        if (contentType === 'calculator') {
+            prompt = PROMPTS.calculator(payload.targetKeyword);
+        } else if (contentType === 'comparison') {
+            prompt = PROMPTS.comparison(payload.outline, payload.targetKeyword, payload.domainName);
+        } else if (contentType === 'costGuide') {
+            prompt = PROMPTS.costGuide(payload.outline, payload.targetKeyword, payload.domainName);
+        } else if (contentType === 'leadCapture') {
+            prompt = PROMPTS.leadCapture(payload.outline, payload.targetKeyword, payload.domainName);
+        } else if (contentType === 'healthDecision') {
+            prompt = PROMPTS.healthDecision(payload.outline, payload.targetKeyword, payload.domainName);
+        } else {
+            // Standard article with voice seed
+            prompt = PROMPTS.article(payload.outline, payload.targetKeyword, payload.domainName, voiceSeed);
+        }
+
         const response = await ai.generate(
             'draftGeneration',
-            PROMPTS.draft(payload.outline, payload.targetKeyword, payload.domainName)
+            prompt
         );
 
         await db.insert(apiCallLogs).values({
@@ -323,7 +276,78 @@ export const pipelineProcessors = {
     seo_optimize: processSeoOptimizeJob,
     generate_meta: processMetaJob,
     keyword_research: processKeywordResearchJob,
+    research: processResearchJob,
 };
+
+export async function processResearchJob(jobId: string): Promise<void> {
+    const ai = getAIClient();
+
+    const jobs = await db.select().from(contentQueue).where(eq(contentQueue.id, jobId)).limit(1);
+    if (jobs.length === 0) throw new Error(`Job ${jobId} not found`);
+
+    const job = jobs[0];
+    const payload = job.payload as { targetKeyword: string; domainName: string };
+
+    await db.update(contentQueue).set({ status: 'processing', startedAt: new Date() }).where(eq(contentQueue.id, jobId));
+
+    try {
+        const response = await ai.generateJSON<{
+            statistics: Array<{ stat: string; source: string; date: string }>;
+            quotes: Array<{ quote: string; author: string; source: string }>;
+            competitorHooks: string[];
+            recentDevelopments: string[];
+        }>(
+            'research',
+            PROMPTS.research(payload.targetKeyword, payload.domainName)
+        );
+
+        await db.insert(apiCallLogs).values({
+            articleId: job.articleId!,
+            stage: 'research' as any, // Cast to any until TS picks up schema change
+            model: response.model,
+            inputTokens: response.inputTokens,
+            outputTokens: response.outputTokens,
+            cost: response.cost,
+            durationMs: response.durationMs,
+        });
+
+        // Save research data to article
+        await db.update(articles).set({
+            researchData: response.data,
+            // status: 'researching' // optional, keep as draft/queued
+        }).where(eq(articles.id, job.articleId!));
+
+        await db.update(contentQueue).set({
+            status: 'completed',
+            completedAt: new Date(),
+            result: response.data,
+            apiTokensUsed: response.inputTokens + response.outputTokens,
+            apiCost: response.cost,
+        }).where(eq(contentQueue.id, jobId));
+
+        // Queue next job: generate_outline
+        await db.insert(contentQueue).values({
+            jobType: 'generate_outline',
+            domainId: job.domainId,
+            articleId: job.articleId,
+            priority: job.priority,
+            payload: {
+                targetKeyword: payload.targetKeyword,
+                secondaryKeywords: [], // research prompt doesn't extract secondary keywords, maybe add later or pass from payload
+                domainName: payload.domainName
+            },
+            status: 'pending',
+        });
+
+    } catch (error) {
+        await db.update(contentQueue).set({
+            status: 'failed',
+            errorMessage: error instanceof Error ? error.message : String(error),
+            attempts: (job.attempts || 0) + 1,
+        }).where(eq(contentQueue.id, jobId));
+        throw error;
+    }
+}
 
 export async function processHumanizeJob(jobId: string): Promise<void> {
     const ai = getAIClient();
@@ -597,6 +621,41 @@ export async function processKeywordResearchJob(jobId: string): Promise<void> {
                 difficulty: kw.difficulty,
                 intent,
                 status: 'queued',
+            });
+        }
+
+        // AUTO-APPROVE BEST KEYWORD AND START RESEARCH
+        if (response.data.keywords.length > 0) {
+            // Sort copy of keywords to avoid mutation issues
+            const sortedKeywords = [...response.data.keywords].sort((a, b) => {
+                // heuristic: score = volume / difficulty (simplified)
+                return (b.searchVolume / (b.difficulty || 1)) - (a.searchVolume / (a.difficulty || 1));
+            });
+            const bestKeyword = sortedKeywords[0];
+
+            console.log(`[KeywordResearch] Auto-selecting best keyword: ${bestKeyword.keyword}`);
+
+            // Create article record
+            const newArticle = await db.insert(articles).values({
+                domainId: job.domainId!,
+                targetKeyword: bestKeyword.keyword,
+                secondaryKeywords: bestKeyword.variations,
+                title: bestKeyword.keyword, // Temporary title
+                slug: slugify(bestKeyword.keyword), // Temporary slug
+                status: 'draft',
+            }).returning({ id: articles.id });
+
+            // Queue RESEARCH job (new start of pipeline)
+            await db.insert(contentQueue).values({
+                jobType: 'research' as any, // Cast to any until TS picks up schema change
+                domainId: job.domainId!,
+                articleId: newArticle[0].id,
+                payload: {
+                    targetKeyword: bestKeyword.keyword,
+                    domainName: payload.domain,
+                },
+                status: 'pending',
+                priority: 1, // High priority to get it moving
             });
         }
 

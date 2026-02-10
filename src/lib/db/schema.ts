@@ -1,5 +1,5 @@
 import { pgTable, text, integer, real, boolean, timestamp, jsonb, uuid, index } from 'drizzle-orm/pg-core';
-import { relations, sql } from 'drizzle-orm';
+import { relations } from 'drizzle-orm';
 
 // ===========================================
 // DOMAINS: The foundation. Every domain in the portfolio.
@@ -32,13 +32,44 @@ export const domains = pgTable('domains', {
     githubRepo: text('github_repo'),
     cloudflareProject: text('cloudflare_project'),
     siteTemplate: text('site_template', {
-        enum: ['authority', 'comparison', 'calculator', 'review']
+        enum: ['authority', 'comparison', 'calculator', 'review', 'tool', 'hub', 'decision', 'cost_guide', 'niche', 'info', 'consumer', 'brand']
     }).default('authority'),
     isDeployed: boolean('is_deployed').default(false),
-    lastDeployedAt: timestamp('last_deployed_at'),
+    contentConfig: jsonb('content_config').$type<{
+        voiceSeed?: {
+            name: string;
+            background: string;
+            quirk: string;
+            toneDial: number;
+            tangents: string;
+            petPhrase: string;
+            formatting: string;
+        };
+        schedule?: {
+            frequency: string; // 'daily', 'weekly', 'sporadic'
+            timeOfDay: 'morning' | 'evening' | 'random';
+            wordCountRange: [number, number];
+        };
+        contentTypeMix?: {
+            article: number;
+            comparison: number;
+            tool: number;
+            guide: number;
+        };
+    }>().default({}),
+
+    // Organization & Infrastructure
+    vertical: text('vertical'), // 'Legal', 'Insurance', 'Health', etc.
+    cloudflareAccount: text('cloudflare_account'), // 'legal-content-1@...', etc.
+
+    // Design & Strategy
+    themeStyle: text('theme_style'), // 'navy-serif', 'green-modern', 'medical-clean'
+    monetizationModel: text('monetization_model'), // 'Lead gen', 'Display + affiliate', etc.
+    monetizationTier: integer('monetization_tier').default(3), // 1=Lead Gen Only, 2=Affiliate Pri, 3=Display Pri, 4=Brand
+
 
     // Valuation
-    estimatedFlipValueLow: real('estimated_flip_value_low'),
+    estimatedRevenueAtMaturity: text('estimated_revenue_at_maturity'), // '$2,000-8,000'
     estimatedFlipValueHigh: real('estimated_flip_value_high'),
     estimatedMonthlyRevenueLow: real('estimated_monthly_revenue_low'),
     estimatedMonthlyRevenueHigh: real('estimated_monthly_revenue_high'),
@@ -113,6 +144,14 @@ export const articles = pgTable('articles', {
     internalLinks: jsonb('internal_links'),
     externalLinks: jsonb('external_links'),
     schemaMarkup: jsonb('schema_markup'),
+
+    // Research
+    researchData: jsonb('research_data').$type<{
+        statistics: Array<{ stat: string; source: string; date: string }>;
+        quotes: Array<{ quote: string; author: string; source: string }>;
+        competitorHooks: string[];
+        recentDevelopments: string[];
+    }>(),
 
     // AI Generation metadata
     aiModel: text('ai_model'),
@@ -207,13 +246,14 @@ export const contentQueue = pgTable('content_queue', {
         enum: [
             'generate_outline', 'generate_draft', 'humanize',
             'seo_optimize', 'generate_meta', 'deploy',
-            'fetch_analytics', 'keyword_research', 'bulk_seed'
+            'fetch_analytics', 'keyword_research', 'bulk_seed',
+            'research'
         ]
     }).notNull(),
 
     // References
-    domainId: uuid('domain_id').references(() => domains.id),
-    articleId: uuid('article_id').references(() => articles.id),
+    domainId: uuid('domain_id').references(() => domains.id, { onDelete: 'cascade' }),
+    articleId: uuid('article_id').references(() => articles.id, { onDelete: 'cascade' }),
     keywordId: uuid('keyword_id').references(() => keywords.id),
 
     // Job data
@@ -224,7 +264,7 @@ export const contentQueue = pgTable('content_queue', {
     status: text('status', {
         enum: ['pending', 'processing', 'completed', 'failed', 'cancelled']
     }).default('pending'),
-    priority: integer('priority').default(5),
+    priority: integer('priority').default(0), // Higher is better
     attempts: integer('attempts').default(0),
     maxAttempts: integer('max_attempts').default(3),
     errorMessage: text('error_message'),
@@ -239,8 +279,8 @@ export const contentQueue = pgTable('content_queue', {
     completedAt: timestamp('completed_at'),
 
     // Scheduling
-    scheduledFor: timestamp('scheduled_for').defaultNow(),
-    lockedUntil: timestamp('locked_until'),
+    scheduledFor: timestamp('scheduled_for'), // For future scheduling
+    lockedUntil: timestamp('locked_until'), // For worker locking
 });
 
 // ===========================================

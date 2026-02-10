@@ -26,8 +26,9 @@
 
 import { db, contentQueue, articles } from '@/lib/db';
 import { eq, and, lte, isNull, or, sql, asc, count } from 'drizzle-orm';
-import { processOutlineJob, processDraftJob, processHumanizeJob, processSeoOptimizeJob, processMetaJob, processKeywordResearchJob } from './pipeline';
+import { processOutlineJob, processDraftJob, processHumanizeJob, processSeoOptimizeJob, processMetaJob, processKeywordResearchJob, processResearchJob } from './pipeline';
 import { processDeployJob } from '@/lib/deploy/processor';
+import { checkContentSchedule } from './scheduler';
 
 const LOCK_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 const JOB_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes max per job
@@ -239,6 +240,9 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
         case 'keyword_research':
             await processKeywordResearchJob(job.id);
             break;
+        case 'research':
+            await processResearchJob(job.id);
+            break;
         case 'bulk_seed':
             // Bulk seed is handled by the API route directly
             await markJobComplete(job.id, 'Bulk seed jobs are processed via API');
@@ -322,6 +326,11 @@ export async function runWorkerContinuously(options: WorkerOptions = {}): Promis
             const now = Date.now();
             if (now - lastStaleCheck > STALE_LOCK_CHECK_INTERVAL) {
                 await recoverStaleLocks();
+
+                // Run scheduler check approx every hour (using large interval or mod check)
+                // For simplicity, we'll check it here but use a separate timestamp
+                await checkContentSchedule().catch((err: unknown) => console.error('[Scheduler] Error:', err));
+
                 lastStaleCheck = now;
             }
 
