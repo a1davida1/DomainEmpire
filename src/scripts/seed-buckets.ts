@@ -1,6 +1,6 @@
 
 import { db, domains } from '../lib/db';
-import { sql } from 'drizzle-orm';
+
 
 const FULL_BUCKETS = [
     {
@@ -325,9 +325,23 @@ async function seedBuckets() {
         for (const dom of bucket.domains) {
             // Extract TLD
             const parts = dom.domain.split('.');
-            const tld = parts.length > 1 ? parts[parts.length - 1] : 'com';
+            const tld = parts.at(-1) || 'com';
 
             const template = mapTemplate(dom.type);
+
+            // Parse revenue range
+            let revLow = 0;
+            let revHigh = 0;
+            if (dom.revenue) {
+                const clean = dom.revenue.replaceAll(/[$,]/g, '');
+                const range = clean.split('-');
+                if (range.length === 2) {
+                    revLow = Number.parseInt(range[0]) || 0;
+                    revHigh = Number.parseInt(range[1]) || 0;
+                } else {
+                    revHigh = Number.parseInt(clean) || 0;
+                }
+            }
 
             // Upsert domain
             await db.insert(domains).values({
@@ -341,7 +355,8 @@ async function seedBuckets() {
                 siteTemplate: template,
                 monetizationModel: dom.monetization,
                 monetizationTier: dom.tier || 3, // Default to 3
-                estimatedRevenueAtMaturity: dom.revenue,
+                estimatedRevenueAtMaturityLow: revLow,
+                estimatedRevenueAtMaturityHigh: revHigh,
                 status: 'active',
                 contentConfig: {
                     schedule: {
@@ -361,7 +376,8 @@ async function seedBuckets() {
                     siteTemplate: template,
                     monetizationModel: dom.monetization,
                     monetizationTier: dom.tier || 3,
-                    estimatedRevenueAtMaturity: dom.revenue,
+                    estimatedRevenueAtMaturityLow: revLow,
+                    estimatedRevenueAtMaturityHigh: revHigh,
                     status: 'active'
                 }
             });
@@ -371,4 +387,5 @@ async function seedBuckets() {
     console.log('[Seed] Bucket updates complete.');
 }
 
-seedBuckets().catch(console.error);
+// Top-level await
+await seedBuckets().catch(console.error);

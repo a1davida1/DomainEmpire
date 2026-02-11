@@ -25,16 +25,18 @@
  */
 
 import { db, contentQueue, articles } from '@/lib/db';
-import { eq, and, lte, isNull, or, sql, asc, count } from 'drizzle-orm';
+import { eq, and, lte, isNull, or, sql, asc, desc, count } from 'drizzle-orm';
 import { processOutlineJob, processDraftJob, processHumanizeJob, processSeoOptimizeJob, processMetaJob, processKeywordResearchJob, processResearchJob } from './pipeline';
 import { processDeployJob } from '@/lib/deploy/processor';
 import { checkContentSchedule } from './scheduler';
+import { evaluateDomain } from '@/lib/evaluation/evaluator';
 
 const LOCK_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 const JOB_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes max per job
 const BATCH_SIZE = 5;
 const POLL_INTERVAL_MS = 5000;
 const STALE_LOCK_CHECK_INTERVAL = 60_000; // Check for stale locks every 60s
+const SCHEDULER_CHECK_INTERVAL = 60 * 60 * 1000; // Run scheduler every hour
 
 interface WorkerOptions {
     continuous?: boolean;
@@ -114,7 +116,7 @@ async function acquireJobs(limit: number, jobTypes?: string[]) {
         })
         .from(contentQueue)
         .where(and(...conditions))
-        .orderBy(asc(contentQueue.priority), asc(contentQueue.createdAt))
+        .orderBy(desc(contentQueue.priority), asc(contentQueue.createdAt))
         .limit(limit);
 
     if (pendingJobs.length === 0) return [];
@@ -162,20 +164,24 @@ async function processJob(job: typeof contentQueue.$inferSelect): Promise<boolea
     const startTime = Date.now();
     console.log(`[Worker] Processing job ${job.id} (${job.jobType}) — attempt ${(job.attempts || 0) + 1}/${job.maxAttempts || 3}`);
 
+    let timeoutId: ReturnType<typeof setTimeout>;
+
     try {
-        // Create a timeout promise
+        // Create a timeout promise (cleared on success or failure to prevent leak)
         const timeoutPromise = new Promise<never>((_, reject) => {
-            setTimeout(() => reject(new Error(`Job timed out after ${JOB_TIMEOUT_MS / 1000}s`)), JOB_TIMEOUT_MS);
+            timeoutId = setTimeout(() => reject(new Error(`Job timed out after ${JOB_TIMEOUT_MS / 1000}s`)), JOB_TIMEOUT_MS);
         });
 
         // Race the job against the timeout
         const jobPromise = executeJob(job);
         await Promise.race([jobPromise, timeoutPromise]);
 
+        clearTimeout(timeoutId!);
         const durationMs = Date.now() - startTime;
         console.log(`[Worker] Job ${job.id} completed in ${durationMs}ms`);
         return true;
     } catch (error) {
+        clearTimeout(timeoutId!);
         const errorMessage = error instanceof Error ? error.message : String(error);
         const durationMs = Date.now() - startTime;
         console.error(`[Worker] Job ${job.id} failed after ${durationMs}ms:`, errorMessage);
@@ -250,6 +256,15 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
         case 'deploy':
             await processDeployJob(job.id);
             break;
+        case 'evaluate': {
+            const evalPayload = job.payload as { domain: string; acquisitionCost?: number; niche?: string };
+            const evalResult = await evaluateDomain(evalPayload.domain, {
+                acquisitionCost: evalPayload.acquisitionCost,
+                niche: evalPayload.niche,
+            });
+            await markJobComplete(job.id, `Score: ${evalResult.compositeScore}/100 — ${evalResult.recommendation}`);
+            break;
+        }
         case 'fetch_analytics':
             await markJobComplete(job.id, 'Analytics fetch not yet implemented');
             break;
@@ -319,19 +334,22 @@ export async function runWorkerContinuously(options: WorkerOptions = {}): Promis
     console.log('[Worker] Starting continuous queue worker...');
 
     let lastStaleCheck = 0;
+    let lastSchedulerCheck = 0;
 
     while (true) {
         try {
-            // Periodically recover stale locks
             const now = Date.now();
+
+            // Periodically recover stale locks (every 60s)
             if (now - lastStaleCheck > STALE_LOCK_CHECK_INTERVAL) {
                 await recoverStaleLocks();
-
-                // Run scheduler check approx every hour (using large interval or mod check)
-                // For simplicity, we'll check it here but use a separate timestamp
-                await checkContentSchedule().catch((err: unknown) => console.error('[Scheduler] Error:', err));
-
                 lastStaleCheck = now;
+            }
+
+            // Run scheduler check approximately every hour
+            if (now - lastSchedulerCheck > SCHEDULER_CHECK_INTERVAL) {
+                await checkContentSchedule().catch((err: unknown) => console.error('[Scheduler] Error:', err));
+                lastSchedulerCheck = now;
             }
 
             const result = await runWorkerOnce(options);

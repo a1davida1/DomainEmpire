@@ -1,46 +1,164 @@
-/**
- * Worker Entry Point
- * 
- * Runs the content queue worker as a standalone process.
- * Loads .env.local using Node built-in fs (zero external dependencies).
- * 
- * Usage: npx tsx src/scripts/worker.ts
- */
 
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { config } from 'dotenv';
+config({ path: '.env.local' });
 
-// Load .env.local manually — no dotenv dependency needed
-const envPath = resolve(process.cwd(), '.env.local');
-try {
-    const envContent = readFileSync(envPath, 'utf-8');
-    for (const line of envContent.split('\n')) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith('#')) continue;
-        const eqIndex = trimmed.indexOf('=');
-        if (eqIndex === -1) continue;
-        const key = trimmed.slice(0, eqIndex);
-        const value = trimmed.slice(eqIndex + 1);
-        // Only set if not already defined (allow OS env to override)
-        if (!process.env[key]) {
-            process.env[key] = value;
-        }
+import { db, contentQueue } from '@/lib/db';
+import { pipelineProcessors } from '@/lib/ai/pipeline';
+import { checkContentSchedule } from '@/lib/ai/scheduler';
+import { asc, desc, eq, inArray, lt, and, sql } from 'drizzle-orm';
+
+const MAX_CONCURRENT_JOBS = 5;
+const POLL_INTERVAL = 5000; // 5 seconds
+const STALE_JOB_THRESHOLD_MINUTES = 30;
+const SCHEDULER_INTERVAL = 60 * 60 * 1000; // 1 hour
+
+async function checkStaleJobs() {
+    console.log('[Worker] Checking for stale jobs...');
+    const staleThreshold = new Date(Date.now() - STALE_JOB_THRESHOLD_MINUTES * 60 * 1000);
+
+    const staleJobs = await db
+        .update(contentQueue)
+        .set({
+            status: 'pending',
+            errorMessage: 'Job reset due to stale lock',
+            // attempts: sql`${contentQueue.attempts} + 1` // Optional: verify if we want to count stale resets as attempts
+        })
+        .where(
+            and(
+                eq(contentQueue.status, 'processing'),
+                lt(contentQueue.startedAt, staleThreshold)
+            )
+        )
+        .returning();
+
+    if (staleJobs.length > 0) {
+        console.warn(`[Worker] Reset ${staleJobs.length} stale jobs`);
     }
-    console.log('[Worker] Loaded environment from .env.local');
-} catch {
-    console.warn('[Worker] Could not load .env.local — using existing environment');
 }
 
-console.log('[Worker] Database URL:', process.env.DATABASE_URL ? 'Set ✓' : 'MISSING ✗');
+async function acquireJobs(limit: number) {
+    return await db.transaction(async (tx) => {
+        // Find pending jobs
+        // Sort by PRIORITY DESC (Higher is better), then Created ASC (FIFO)
+        const pending = await tx
+            .select()
+            .from(contentQueue)
+            .where(
+                and(
+                    eq(contentQueue.status, 'pending'),
+                    lt(contentQueue.attempts, contentQueue.maxAttempts)
+                )
+            )
+            .orderBy(desc(contentQueue.priority), asc(contentQueue.createdAt))
+            .limit(limit) // Prefer locking only what we need
+            .for('update', { skipLocked: true });
 
-// Dynamic import AFTER env is loaded so db connection picks up DATABASE_URL
-const { runWorkerContinuously } = await import('../lib/ai/worker');
+        if (pending.length === 0) return [];
 
-console.log('[Worker] Starting continuous queue worker...');
+        const ids = pending.map((j) => j.id);
 
-try {
-    await runWorkerContinuously();
-} catch (err) {
-    console.error('[Worker] Fatal crash:', err);
-    process.exit(1);
+        // Mark as processing
+        await tx
+            .update(contentQueue)
+            .set({
+                status: 'processing',
+                startedAt: new Date(),
+            })
+            .where(inArray(contentQueue.id, ids));
+
+        return pending;
+    });
 }
+
+async function processJob(job: typeof contentQueue.$inferSelect) {
+    console.log(`[Worker] Starting job ${job.id} (${job.jobType})`);
+
+    let timeoutId: NodeJS.Timeout;
+
+    try {
+        const handler = pipelineProcessors[job.jobType as keyof typeof pipelineProcessors];
+        if (!handler) {
+            throw new Error(`No handler for job type: ${job.jobType}`);
+        }
+
+        // Race between handler and timeout
+        await Promise.race([
+            handler(job.id),
+            new Promise((_, reject) => {
+                timeoutId = setTimeout(() => reject(new Error('Job duration exceeded 10m limit')), 10 * 60 * 1000);
+            })
+        ]);
+
+        console.log(`[Worker] Completed job ${job.id}`);
+        // Note: Pipeline handlers mark the job as 'completed' and save results/costs.
+        // We do NOT double-update here.
+
+    } catch (error) {
+        console.error(`[Worker] Failed job ${job.id}:`, error);
+
+        // Worker handles failure updates (Single Source of Truth)
+        await db
+            .update(contentQueue)
+            .set({
+                status: 'failed',
+                errorMessage: error instanceof Error ? error.message : String(error),
+                attempts: sql`${contentQueue.attempts} + 1`,
+            })
+            .where(eq(contentQueue.id, job.id));
+
+    } finally {
+        // @ts-ignore - Create safe clearance
+        if (timeoutId) clearTimeout(timeoutId);
+    }
+}
+
+async function startWorker() {
+    console.log('[Worker] Starting AI Content Pipeline Worker...');
+
+    // Initial cleanup
+    await checkStaleJobs();
+
+    let lastScheduleCheck = 0;
+
+    while (true) {
+        try {
+            // Run Scheduler periodically
+            if (Date.now() - lastScheduleCheck > SCHEDULER_INTERVAL) {
+                await checkContentSchedule();
+                lastScheduleCheck = Date.now();
+            }
+
+            // Count active jobs
+            const activeJobs = await db
+                .select({ count: sql<number>`count(*)` })
+                .from(contentQueue)
+                .where(eq(contentQueue.status, 'processing'));
+
+            const activeCount = Number(activeJobs[0]?.count || 0);
+            const availableSlots = MAX_CONCURRENT_JOBS - activeCount;
+
+            if (availableSlots > 0) {
+                const jobs = await acquireJobs(availableSlots);
+
+                if (jobs.length > 0) {
+                    console.log(`[Worker] Acquired ${jobs.length} new jobs`);
+                    // Process in parallel (fire and forget promise, verified by polling)
+                    jobs.forEach(job => processJob(job));
+                }
+            }
+
+            // Periodic stale check (every ~minute)
+            if (Date.now() % 60000 < POLL_INTERVAL) {
+                await checkStaleJobs();
+            }
+
+        } catch (error) {
+            console.error('[Worker] Loop error:', error);
+        }
+
+        await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
+    }
+}
+
+// Start
+startWorker().catch(console.error);

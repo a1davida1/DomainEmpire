@@ -30,12 +30,12 @@ interface ImportResult {
 
 type DomainStatus = 'parked' | 'active' | 'redirect' | 'forsale' | 'defensive';
 type DomainBucket = 'build' | 'redirect' | 'park' | 'defensive';
-type SiteTemplate = 'authority' | 'comparison' | 'calculator' | 'review';
+type SiteTemplate = 'authority' | 'comparison' | 'calculator' | 'review' | 'tool' | 'hub' | 'decision' | 'cost_guide' | 'niche' | 'info' | 'consumer' | 'brand';
 type Registrar = 'godaddy' | 'namecheap' | 'cloudflare' | 'other';
 
 const VALID_STATUSES: DomainStatus[] = ['parked', 'active', 'redirect', 'forsale', 'defensive'];
 const VALID_BUCKETS: DomainBucket[] = ['build', 'redirect', 'park', 'defensive'];
-const VALID_TEMPLATES: SiteTemplate[] = ['authority', 'comparison', 'calculator', 'review'];
+const VALID_TEMPLATES: SiteTemplate[] = ['authority', 'comparison', 'calculator', 'review', 'tool', 'hub', 'decision', 'cost_guide', 'niche', 'info', 'consumer', 'brand'];
 const VALID_REGISTRARS: Registrar[] = ['godaddy', 'namecheap', 'cloudflare', 'other'];
 
 const DOMAIN_REGEX = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z]{2,})+$/i;

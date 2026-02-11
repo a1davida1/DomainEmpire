@@ -11,9 +11,9 @@ import {
     TableRow,
 } from '@/components/ui/table';
 import { Card, CardContent } from '@/components/ui/card';
-import { Search, Filter, Edit, ExternalLink, FileText } from 'lucide-react';
+import { Search, Filter, Edit, ExternalLink, FileText, ChevronLeft, ChevronRight } from 'lucide-react';
 import { db, articles } from '@/lib/db';
-import { desc, like, or } from 'drizzle-orm';
+import { desc, like, or, eq, and } from 'drizzle-orm';
 
 interface PageProps {
     searchParams: Promise<{ q?: string; status?: string; page?: string }>;
@@ -24,17 +24,24 @@ export const dynamic = 'force-dynamic';
 export default async function ArticlesPage({ searchParams }: PageProps) {
     const params = await searchParams;
     const query = params.q || '';
-    const page = Number(params.page) || 1;
+    const page = Math.max(1, Number.parseInt(params.page || '1') || 1);
     const limit = 20;
     const offset = (page - 1) * limit;
 
     // Build filter
-    let whereClause = undefined;
+    const filters = [];
     if (query) {
-        whereClause = or(
-            like(articles.title, `%${query}%`),
-            like(articles.targetKeyword, `%${query}%`)
-        );
+        filters.push(or(like(articles.title, `%${query}%`), like(articles.targetKeyword, `%${query}%`)));
+    }
+    if (params.status) {
+        filters.push(eq(articles.status, params.status as any));
+    }
+
+    let whereClause = undefined;
+    if (filters.length > 1) {
+        whereClause = and(...filters);
+    } else if (filters.length === 1) {
+        whereClause = filters[0];
     }
 
 
@@ -72,20 +79,22 @@ export default async function ArticlesPage({ searchParams }: PageProps) {
                 </div>
             </div>
 
-            <div className="flex gap-4">
+            <form className="flex gap-4" action="/dashboard/content/articles" method="get">
                 <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
+                        name="q"
                         placeholder="Search articles..."
                         defaultValue={query}
                         className="pl-9"
                     />
+                    {params.status && <input type="hidden" name="status" value={params.status} />}
                 </div>
-                <Button variant="outline">
+                <Button type="submit" variant="outline">
                     <Filter className="mr-2 h-4 w-4" />
                     Filter
                 </Button>
-            </div>
+            </form>
 
             <Card>
                 <CardContent className="p-0">
@@ -117,7 +126,7 @@ export default async function ArticlesPage({ searchParams }: PageProps) {
                                             </div>
                                         </TableCell>
                                         <TableCell>
-                                            <Badge variant="outline">{article.domain.domain}</Badge>
+                                            <Badge variant="outline">{article.domain?.domain || 'Unknown'}</Badge>
                                         </TableCell>
                                         <TableCell>
                                             <Badge variant="secondary" className="capitalize">
@@ -131,15 +140,16 @@ export default async function ArticlesPage({ searchParams }: PageProps) {
                                         <TableCell className="text-right">
                                             <div className="flex justify-end gap-2">
                                                 <Link href={`/dashboard/content/articles/${article.id}`}>
-                                                    <Button variant="ghost" size="icon">
+                                                    <Button variant="ghost" size="icon" aria-label={`Edit article ${article.title}`}>
                                                         <Edit className="h-4 w-4" />
                                                     </Button>
                                                 </Link>
-                                                {article.domain.isDeployed && article.status === 'published' && (
+                                                {article.domain?.isDeployed && article.status === 'published' && (
                                                     <a
                                                         href={`https://${article.domain.domain}/${article.slug}`}
                                                         target="_blank"
                                                         rel="noopener noreferrer"
+                                                        aria-label={`View ${article.slug} on live site`}
                                                     >
                                                         <Button variant="ghost" size="icon">
                                                             <ExternalLink className="h-4 w-4" />
@@ -155,6 +165,49 @@ export default async function ArticlesPage({ searchParams }: PageProps) {
                     </Table>
                 </CardContent>
             </Card>
+
+            {/* Pagination */}
+            <div className="flex items-center justify-end gap-2">
+                <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={page <= 1}
+                    asChild={page > 1}
+                >
+                    {page > 1 ? (
+                        <Link href={`/dashboard/content/articles?page=${page - 1}&q=${query}${params.status ? `&status=${params.status}` : ''}`}>
+                            <ChevronLeft className="mr-2 h-4 w-4" />
+                            Previous
+                        </Link>
+                    ) : (
+                        <span>
+                            <ChevronLeft className="mr-2 h-4 w-4" />
+                            Previous
+                        </span>
+                    )}
+                </Button>
+                <div className="text-sm text-muted-foreground">
+                    Page {page}
+                </div>
+                <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={allArticles.length < limit}
+                    asChild={allArticles.length >= limit}
+                >
+                    {allArticles.length >= limit ? (
+                        <Link href={`/dashboard/content/articles?page=${page + 1}&q=${query}${params.status ? `&status=${params.status}` : ''}`}>
+                            Next
+                            <ChevronRight className="ml-2 h-4 w-4" />
+                        </Link>
+                    ) : (
+                        <span>
+                            Next
+                            <ChevronRight className="ml-2 h-4 w-4" />
+                        </span>
+                    )}
+                </Button>
+            </div>
         </div>
     );
 }

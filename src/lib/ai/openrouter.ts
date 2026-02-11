@@ -22,12 +22,12 @@ export const MODEL_CONFIG = {
     voiceSeedGeneration: 'anthropic/claude-sonnet-4-5-20250929',
 
     // Deep Research (Online)
-    research: 'perplexity/llama-3.1-sonar-large-128k-online',
+    research: 'perplexity/sonar-reasoning',
 } as const;
 
 // Pricing per 1K tokens (approximate, check OpenRouter for current)
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-    'x-ai/grok-3-fast': { input: 0.05, output: 0.25 },
+    'x-ai/grok-3-fast': { input: 0.005, output: 0.025 },
     'anthropic/claude-sonnet-4-5-20250929': { input: 0.003, output: 0.015 },
     'anthropic/claude-3-5-haiku-20241022': { input: 0.0008, output: 0.004 },
 };

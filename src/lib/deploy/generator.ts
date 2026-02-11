@@ -5,6 +5,7 @@
 import { db, articles, domains, monetizationProfiles } from '@/lib/db';
 import { eq, and } from 'drizzle-orm';
 import { getMonetizationScripts } from '@/lib/monetization/scripts';
+import { marked } from 'marked';
 
 interface SiteConfig {
     domain: string;
@@ -14,6 +15,7 @@ interface SiteConfig {
     subNiche?: string;
     template: string;
     scripts: { head: string; body: string };
+    theme?: string;
 }
 
 interface GeneratedFile {
@@ -47,6 +49,7 @@ export async function generateSiteFiles(domainId: string): Promise<GeneratedFile
         niche: domain.niche || 'general',
         subNiche: domain.subNiche || undefined,
         template: domain.siteTemplate || 'authority',
+        theme: domain.themeStyle || 'default',
         scripts,
     };
 
@@ -59,7 +62,7 @@ export async function generateSiteFiles(domainId: string): Promise<GeneratedFile
             path: `src/pages/${a.slug}.astro`,
             content: generateArticlePage(config, a),
         })),
-        { path: 'src/styles/global.css', content: generateGlobalStyles() },
+        { path: 'src/styles/global.css', content: generateGlobalStyles(config.theme) },
         { path: 'public/robots.txt', content: `User-agent: *\nAllow: /\nSitemap: https://${config.domain}/sitemap.xml` },
         { path: 'public/sitemap.xml', content: generateSitemap(config, publishedArticles) },
     ];
@@ -112,23 +115,51 @@ import Base from '../layouts/Base.astro';
 }
 
 function generateArticlePage(config: SiteConfig, article: typeof articles.$inferSelect): string {
+    // Sanitize content to remove any leftover AI placeholders
+    const rawMarkdown = (article.contentMarkdown || '')
+        .replace(/\[INTERNAL_LINK.*?\]/g, '')
+        .replace(/\[EXTERNAL_LINK.*?\]/g, '')
+        .replace(/\[IMAGE.*?\]/g, '');
+
+    const htmlContent = article.contentHtml || (rawMarkdown ? marked.parse(rawMarkdown, { async: false }) : '');
+
+    // Safety: escape title/description for attributes
+    const safeTitle = article.title.replace(/"/g, '&quot;');
+    const safeDesc = (article.metaDescription || '').replace(/"/g, '&quot;');
+
     return `---
 import Base from '../layouts/Base.astro';
 ---
-<Base title="${article.title}" description="${article.metaDescription || ''}">
-  <article><h1>${article.title}</h1>${article.contentHtml || article.contentMarkdown || ''}</article>
+<Base title="${safeTitle}" description="${safeDesc}">
+  <article><h1>${safeTitle}</h1><Fragment set:html={${JSON.stringify(htmlContent)}} /></article>
 </Base>`;
 }
 
-function generateGlobalStyles(): string {
-    return `*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;line-height:1.6;max-width:800px;margin:0 auto;padding:2rem}header{margin-bottom:2rem;border-bottom:1px solid #eee;padding-bottom:1rem}.logo{font-size:1.5rem;font-weight:bold;text-decoration:none;color:#333}.hero{text-align:center;padding:4rem 0}.hero h1{font-size:2.5rem;margin-bottom:1rem}.articles ul{list-style:none}.articles li{margin-bottom:1rem}.articles a{font-size:1.25rem;color:#0066cc}article h1{font-size:2rem;margin-bottom:2rem}article h2,article h3{margin-top:2rem;margin-bottom:1rem}article p{margin-bottom:1rem}footer{margin-top:4rem;border-top:1px solid #eee;padding-top:1rem;text-align:center;color:#666;font-size:0.875rem}`;
+function generateGlobalStyles(theme?: string): string {
+    let base = `*{margin:0;padding:0;box-sizing:border-box}body{line-height:1.6;max-width:800px;margin:0 auto;padding:2rem}header{margin-bottom:2rem;border-bottom:1px solid #eee;padding-bottom:1rem}.logo{font-size:1.5rem;font-weight:bold;text-decoration:none;color:#333}.hero{text-align:center;padding:4rem 0}.hero h1{font-size:2.5rem;margin-bottom:1rem}.articles ul{list-style:none}.articles li{margin-bottom:1rem}.articles a{font-size:1.25rem;color:#0066cc}article h1{font-size:2rem;margin-bottom:2rem}article h2,article h3{margin-top:2rem;margin-bottom:1rem}article p{margin-bottom:1rem}footer{margin-top:4rem;border-top:1px solid #eee;padding-top:1rem;text-align:center;color:#666;font-size:0.875rem}`;
+
+    if (theme === 'navy-serif') {
+        base += `body{font-family:Georgia,serif;background-color:#f4f4f9;color:#0a1929}header{border-bottom:2px solid #0a1929}.logo{color:#0a1929}.hero{background-color:#0a1929;color:white;padding:5rem 0}.hero h1{margin-bottom:1.5rem}footer{background-color:#0a1929;color:white;margin-top:0}`;
+    } else if (theme === 'green-modern') {
+        base += `body{font-family:Inter,system-ui,sans-serif;background-color:#f0fdf4;color:#14532d}.logo{color:#15803d}a{color:#16a34a}`;
+    } else if (theme === 'medical-clean') {
+        base += `body{font-family:message-box,sans-serif;background-color:#ffffff;color:#334155}.hero{color:#0ea5e9}`;
+    } else {
+        base += `body{font-family:system-ui,sans-serif}`;
+    }
+    return base;
 }
 
 function generateSitemap(config: SiteConfig, articleList: typeof articles.$inferSelect[]): string {
     const now = new Date().toISOString().split('T')[0];
     const urls = [
         `<url><loc>https://${config.domain}/</loc><lastmod>${now}</lastmod><priority>1.0</priority></url>`,
-        ...articleList.map(a => `<url><loc>https://${config.domain}/${a.slug}</loc><lastmod>${now}</lastmod></url>`),
-    ].join('\n');
-    return `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls}</urlset>`;
+        ...articleList.map(a =>
+            `<url><loc>https://${config.domain}/${a.slug}</loc><lastmod>${a.updatedAt ? new Date(a.updatedAt).toISOString().split('T')[0] : now}</lastmod><priority>0.8</priority></url>`
+        )
+    ];
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls.join('\n')}
+</urlset>`;
 }

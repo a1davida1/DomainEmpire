@@ -231,31 +231,32 @@ export async function commitMultipleFiles(
         const commitData = await commitResponse.json();
         const baseTreeSha = commitData.tree.sha;
 
-        // Create blobs for each file
-        const treeItems = [];
-        for (const file of files) {
-            const blobResponse = await githubFetch(
-                `/repos/${config.owner}/${repoName}/git/blobs`,
-                {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        content: file.content,
-                        encoding: 'utf-8',
-                    }),
+        // Create blobs for each file in parallel
+        const blobResults = await Promise.all(
+            files.map(async (file) => {
+                const blobResponse = await githubFetch(
+                    `/repos/${config.owner}/${repoName}/git/blobs`,
+                    {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            content: file.content,
+                            encoding: 'utf-8',
+                        }),
+                    }
+                );
+                if (!blobResponse.ok) {
+                    throw new Error(`Failed to create blob for ${file.path}`);
                 }
-            );
-            if (!blobResponse.ok) {
-                return { success: false, error: `Failed to create blob for ${file.path}` };
-            }
-            const blobData = await blobResponse.json();
-
-            treeItems.push({
-                path: file.path,
-                mode: '100644',
-                type: 'blob',
-                sha: blobData.sha,
-            });
-        }
+                const blobData = await blobResponse.json();
+                return {
+                    path: file.path,
+                    mode: '100644' as const,
+                    type: 'blob' as const,
+                    sha: blobData.sha,
+                };
+            })
+        );
+        const treeItems = blobResults;
 
         // Create new tree
         const treeResponse = await githubFetch(

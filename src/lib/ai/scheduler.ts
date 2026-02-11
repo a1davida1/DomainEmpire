@@ -1,6 +1,6 @@
 
 import { db, domains, contentQueue, articles } from '@/lib/db';
-import { eq, desc, and, or, isNull, inArray } from 'drizzle-orm';
+import { eq, desc, and, inArray, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 
 /**
@@ -11,72 +11,76 @@ export async function checkContentSchedule() {
 
     // 1. Get all active domains
     const activeDomains = await db.select().from(domains).where(eq(domains.status, 'active'));
+    if (activeDomains.length === 0) return;
 
-    for (const domain of activeDomains) {
-        // 2. Check if there are any pending/processing jobs for this domain
-        // If so, we don't need to schedule another one yet.
-        const pendingJobs = await db
-            .select({ id: contentQueue.id })
-            .from(contentQueue)
-            .where(
-                and(
-                    eq(contentQueue.domainId, domain.id),
-                    inArray(contentQueue.status, ['pending', 'processing'])
-                )
+    const activeDomainIds = activeDomains.map(d => d.id);
+
+    // 2. Bulk check pending jobs
+    const pendingJobs = await db
+        .select({ domainId: contentQueue.domainId })
+        .from(contentQueue)
+        .where(
+            and(
+                inArray(contentQueue.domainId, activeDomainIds),
+                inArray(contentQueue.status, ['pending', 'processing'])
             )
-            .limit(1);
+        );
 
-        if (pendingJobs.length > 0) {
-            continue; // Already working on something
-        }
+    const busyDomainIds = new Set(pendingJobs.map(j => j.domainId));
 
-        // 3. Get last article to calculate gap
-        const lastArticle = await db
-            .select()
-            .from(articles)
-            .where(eq(articles.domainId, domain.id))
-            .orderBy(desc(articles.createdAt))
-            .limit(1);
+    // 3. Bulk check latest articles
+    const latestArticles = await db.select({
+        domainId: articles.domainId,
+        lastDate: sql<Date>`max(${articles.createdAt})`
+    })
+        .from(articles)
+        .where(inArray(articles.domainId, activeDomainIds))
+        .groupBy(articles.domainId);
 
-        const lastDate = lastArticle[0]?.createdAt || new Date(0); // Epoch if no articles
+    const lastDateMap = new Map(latestArticles.map(a => [a.domainId, a.lastDate]));
 
-        // 4. Determine schedule config (use defaults if missing)
+    // 4. Process each domain
+    for (const domain of activeDomains) {
+        if (busyDomainIds.has(domain.id)) continue;
+
+        const lastDate = lastDateMap.get(domain.id) || new Date(0);
+
+        // Use current time as base if last article is very old (or non-existent) to avoid immediate burst
+        const baseDate = lastDate.getFullYear() < 2020 ? new Date() : lastDate;
+
+        // Determine schedule config (use defaults if missing)
         const config = domain.contentConfig?.schedule || {
             frequency: 'sporadic',
             timeOfDay: 'random',
             wordCountRange: [800, 1500]
         };
 
-        // 5. Calculate Target Post Date
+        // Calculate Target Post Date
         let gapDays = 0;
         switch (config.frequency) {
             case 'daily':
-                gapDays = 0.8 + Math.random() * 0.4; // 0.8 - 1.2 days
+                gapDays = 0.8 + Math.random() * 0.4;
                 break;
             case 'weekly':
-                gapDays = 6 + Math.random() * 2; // 6 - 8 days
+                gapDays = 6 + Math.random() * 2;
                 break;
             case 'sporadic':
             default:
-                // Anti-AI pattern: 2, 4, 1, 5 days gaps
-                gapDays = 1 + Math.random() * 4; // 1 - 5 days
+                gapDays = 1 + Math.random() * 4;
                 break;
         }
 
-        const nextPostDate = new Date(lastDate.getTime() + gapDays * 24 * 60 * 60 * 1000);
+        const nextPostDate = new Date(baseDate.getTime() + gapDays * 24 * 60 * 60 * 1000);
 
-        // 6. Adjust Time of Day (Human patterns)
+        // Adjust Time of Day
         const hour = nextPostDate.getHours();
         let targetHour = hour;
 
         if (config.timeOfDay === 'morning') {
-            // 7am - 9am
             targetHour = 7 + Math.floor(Math.random() * 3);
         } else if (config.timeOfDay === 'evening') {
-            // 7pm - 10pm (19 - 22)
             targetHour = 19 + Math.floor(Math.random() * 4);
         } else {
-            // Random human clusters: 7-9am, 11-1pm, 7-10pm
             const r = Math.random();
             if (r < 0.33) targetHour = 7 + Math.floor(Math.random() * 3);
             else if (r < 0.66) targetHour = 11 + Math.floor(Math.random() * 3);
@@ -85,12 +89,7 @@ export async function checkContentSchedule() {
 
         nextPostDate.setHours(targetHour, Math.floor(Math.random() * 60), 0, 0);
 
-        // If calculated date is in the past, schedule it for "now" (plus small random delay)
-        // or just keep it as is (Worker picks up passed dates)
-        // But if it's WAY in the past (e.g. initial setup), spread them out?
-        // For simplicity, just let the worker pick it up immediately if past.
-
-        // 7. Queue the Job
+        // Queue the Job
         console.log(`[Scheduler] Scheduling content for ${domain.domain} at ${nextPostDate.toISOString()}`);
 
         await db.insert(contentQueue).values({
@@ -100,7 +99,7 @@ export async function checkContentSchedule() {
             payload: {
                 domain: domain.domain,
                 niche: domain.niche,
-                targetCount: 1 // Just one article at a time
+                targetCount: 1
             },
             status: 'pending',
             priority: 2,

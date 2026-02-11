@@ -13,13 +13,19 @@ const createDomainSchema = z.object({
     renewalDate: z.string().optional().transform((val) => val ? new Date(val) : undefined),
     renewalPrice: z.number().optional(),
     status: z.enum(['parked', 'active', 'redirect', 'forsale', 'defensive']).optional().default('parked'),
-    bucket: z.enum(['build', 'redirect', 'park', 'defensive']).optional().default('build'),
+    bucket: z.enum(['build', 'redirect', 'park', 'defensive']).optional().default('build'), // Strategy
     tier: z.number().min(1).max(3).optional().default(3),
     niche: z.string().optional(),
     subNiche: z.string().optional(),
-    siteTemplate: z.enum(['authority', 'comparison', 'calculator', 'review']).optional().default('authority'),
+    vertical: z.string().optional(), // Legal, Insurance, etc.
+    monetizationTier: z.number().min(1).max(4).optional().default(3),
+    siteTemplate: z.enum(['authority', 'comparison', 'calculator', 'review', 'tool', 'hub', 'decision', 'cost_guide', 'niche', 'info', 'consumer', 'brand']).optional().default('authority'),
     notes: z.string().optional(),
     tags: z.array(z.string()).optional().default([]),
+    cloudflareAccount: z.string().optional(),
+    themeStyle: z.string().optional(),
+    monetizationModel: z.string().optional(),
+    estimatedRevenueAtMaturity: z.string().optional(),
 });
 
 // GET /api/domains - List all domains with optional filters
@@ -32,6 +38,7 @@ export async function GET(request: NextRequest) {
         const status = searchParams.get('status');
         const niche = searchParams.get('niche');
         const tier = searchParams.get('tier');
+        const vertical = searchParams.get('vertical');
         const search = searchParams.get('search');
         const limit = Number.parseInt(searchParams.get('limit') || '50', 10);
         const offset = Number.parseInt(searchParams.get('offset') || '0', 10);
@@ -40,10 +47,13 @@ export async function GET(request: NextRequest) {
         const conditions: ReturnType<typeof eq>[] = [];
 
         if (status) {
-            conditions.push(eq(domains.status, status as typeof domains.status.enumValues[number]));
+            conditions.push(eq(domains.status, status as any));
         }
         if (niche) {
             conditions.push(eq(domains.niche, niche));
+        }
+        if (vertical) {
+            conditions.push(eq(domains.vertical, vertical));
         }
         if (tier) {
             conditions.push(eq(domains.tier, Number.parseInt(tier, 10)));
@@ -102,7 +112,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const data = validationResult.data;
+        const data: any = validationResult.data; // Cast to any to handle extended schema
 
         // Extract TLD from domain
         const domainParts = data.domain.split('.');
@@ -122,6 +132,20 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        // Parse revenue range if provided
+        let revLow = 0;
+        let revHigh = 0;
+        if (data.estimatedRevenueAtMaturity) {
+            const clean = data.estimatedRevenueAtMaturity.replaceAll(/[$,]/g, '');
+            const range = clean.split('-');
+            if (range.length === 2) {
+                revLow = Number.parseInt(range[0]) || 0;
+                revHigh = Number.parseInt(range[1]) || 0;
+            } else {
+                revHigh = Number.parseInt(clean) || 0;
+            }
+        }
+
         // Create the domain
         const newDomain: NewDomain = {
             domain: data.domain.toLowerCase(),
@@ -139,6 +163,14 @@ export async function POST(request: NextRequest) {
             siteTemplate: data.siteTemplate,
             notes: data.notes,
             tags: data.tags,
+            // New fields
+            vertical: data.vertical,
+            monetizationTier: data.monetizationTier,
+            cloudflareAccount: data.cloudflareAccount,
+            themeStyle: data.themeStyle,
+            monetizationModel: data.monetizationModel,
+            estimatedRevenueAtMaturityLow: revLow,
+            estimatedRevenueAtMaturityHigh: revHigh,
         };
 
         const inserted = await db.insert(domains).values(newDomain).returning();

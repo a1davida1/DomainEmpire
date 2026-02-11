@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
+import { createHmac, randomBytes } from 'node:crypto';
 
 const AUTH_COOKIE_NAME = 'domain-empire-auth';
 
@@ -16,16 +17,19 @@ export async function verifyAuth(): Promise<boolean> {
         return false;
     }
 
-    // Token is a simple hash of the password + secret
-    const expectedToken = hashPassword(process.env.ADMIN_PASSWORD || '');
-    return authToken.value === expectedToken;
+    // Token format: nonce:hmac(password + nonce)
+    const [nonce, hash] = authToken.value.split(':');
+    if (!nonce || !hash) return false;
+
+    const expectedHash = createHmac('sha256', process.env.AUTH_SECRET || 'fallback-secret-change-me')
+        .update((process.env.ADMIN_PASSWORD || '') + nonce)
+        .digest('hex');
+    return hash === expectedHash;
 }
 
 export function hashPassword(password: string): string {
-    // Simple hash for session token - not for storing passwords
-    const crypto = require('crypto');
     const secret = process.env.AUTH_SECRET || 'fallback-secret-change-me';
-    return crypto.createHmac('sha256', secret).update(password).digest('hex');
+    return createHmac('sha256', secret).update(password).digest('hex');
 }
 
 export async function createAuthCookie(password: string): Promise<boolean> {
@@ -40,7 +44,11 @@ export async function createAuthCookie(password: string): Promise<boolean> {
     }
 
     const cookieStore = await cookies();
-    const token = hashPassword(password);
+    const nonce = randomBytes(16).toString('hex');
+    const hash = createHmac('sha256', process.env.AUTH_SECRET || 'fallback-secret-change-me')
+        .update(password + nonce)
+        .digest('hex');
+    const token = `${nonce}:${hash}`;
 
     cookieStore.set(AUTH_COOKIE_NAME, token, {
         httpOnly: true,

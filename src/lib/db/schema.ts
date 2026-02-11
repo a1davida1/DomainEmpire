@@ -1,5 +1,6 @@
 import { pgTable, text, integer, real, boolean, timestamp, jsonb, uuid, index } from 'drizzle-orm/pg-core';
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
+export { sql };
 
 // ===========================================
 // DOMAINS: The foundation. Every domain in the portfolio.
@@ -31,10 +32,31 @@ export const domains = pgTable('domains', {
     // Deployment
     githubRepo: text('github_repo'),
     cloudflareProject: text('cloudflare_project'),
+    isDeployed: boolean('is_deployed').default(false),
+    lastDeployedAt: timestamp('last_deployed_at'),
     siteTemplate: text('site_template', {
         enum: ['authority', 'comparison', 'calculator', 'review', 'tool', 'hub', 'decision', 'cost_guide', 'niche', 'info', 'consumer', 'brand']
     }).default('authority'),
-    isDeployed: boolean('is_deployed').default(false),
+    // Organization & Infrastructure
+    vertical: text('vertical'), // 'Legal', 'Insurance', 'Health', etc.
+    cloudflareAccount: text('cloudflare_account'), // 'legal-content-1@...', etc.
+
+    // Design & Strategy
+    themeStyle: text('theme_style'), // 'navy-serif', 'green-modern', 'medical-clean'
+    monetizationModel: text('monetization_model'), // 'Lead gen', 'Display + affiliate', etc.
+    monetizationTier: integer('monetization_tier').default(3), // 1=Lead Gen Only, 2=Affiliate Pri, 3=Display Pri, 4=Brand
+
+    // Valuation
+    estimatedRevenueAtMaturityLow: real('estimated_revenue_at_maturity_low'),
+    estimatedRevenueAtMaturityHigh: real('estimated_revenue_at_maturity_high'),
+    estimatedFlipValueLow: real('estimated_flip_value_low'),
+    estimatedFlipValueHigh: real('estimated_flip_value_high'),
+    estimatedMonthlyRevenueLow: real('estimated_monthly_revenue_low'),
+    estimatedMonthlyRevenueHigh: real('estimated_monthly_revenue_high'),
+
+    // Notes
+    notes: text('notes'),
+    tags: jsonb('tags').$type<string[]>().default([]),
     contentConfig: jsonb('content_config').$type<{
         voiceSeed?: {
             name: string;
@@ -46,7 +68,7 @@ export const domains = pgTable('domains', {
             formatting: string;
         };
         schedule?: {
-            frequency: string; // 'daily', 'weekly', 'sporadic'
+            frequency: 'daily' | 'weekly' | 'sporadic';
             timeOfDay: 'morning' | 'evening' | 'random';
             wordCountRange: [number, number];
         };
@@ -58,33 +80,14 @@ export const domains = pgTable('domains', {
         };
     }>().default({}),
 
-    // Organization & Infrastructure
-    vertical: text('vertical'), // 'Legal', 'Insurance', 'Health', etc.
-    cloudflareAccount: text('cloudflare_account'), // 'legal-content-1@...', etc.
-
-    // Design & Strategy
-    themeStyle: text('theme_style'), // 'navy-serif', 'green-modern', 'medical-clean'
-    monetizationModel: text('monetization_model'), // 'Lead gen', 'Display + affiliate', etc.
-    monetizationTier: integer('monetization_tier').default(3), // 1=Lead Gen Only, 2=Affiliate Pri, 3=Display Pri, 4=Brand
-
-
-    // Valuation
-    estimatedRevenueAtMaturity: text('estimated_revenue_at_maturity'), // '$2,000-8,000'
-    estimatedFlipValueHigh: real('estimated_flip_value_high'),
-    estimatedMonthlyRevenueLow: real('estimated_monthly_revenue_low'),
-    estimatedMonthlyRevenueHigh: real('estimated_monthly_revenue_high'),
-
-    // Notes
-    notes: text('notes'),
-    tags: jsonb('tags').$type<string[]>().default([]),
-
     // Timestamps
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow(),
 }, (t) => ({
     statusIdx: index('domain_status_idx').on(t.status),
     tierIdx: index('domain_tier_idx').on(t.tier),
-    bucketIdx: index('domain_bucket_idx').on(t.bucket),
+    bucketIdx: index('domain_bucket_idx').on(t.bucket), // Note: This references operational bucket
+    verticalIdx: index('domain_vertical_idx').on(t.vertical),
 }));
 
 // ===========================================
@@ -247,7 +250,7 @@ export const contentQueue = pgTable('content_queue', {
             'generate_outline', 'generate_draft', 'humanize',
             'seo_optimize', 'generate_meta', 'deploy',
             'fetch_analytics', 'keyword_research', 'bulk_seed',
-            'research'
+            'research', 'evaluate'
         ]
     }).notNull(),
 
@@ -301,6 +304,16 @@ export const domainResearch = pgTable('domain_research', {
     keywordCpc: real('keyword_cpc'),
     estimatedRevenuePotential: real('estimated_revenue_potential'),
     domainScore: real('domain_score'),
+
+    // Full evaluation data
+    evaluationResult: jsonb('evaluation_result'),
+    evaluationHistory: jsonb('evaluation_history').$type<Array<{
+        evaluatedAt: string;
+        compositeScore: number;
+        recommendation: string;
+        mode: string;
+    }>>().default([]),
+    evaluatedAt: timestamp('evaluated_at'),
 
     // Decision
     decision: text('decision', {
@@ -371,9 +384,10 @@ export const siteTemplates = pgTable('site_templates', {
 export const apiCallLogs = pgTable('api_call_logs', {
     id: uuid('id').primaryKey().defaultRandom(),
     articleId: uuid('article_id').references(() => articles.id),
+    domainId: uuid('domain_id').references(() => domains.id),
 
     stage: text('stage', {
-        enum: ['keyword_research', 'outline', 'draft', 'humanize', 'seo', 'meta', 'classify']
+        enum: ['keyword_research', 'outline', 'draft', 'humanize', 'seo', 'meta', 'classify', 'research', 'evaluate']
     }).notNull(),
     model: text('model').notNull(),
     inputTokens: integer('input_tokens').notNull(),

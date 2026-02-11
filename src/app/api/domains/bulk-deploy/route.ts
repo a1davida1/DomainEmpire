@@ -9,6 +9,7 @@ const bulkDeploySchema = z.object({
     domainIds: z.array(z.string().uuid()).min(1).max(50),
     createRepo: z.boolean().default(true),
     triggerBuild: z.boolean().default(true),
+    addCustomDomain: z.boolean().default(true),
 });
 
 // POST /api/domains/bulk-deploy - Deploy multiple domains
@@ -28,7 +29,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const { domainIds, createRepo, triggerBuild } = bulkDeploySchema.parse(body);
+        const { domainIds, createRepo, triggerBuild, addCustomDomain } = bulkDeploySchema.parse(body);
 
         // Deduplicate domainIds to handle duplicates correctly
         const uniqueDomainIds = [...new Set(domainIds)];
@@ -56,7 +57,7 @@ export async function POST(request: NextRequest) {
                         domain: domain.domain,
                         createRepo,
                         triggerBuild,
-                        addCustomDomain: true,
+                        addCustomDomain,
                     },
                     status: 'pending' as const,
                     scheduledFor: new Date(),

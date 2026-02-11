@@ -16,7 +16,7 @@ const updateDomainSchema = z.object({
     tier: z.number().min(1).max(3).optional(),
     niche: z.string().optional(),
     subNiche: z.string().optional(),
-    siteTemplate: z.enum(['authority', 'comparison', 'calculator', 'review']).optional(),
+    siteTemplate: z.enum(['authority', 'comparison', 'calculator', 'review', 'tool', 'hub', 'decision', 'cost_guide', 'niche', 'info', 'consumer', 'brand']).optional(),
     notes: z.string().optional(),
     tags: z.array(z.string()).optional(),
     redirectTargetId: z.string().uuid().optional().nullable(),

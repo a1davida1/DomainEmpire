@@ -181,8 +181,13 @@ async function stepDeployCloudflare(ctx: DeployContext): Promise<void> {
         updatedAt: new Date(),
     }).where(eq(domains.id, ctx.domainId));
 
-    await triggerDeployment(ctx.repoName, 'main');
-    doneStep(ctx, 3, `Project: ${projectResult.projectName}`);
+    try {
+        await triggerDeployment(ctx.repoName, 'main');
+        doneStep(ctx, 3, `Project: ${projectResult.projectName}`);
+    } catch (err: any) {
+        await failStep(ctx, 3, err instanceof Error ? err.message : String(err));
+        throw new Error(`Failed to trigger deployment: ${err}`);
+    }
 }
 
 /**
@@ -195,8 +200,16 @@ async function stepAddCustomDomain(ctx: DeployContext): Promise<void> {
     }
 
     await startStep(ctx, 4);
-    await addCustomDomain(ctx.cfProject, ctx.payload.domain);
-    doneStep(ctx, 4, `Linked ${ctx.payload.domain}`);
+    try {
+        await addCustomDomain(ctx.cfProject, ctx.payload.domain);
+        doneStep(ctx, 4, `Linked ${ctx.payload.domain}`);
+    } catch (err: any) {
+        await failStep(ctx, 4, `Failed to link ${ctx.payload.domain}: ${err instanceof Error ? err.message : String(err)}`);
+        // We usually don't throw here if we want to continue, but step 4 failure might be critical.
+        // However, the user prompt said "call failStep... so the step is marked failed instead of remaining running".
+        // It didn't explicitly say to throw or return. But if I don't return, it proceeds.
+        return;
+    }
 }
 
 /**
@@ -215,9 +228,8 @@ async function stepUpdateDns(ctx: DeployContext): Promise<void> {
         await updateNameservers(ctx.payload.domain, nameservers);
         doneStep(ctx, 5, 'Nameservers updated');
     } catch (err) {
-        // Don't fail the whole job if DNS update fails
-        ctx.steps[5].status = 'failed';
-        ctx.steps[5].detail = err instanceof Error ? err.message : 'DNS update failed';
+        // Don't fail the whole job if DNS update fails, but mark the step as failed
+        await failStep(ctx, 5, err instanceof Error ? err.message : 'DNS update failed');
         console.error(`DNS update failed for ${ctx.payload.domain}:`, err);
     }
 }

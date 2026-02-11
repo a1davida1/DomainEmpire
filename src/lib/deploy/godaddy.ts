@@ -53,13 +53,13 @@ async function gdFetch(endpoint: string, options: RequestInit = {}): Promise<Res
  * Parse a GoDaddy error response into a readable message
  */
 async function parseError(response: Response, operation: string): Promise<string> {
+    const text = await response.text();
     try {
-        const data = await response.json() as GoDaddyErrorResponse;
+        const data = JSON.parse(text) as GoDaddyErrorResponse;
         const fieldErrors = data.fields?.map(f => `${f.path}: ${f.message}`).join('; ');
         return `${operation}: ${data.message || data.code}${fieldErrors ? ' (' + fieldErrors + ')' : ''} [HTTP ${response.status}]`;
     } catch {
-        const text = await response.text().catch(() => 'Unknown error');
-        return `${operation}: ${text} [HTTP ${response.status}]`;
+        return `${operation}: ${text || 'Unknown error'} [HTTP ${response.status}]`;
     }
 }
 
@@ -78,7 +78,7 @@ export async function updateCnameRecord(
     value: string,
     ttl = 3600
 ): Promise<void> {
-    const response = await gdFetch(`/domains/${domain}/records/CNAME/${name}`, {
+    const response = await gdFetch(`/domains/${encodeURIComponent(domain)}/records/CNAME/${encodeURIComponent(name)}`, {
         method: 'PUT',
         body: JSON.stringify([{ data: value, ttl }]),
     });
@@ -148,5 +148,39 @@ export async function verifyDomainAccess(domain: string): Promise<boolean> {
         return response.ok;
     } catch {
         return false;
+    }
+}
+
+/**
+ * Check domain availability and registration price via GoDaddy API.
+ * Returns null if API credentials aren't configured or request fails.
+ *
+ * @param domain - Full domain name (e.g. "example.com")
+ */
+export async function checkDomainAvailability(domain: string): Promise<{
+    available: boolean;
+    price?: number;
+    currency?: string;
+} | null> {
+    try {
+        const response = await gdFetch(
+            `/domains/available?domain=${encodeURIComponent(domain)}&checkType=FAST`
+        );
+        if (!response.ok) return null;
+
+        const data = await response.json() as {
+            available: boolean;
+            price?: number;
+            currency?: string;
+        };
+
+        return {
+            available: data.available,
+            // GoDaddy returns price in micro-units (1 USD = 1,000,000)
+            price: data.price ? data.price / 1_000_000 : undefined,
+            currency: data.currency,
+        };
+    } catch {
+        return null;
     }
 }
