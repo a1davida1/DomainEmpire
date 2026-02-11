@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Globe, Loader2 } from 'lucide-react';
 
 export default function LoginPage() {
+    const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
@@ -23,7 +24,7 @@ export default function LoginPage() {
             const response = await fetch('/api/auth/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password }),
+                body: JSON.stringify({ email: email || undefined, password }),
             });
 
             const data = await response.json();
@@ -33,10 +34,9 @@ export default function LoginPage() {
                 return;
             }
 
-            // Redirect to dashboard on success
             router.push('/dashboard');
             router.refresh();
-        } catch (err) {
+        } catch {
             setError('An error occurred. Please try again.');
         } finally {
             setLoading(false);
@@ -52,11 +52,24 @@ export default function LoginPage() {
                     </div>
                     <CardTitle className="text-2xl">Domain Empire</CardTitle>
                     <CardDescription>
-                        Enter your password to access the dashboard
+                        Sign in to access the dashboard
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
                     <form onSubmit={handleSubmit} className="space-y-4">
+                        <div className="space-y-2">
+                            <Label htmlFor="email">Email</Label>
+                            <Input
+                                id="email"
+                                type="email"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                placeholder="admin@domainempire.local"
+                                disabled={loading}
+                                autoComplete="email"
+                            />
+                        </div>
+
                         <div className="space-y-2">
                             <Label htmlFor="password">Password</Label>
                             <Input
@@ -67,6 +80,7 @@ export default function LoginPage() {
                                 placeholder="Enter your password"
                                 required
                                 disabled={loading}
+                                autoComplete="current-password"
                             />
                         </div>
 
@@ -86,6 +100,10 @@ export default function LoginPage() {
                                 'Sign In'
                             )}
                         </Button>
+
+                        <p className="text-xs text-center text-muted-foreground">
+                            Email is optional for single-admin setups
+                        </p>
                     </form>
                 </CardContent>
             </Card>

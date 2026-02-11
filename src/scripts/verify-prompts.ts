@@ -47,5 +47,10 @@ try {
     errors++;
 }
 
-if (errors > 0) process.exit(1);
-console.log('Verification Complete');
+if (errors > 0) {
+    console.error(`Verification FAILED with ${errors} errors`);
+    process.exit(1);
+} else {
+    console.log('Verification Complete: ALL OK');
+    process.exit(0);
+}

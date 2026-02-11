@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createAuthCookie } from '@/lib/auth';
+import { login, seedAdminIfNeeded } from '@/lib/auth';
 
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
-        const { password } = body;
+        const { email, password } = body;
 
         if (!password) {
             return NextResponse.json(
@@ -13,16 +13,24 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const success = await createAuthCookie(password);
+        // Migration path: seed admin user from ADMIN_PASSWORD if no users exist
+        await seedAdminIfNeeded();
 
-        if (!success) {
+        // Support legacy single-password login by using default admin email
+        const loginEmail = email || process.env.ADMIN_EMAIL || 'admin@domainempire.local';
+        const user = await login(loginEmail, password);
+
+        if (!user) {
             return NextResponse.json(
-                { error: 'Invalid password' },
+                { error: 'Invalid credentials' },
                 { status: 401 }
             );
         }
 
-        return NextResponse.json({ success: true });
+        return NextResponse.json({
+            success: true,
+            user: { id: user.id, name: user.name, email: user.email, role: user.role },
+        });
     } catch (error) {
         console.error('Login error:', error);
         return NextResponse.json(

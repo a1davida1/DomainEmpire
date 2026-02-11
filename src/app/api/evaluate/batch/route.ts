@@ -49,19 +49,32 @@ export async function POST(request: NextRequest) {
         const { domains, acquisitionCosts, quickMode, forceRefresh } = parsed.data;
         const uniqueDomains = [...new Set(domains.map(d => d.toLowerCase()))];
 
+        if (!quickMode && uniqueDomains.length > 5) {
+            return NextResponse.json(
+                {
+                    error: 'Batch too large for full evaluation',
+                    message: `Please use quickMode for more than 5 domains, or reduce the batch size. Found ${uniqueDomains.length} domains.`
+                },
+                { status: 400 }
+            );
+        }
+
         const results: EvaluationResult[] = [];
         const errors: Array<{ domain: string; error: string }> = [];
 
-        // In quick mode, run all in parallel. In full mode, run sequentially with delay.
-        const normalizedCosts = acquisitionCosts
-            ? Object.fromEntries(Object.entries(acquisitionCosts).map(([k, v]) => [k.toLowerCase(), v]))
-            : {};
+        // Normalize costs map to lowercase keys
+        const normalizedCosts: Record<string, number> = {};
+        if (acquisitionCosts) {
+            for (const [rawDomain, cost] of Object.entries(acquisitionCosts)) {
+                normalizedCosts[rawDomain.toLowerCase()] = cost;
+            }
+        }
 
         if (quickMode) {
             const settled = await Promise.allSettled(
                 uniqueDomains.map(domain =>
                     evaluateDomain(domain, {
-                        acquisitionCost: normalizedCosts[domain.toLowerCase()],
+                        acquisitionCost: normalizedCosts[domain],
                         quickMode: true,
                         forceRefresh,
                     })
@@ -84,7 +97,7 @@ export async function POST(request: NextRequest) {
                 const domain = uniqueDomains[i];
                 try {
                     const result = await evaluateDomain(domain, {
-                        acquisitionCost: normalizedCosts[domain.toLowerCase()],
+                        acquisitionCost: normalizedCosts[domain],
                         quickMode: false,
                         forceRefresh,
                     });

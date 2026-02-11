@@ -919,7 +919,13 @@ async function getCachedEvaluation(domain: string): Promise<EvaluationResult | n
             .limit(1);
 
         if (cached.length > 0 && cached[0].evaluationResult) {
-            return cached[0].evaluationResult as EvaluationResult;
+            const raw = cached[0].evaluationResult as any;
+            // Validate essential fields
+            if (raw.compositeScore != null && raw.signals && raw.recommendation) {
+                return raw as EvaluationResult;
+            }
+            // Invalidate if shape is wrong
+            console.warn(`[Evaluator] Cache hit for ${domain} but invalid shape. Re-evaluating.`);
         }
     } catch (err) {
         console.warn('Cache lookup failed:', err);
@@ -960,12 +966,6 @@ async function lookupDomainAge(domain: string): Promise<{ age: string; registere
 // ─── Persistence ────────────────────────────────────────────
 
 async function persistEvaluation(result: EvaluationResult, _niche: string): Promise<void> {
-    const existing = await db
-        .select({ id: domainResearch.id, evaluationHistory: domainResearch.evaluationHistory })
-        .from(domainResearch)
-        .where(eq(domainResearch.domain, result.domain))
-        .limit(1);
-
     const historyEntry = {
         evaluatedAt: result.evaluatedAt,
         compositeScore: result.compositeScore,
@@ -981,7 +981,7 @@ async function persistEvaluation(result: EvaluationResult, _niche: string): Prom
         domainScore: result.compositeScore,
         isAvailable: result.signals.mechanics.available ?? null,
         registrationPrice: result.signals.mechanics.registrationPrice ?? null,
-        estimatedRevenuePotential: result.revenueProjections.month12.revenue[1],
+        estimatedRevenuePotential: result.revenueProjections.month12.revenue[1] ?? 0,
         evaluationResult: result as unknown as Record<string, unknown>,
         evaluatedAt: new Date(),
         decision: result.recommendation === 'strong_buy' || result.recommendation === 'buy'
@@ -992,27 +992,17 @@ async function persistEvaluation(result: EvaluationResult, _niche: string): Prom
         decisionReason: result.aiSummary,
     };
 
-    if (existing.length > 0) {
-        // Append to evaluation history atomically
-        await db.update(domainResearch)
-            .set({
+    await db.insert(domainResearch).values({
+        ...data,
+        evaluationHistory: [historyEntry],
+    })
+        .onConflictDoUpdate({
+            target: domainResearch.domain,
+            set: {
                 ...data,
-                evaluationHistory: sql`${domainResearch.evaluationHistory} || ${JSON.stringify([historyEntry])}::jsonb`
-            })
-            .where(eq(domainResearch.id, existing[0].id));
-    } else {
-        await db.insert(domainResearch).values({
-            ...data,
-            evaluationHistory: [historyEntry],
-        })
-            .onConflictDoUpdate({
-                target: domainResearch.domain,
-                set: {
-                    ...data,
-                    evaluationHistory: sql`${domainResearch.evaluationHistory} || ${JSON.stringify([historyEntry])}::jsonb`
-                }
-            });
-    }
+                evaluationHistory: sql`COALESCE(${domainResearch.evaluationHistory}, '[]'::jsonb) || ${JSON.stringify([historyEntry])}::jsonb`
+            }
+        });
 }
 
 // ─── AI Response Types ──────────────────────────────────────

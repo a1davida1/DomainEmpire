@@ -2,9 +2,10 @@
  * Site Generator - Creates static site content for deployment
  */
 
-import { db, articles, domains, monetizationProfiles } from '@/lib/db';
+import { db, articles, domains, monetizationProfiles, citations, users, reviewEvents } from '@/lib/db';
 import { eq, and } from 'drizzle-orm';
 import { getMonetizationScripts } from '@/lib/monetization/scripts';
+import { getDisclosureConfig } from '@/lib/disclosures';
 import { marked } from 'marked';
 import sanitizeHtml from 'sanitize-html';
 
@@ -72,19 +73,35 @@ export async function generateSiteFiles(domainId: string): Promise<GeneratedFile
         scripts,
     };
 
-    return [
+    // Load disclosure config for trust elements
+    const disclosure = await getDisclosureConfig(domainId);
+
+    const files: GeneratedFile[] = [
         { path: 'package.json', content: generatePackageJson(config) },
         { path: 'astro.config.mjs', content: generateAstroConfig(config) },
-        { path: 'src/layouts/Base.astro', content: generateBaseLayout(config) },
+        { path: 'src/layouts/Base.astro', content: generateBaseLayout(config, disclosure) },
         { path: 'src/pages/index.astro', content: generateIndexPage(config, publishedArticles) },
         ...await Promise.all(publishedArticles.map(async a => ({
             path: `src/pages/${a.slug}.astro`,
-            content: await generateArticlePage(config, a),
+            content: await generateArticlePage(config, a, disclosure),
         }))),
         { path: 'src/styles/global.css', content: generateGlobalStyles(config.theme) },
         { path: 'public/robots.txt', content: `User-agent: *\nAllow: /\nSitemap: https://${config.domain}/sitemap.xml` },
         { path: 'public/sitemap.xml', content: generateSitemap(config, publishedArticles) },
     ];
+
+    // Trust pages
+    if (disclosure.aboutPage) {
+        files.push({ path: 'src/pages/about.astro', content: generateTrustPage(config, 'About', disclosure.aboutPage) });
+    }
+    if (disclosure.editorialPolicyPage) {
+        files.push({ path: 'src/pages/editorial-policy.astro', content: generateTrustPage(config, 'Editorial Policy', disclosure.editorialPolicyPage) });
+    }
+    if (disclosure.howWeMoneyPage) {
+        files.push({ path: 'src/pages/how-we-make-money.astro', content: generateTrustPage(config, 'How We Make Money', disclosure.howWeMoneyPage) });
+    }
+
+    return files;
 }
 
 function generatePackageJson(config: SiteConfig): string {
@@ -102,7 +119,15 @@ function generateAstroConfig(config: SiteConfig): string {
 export default defineConfig({ site: 'https://${config.domain}', output: 'static' });`;
 }
 
-function generateBaseLayout(config: SiteConfig): string {
+function generateBaseLayout(config: SiteConfig, disclosure?: { aboutPage?: string | null; editorialPolicyPage?: string | null; howWeMoneyPage?: string | null }): string {
+    const footerLinks: string[] = [];
+    if (disclosure?.aboutPage) footerLinks.push('<a href="/about">About</a>');
+    if (disclosure?.editorialPolicyPage) footerLinks.push('<a href="/editorial-policy">Editorial Policy</a>');
+    if (disclosure?.howWeMoneyPage) footerLinks.push('<a href="/how-we-make-money">How We Make Money</a>');
+    const footerLinksHtml = footerLinks.length > 0
+        ? `<nav class="footer-links">${footerLinks.join(' | ')}</nav>`
+        : '';
+
     return `---
 interface Props { title: string; description?: string; }
 const { title, description = "${config.description}" } = Astro.props;
@@ -117,7 +142,7 @@ const { title, description = "${config.description}" } = Astro.props;
 </head>
 <body><header><nav><a href="/" class="logo">${config.title}</a></nav></header>
 <main><slot /></main>
-<footer><p>&copy; ${new Date().getFullYear()} ${config.title}</p></footer>
+<footer>${footerLinksHtml}<p>&copy; ${new Date().getFullYear()} ${config.title}</p></footer>
 <Fragment set:html={${JSON.stringify(config.scripts.body)}} />
 </body></html>`;
 }

@@ -10,8 +10,13 @@ import { sql } from 'drizzle-orm';
 async function main() {
     console.log('Testing DB connection...');
     const dbUrl = process.env.DATABASE_URL || '';
-    const maskedUrl = dbUrl.replace(/(:)([^:@]+)(@)/, '$1****$3');
-    console.log('DATABASE_URL:', maskedUrl);
+    try {
+        const url = new URL(dbUrl);
+        url.password = '****';
+        console.log('DATABASE_URL:', url.toString());
+    } catch {
+        console.log('DATABASE_URL: (invalid or empty)');
+    }
 
     try {
         const db = getDb();

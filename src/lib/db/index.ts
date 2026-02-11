@@ -25,7 +25,7 @@ export function getDb(): PostgresJsDatabase<typeof schema> {
         max: 10,
         idle_timeout: 20,
         connect_timeout: 10,
-        ssl: 'require',
+        ssl: process.env.DATABASE_SSL === 'true' || process.env.NODE_ENV === 'production' ? 'require' : undefined,
     });
 
     _db = drizzle(client, { schema });

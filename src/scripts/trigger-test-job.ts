@@ -63,6 +63,11 @@ async function main() {
 
             // Fetch Research Data
             const [updatedArticle] = await db.select().from(articles).where(eq(articles.id, article.id));
+            if (!updatedArticle) {
+                console.error('❌ Article not found after job completion');
+                process.exit(1);
+            }
+
             console.log('\n--- RESEARCH DATA ---');
             console.log(JSON.stringify(updatedArticle.researchData, null, 2));
             console.log('---------------------\n');
@@ -73,15 +78,15 @@ async function main() {
             if (outlineJob) {
                 console.log(`✅ Next Job Queued: ${outlineJob.jobType} (${outlineJob.status})`);
             } else {
-                console.error('❌ Next job NOT found! Pipeline broken?');
+                console.warn('⚠️ Next job NOT found! Pipeline might be paused or broken.');
             }
 
             process.exit(0);
         } else if (updatedJob.status === 'failed') {
-            console.error('❌ Job Failed:', updatedJob.errorMessage);
+            console.error('❌ Job Failed:', updatedJob.errorMessage || 'Unknown error');
             process.exit(1);
-        } else if (updatedJob.status === 'processing') {
-            process.stdout.write('.');
+        } else if (updatedJob.status === 'processing' || updatedJob.status === 'pending') {
+            process.stdout.write(updatedJob.status === 'processing' ? '.' : 'p');
         }
 
         await new Promise(r => setTimeout(r, 2000));

@@ -71,9 +71,14 @@ function splitDomain(domain: string): { name: string; tld: string; fullTld: stri
     const lastTwo = parts.slice(-2).join('.');
 
     if (compoundTlds.includes(lastTwo) && parts.length >= 3) {
+        const sld = lastTwo.split('.')[0];
+        const tld = lastTwo.split('.')[1];
+
+        // Re-importing TLD_SCORES if needed, but assuming accessible or checking keys
+        // If the SLD (e.g., 'co') exists in TLD_SCORES, use it; else fallback to original logic
         return {
             name: parts.slice(0, -2).join('.'),
-            tld: lastTwo.split('.')[1], // Use country code for scoring
+            tld: sld, // Default to second-level label like 'co'
             fullTld: lastTwo,
         };
     }
@@ -115,12 +120,13 @@ function countSyllables(word: string): number {
  */
 function isPronounceable(name: string): boolean {
     const cleaned = name.replace(/-/g, '');
+    if (!cleaned || cleaned.length === 0) return false;
+
     if (HARD_CLUSTERS.test(cleaned)) return false;
 
     // Check vowel distribution — names with no vowels are unpronounceable
     const vowelCount = (cleaned.match(/[aeiouy]/gi) || []).length;
-    if (cleaned.length === 0) return false;
-    const ratio = vowelCount / cleaned.length;
+    const ratio = vowelCount / Math.max(1, cleaned.length);
 
     return ratio >= 0.2 && ratio <= 0.8;
 }

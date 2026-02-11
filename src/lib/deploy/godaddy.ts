@@ -177,7 +177,7 @@ export async function checkDomainAvailability(domain: string): Promise<{
         return {
             available: data.available,
             // GoDaddy returns price in micro-units (1 USD = 1,000,000)
-            price: data.price ? data.price / 1_000_000 : undefined,
+            price: data.price != null ? data.price / 1_000_000 : undefined,
             currency: data.currency,
         };
     } catch {

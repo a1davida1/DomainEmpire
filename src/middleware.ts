@@ -47,6 +47,11 @@ function checkMemoryRateLimit(ip: string): boolean {
     return true;
 }
 
+const SESSION_COOKIE = 'de-session';
+
+// Public paths that don't require authentication
+const PUBLIC_PATHS = ['/login', '/api/auth/login', '/api/auth/logout'];
+
 export async function middleware(request: NextRequest) {
     const ip =
         (request as unknown as { ip?: string }).ip ||
@@ -55,8 +60,10 @@ export async function middleware(request: NextRequest) {
         request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
         'anonymous';
 
-    // Only rate limit API routes
-    if (request.nextUrl.pathname.startsWith('/api')) {
+    const { pathname } = request.nextUrl;
+
+    // Rate limit API routes
+    if (pathname.startsWith('/api')) {
         if (ratelimit) {
             const { success, remaining } = await ratelimit.limit(ip);
             if (!success) {
@@ -78,6 +85,23 @@ export async function middleware(request: NextRequest) {
         }
     }
 
+    // Session-based auth check for dashboard and non-public API routes
+    const isPublic = PUBLIC_PATHS.some(p => pathname === p || pathname.startsWith(p + '/'));
+    const needsAuth = pathname.startsWith('/dashboard') || (pathname.startsWith('/api') && !isPublic);
+
+    if (needsAuth) {
+        const sessionToken = request.cookies.get(SESSION_COOKIE)?.value;
+        if (!sessionToken) {
+            // Redirect browsers to login, return 401 for API calls
+            if (pathname.startsWith('/api')) {
+                return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+            }
+            return NextResponse.redirect(new URL('/login', request.url));
+        }
+        // Note: Full session validation (DB lookup) happens in requireAuth() within route handlers.
+        // Middleware only checks cookie presence for fast rejection of unauthenticated requests.
+    }
+
     const response = NextResponse.next();
 
     // Security headers
@@ -90,5 +114,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-    matcher: '/api/:path*',
+    matcher: ['/api/:path*', '/dashboard/:path*'],
 };

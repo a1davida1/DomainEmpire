@@ -12,7 +12,7 @@
  * Model: Perplexity (needs live search data)
  */
 export function keywordSerpPrompt(domain: string, niche: string): string {
-    return `Analyze this domain name as a potential website investment:
+  return `Analyze this domain name as a potential website investment:
 
 DOMAIN: ${domain}
 DETECTED NICHE: ${niche}
@@ -70,7 +70,7 @@ Return ONLY valid JSON:
  * Model: Perplexity (needs live web data for trends)
  */
 export function marketAnalysisPrompt(domain: string, niche: string): string {
-    return `Evaluate the market opportunity for a content website in this space:
+  return `Evaluate the market opportunity for a content website in this space:
 
 DOMAIN: ${domain}
 NICHE: ${niche}
@@ -139,14 +139,14 @@ Return ONLY valid JSON:
  * Model: Grok fast (structured reasoning, no web data needed)
  */
 export function investmentThesisPrompt(
-    domain: string,
-    niche: string,
-    brandScore: number,
-    keywordData: { volume: number; difficulty: number; cpc: number },
-    marketData: { trend: string; ymyl: string; rpm: [number, number] },
-    acquisitionCost: number
+  domain: string,
+  niche: string,
+  brandScore: number,
+  keywordData: { volume: number; difficulty: number; cpc: number },
+  marketData: { trend: string; ymyl: string; rpm: [number, number] },
+  acquisitionCost: number
 ): string {
-    return `You are a domain investment analyst. Evaluate this acquisition:
+  return `You are a domain investment analyst. Evaluate this acquisition:
 
 DOMAIN: ${domain}
 NICHE: ${niche}
@@ -154,7 +154,7 @@ BRAND QUALITY SCORE: ${brandScore}/100
 PRIMARY KEYWORD: Volume ${keywordData.volume}/mo, Difficulty ${keywordData.difficulty}/100, CPC $${keywordData.cpc}
 MARKET TREND: ${marketData.trend}
 YMYL SEVERITY: ${marketData.ymyl}
-ESTIMATED RPM: $${marketData.rpm[0]}-$${marketData.rpm[1]}
+ESTIMATED RPM: $${marketData.rpm?.[0] ?? 0}-$${marketData.rpm?.[1] ?? 0}
 ACQUISITION COST: $${acquisitionCost}
 
 Provide a comprehensive investment analysis:

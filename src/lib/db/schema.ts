@@ -187,6 +187,14 @@ export const articles = pgTable('articles', {
     lastRefreshedAt: timestamp('last_refreshed_at'),
     stalenessScore: real('staleness_score'),
 
+    // YMYL & Review
+    ymylLevel: text('ymyl_level', {
+        enum: ['none', 'low', 'medium', 'high']
+    }).default('none'),
+    lastReviewedAt: timestamp('last_reviewed_at'),
+    lastReviewedBy: uuid('last_reviewed_by'),
+    publishedBy: uuid('published_by'),
+
     // Timestamps
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow(),
@@ -518,6 +526,222 @@ export const backlinkSnapshots = pgTable('backlink_snapshots', {
 });
 
 // ===========================================
+// USERS: Multi-user auth with roles
+// ===========================================
+export const users = pgTable('users', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    email: text('email').notNull().unique(),
+    name: text('name').notNull(),
+    passwordHash: text('password_hash').notNull(),
+    role: text('role', {
+        enum: ['admin', 'editor', 'reviewer', 'expert']
+    }).notNull().default('editor'),
+    expertise: jsonb('expertise').$type<string[]>().default([]),
+    credentials: text('credentials'),
+    isActive: boolean('is_active').default(true),
+    lastLoginAt: timestamp('last_login_at'),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+}, (t) => ({
+    emailIdx: index('user_email_idx').on(t.email),
+    roleIdx: index('user_role_idx').on(t.role),
+    activeIdx: index('user_active_idx').on(t.isActive),
+}));
+
+// ===========================================
+// SESSIONS: Auth session tokens
+// ===========================================
+export const sessions = pgTable('sessions', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    token: text('token').notNull().unique(),
+    expiresAt: timestamp('expires_at').notNull(),
+    createdAt: timestamp('created_at').defaultNow(),
+}, (t) => ({
+    tokenIdx: index('session_token_idx').on(t.token),
+    expiresIdx: index('session_expires_idx').on(t.expiresAt),
+    userIdx: index('session_user_idx').on(t.userId),
+}));
+
+// ===========================================
+// CONTENT REVISIONS: Immutable content snapshots
+// ===========================================
+export const contentRevisions = pgTable('content_revisions', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    articleId: uuid('article_id').notNull().references(() => articles.id, { onDelete: 'cascade' }),
+    revisionNumber: integer('revision_number').notNull(),
+    title: text('title'),
+    contentMarkdown: text('content_markdown'),
+    metaDescription: text('meta_description'),
+    contentHash: text('content_hash'),
+    wordCount: integer('word_count'),
+    changeType: text('change_type', {
+        enum: ['ai_generated', 'ai_refined', 'manual_edit', 'status_change', 'bulk_refresh']
+    }).notNull(),
+    changeSummary: text('change_summary'),
+    createdById: uuid('created_by_id').references(() => users.id),
+    createdAt: timestamp('created_at').defaultNow(),
+}, (t) => ({
+    articleRevIdx: unique('article_revision_unq').on(t.articleId, t.revisionNumber),
+    articleIdx: index('revision_article_idx').on(t.articleId),
+    createdIdx: index('revision_created_idx').on(t.createdAt),
+}));
+
+// ===========================================
+// REVIEW EVENTS: Append-only audit log
+// ===========================================
+export const reviewEvents = pgTable('review_events', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    articleId: uuid('article_id').notNull().references(() => articles.id, { onDelete: 'cascade' }),
+    revisionId: uuid('revision_id').references(() => contentRevisions.id),
+    actorId: uuid('actor_id').notNull().references(() => users.id),
+    actorRole: text('actor_role').notNull(),
+    eventType: text('event_type', {
+        enum: [
+            'created', 'edited', 'submitted_for_review', 'approved', 'rejected',
+            'published', 'archived', 'reverted', 'comment', 'qa_completed', 'expert_signed'
+        ]
+    }).notNull(),
+    reasonCode: text('reason_code'),
+    rationale: text('rationale'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}),
+    createdAt: timestamp('created_at').defaultNow(),
+}, (t) => ({
+    articleIdx: index('review_event_article_idx').on(t.articleId),
+    actorIdx: index('review_event_actor_idx').on(t.actorId),
+    typeIdx: index('review_event_type_idx').on(t.eventType),
+    createdIdx: index('review_event_created_idx').on(t.createdAt),
+}));
+
+// ===========================================
+// QA CHECKLIST TEMPLATES: Configurable review checklists
+// ===========================================
+export const qaChecklistTemplates = pgTable('qa_checklist_templates', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: text('name').notNull().unique(),
+    contentType: text('content_type'),
+    ymylLevel: text('ymyl_level', {
+        enum: ['none', 'low', 'medium', 'high']
+    }),
+    items: jsonb('items').$type<Array<{
+        id: string;
+        category: string;
+        label: string;
+        required: boolean;
+    }>>().default([]),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// ===========================================
+// QA CHECKLIST RESULTS: Completed checklist records
+// ===========================================
+export const qaChecklistResults = pgTable('qa_checklist_results', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    articleId: uuid('article_id').notNull().references(() => articles.id, { onDelete: 'cascade' }),
+    templateId: uuid('template_id').references(() => qaChecklistTemplates.id),
+    reviewerId: uuid('reviewer_id').notNull().references(() => users.id),
+    results: jsonb('results').$type<Record<string, { checked: boolean; notes?: string }>>().default({}),
+    allPassed: boolean('all_passed').default(false),
+    completedAt: timestamp('completed_at'),
+    createdAt: timestamp('created_at').defaultNow(),
+}, (t) => ({
+    articleIdx: index('qa_result_article_idx').on(t.articleId),
+    reviewerIdx: index('qa_result_reviewer_idx').on(t.reviewerId),
+}));
+
+// ===========================================
+// APPROVAL POLICIES: Per-domain/YMYL approval rules
+// ===========================================
+export const approvalPolicies = pgTable('approval_policies', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    domainId: uuid('domain_id').references(() => domains.id, { onDelete: 'cascade' }),
+    contentType: text('content_type'),
+    ymylLevel: text('ymyl_level', {
+        enum: ['none', 'low', 'medium', 'high']
+    }).notNull(),
+    requiredRole: text('required_role', {
+        enum: ['editor', 'reviewer', 'expert', 'admin']
+    }).notNull().default('reviewer'),
+    requiresQaChecklist: boolean('requires_qa_checklist').default(true),
+    requiresExpertSignoff: boolean('requires_expert_signoff').default(false),
+    autoPublish: boolean('auto_publish').default(false),
+    createdAt: timestamp('created_at').defaultNow(),
+}, (t) => ({
+    domainIdx: index('approval_policy_domain_idx').on(t.domainId),
+    ymylIdx: index('approval_policy_ymyl_idx').on(t.ymylLevel),
+}));
+
+// ===========================================
+// CITATIONS: Structured source citations per article
+// ===========================================
+export const citations = pgTable('citations', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    articleId: uuid('article_id').notNull().references(() => articles.id, { onDelete: 'cascade' }),
+    claimText: text('claim_text'),
+    sourceUrl: text('source_url').notNull(),
+    sourceTitle: text('source_title'),
+    retrievedAt: timestamp('retrieved_at').notNull(),
+    quotedSnippet: text('quoted_snippet'),
+    notes: text('notes'),
+    position: integer('position').default(0),
+    createdById: uuid('created_by_id').references(() => users.id),
+    createdAt: timestamp('created_at').defaultNow(),
+}, (t) => ({
+    articleIdx: index('citation_article_idx').on(t.articleId),
+}));
+
+// ===========================================
+// DISCLOSURE CONFIGS: Per-domain compliance settings
+// ===========================================
+export const disclosureConfigs = pgTable('disclosure_configs', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    domainId: uuid('domain_id').notNull().references(() => domains.id, { onDelete: 'cascade' }).unique(),
+    affiliateDisclosure: text('affiliate_disclosure'),
+    adDisclosure: text('ad_disclosure'),
+    notAdviceDisclaimer: text('not_advice_disclaimer'),
+    howWeMoneyPage: text('how_we_money_page'),
+    editorialPolicyPage: text('editorial_policy_page'),
+    aboutPage: text('about_page'),
+    showReviewedBy: boolean('show_reviewed_by').default(true),
+    showLastUpdated: boolean('show_last_updated').default(true),
+    showChangeLog: boolean('show_change_log').default(false),
+    showMethodology: boolean('show_methodology').default(true),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// ===========================================
+// COMPLIANCE SNAPSHOTS: Daily compliance metric tracking
+// ===========================================
+export const complianceSnapshots = pgTable('compliance_snapshots', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    domainId: uuid('domain_id').references(() => domains.id, { onDelete: 'cascade' }),
+    snapshotDate: timestamp('snapshot_date', { mode: 'date' }).notNull(),
+    metrics: jsonb('metrics').$type<{
+        ymylApprovalRate: number;
+        citationCoverageRatio: number;
+        avgTimeInReviewHours: number;
+        articlesWithExpertReview: number;
+        articlesWithQaPassed: number;
+        disclosureComplianceRate: number;
+        meaningfulEditRatio: number;
+    }>().default({
+        ymylApprovalRate: 0,
+        citationCoverageRatio: 0,
+        avgTimeInReviewHours: 0,
+        articlesWithExpertReview: 0,
+        articlesWithQaPassed: 0,
+        disclosureComplianceRate: 0,
+        meaningfulEditRatio: 0,
+    }),
+    createdAt: timestamp('created_at').defaultNow(),
+}, (t) => ({
+    domainIdx: index('compliance_snapshot_domain_idx').on(t.domainId),
+    dateIdx: index('compliance_snapshot_date_idx').on(t.snapshotDate),
+}));
+
+// ===========================================
 // RELATIONS
 // ===========================================
 export const domainsRelations = relations(domains, ({ many, one }) => ({
@@ -529,6 +753,9 @@ export const domainsRelations = relations(domains, ({ many, one }) => ({
     notifications: many(notifications),
     competitors: many(competitors),
     backlinkSnapshots: many(backlinkSnapshots),
+    approvalPolicies: many(approvalPolicies),
+    disclosureConfig: one(disclosureConfigs),
+    complianceSnapshots: many(complianceSnapshots),
     redirectTarget: one(domains, {
         fields: [domains.redirectTargetId],
         references: [domains.id],
@@ -546,11 +773,15 @@ export const keywordsRelations = relations(keywords, ({ one }) => ({
     }),
 }));
 
-export const articlesRelations = relations(articles, ({ one }) => ({
+export const articlesRelations = relations(articles, ({ one, many }) => ({
     domain: one(domains, {
         fields: [articles.domainId],
         references: [domains.id],
     }),
+    revisions: many(contentRevisions),
+    reviewEvents: many(reviewEvents),
+    qaResults: many(qaChecklistResults),
+    citations: many(citations),
 }));
 
 export const monetizationProfilesRelations = relations(monetizationProfiles, ({ one }) => ({
@@ -588,6 +819,92 @@ export const backlinkSnapshotsRelations = relations(backlinkSnapshots, ({ one })
     }),
 }));
 
+export const usersRelations = relations(users, ({ many }) => ({
+    sessions: many(sessions),
+    reviewEvents: many(reviewEvents),
+    revisions: many(contentRevisions),
+}));
+
+export const sessionsRelations = relations(sessions, ({ one }) => ({
+    user: one(users, {
+        fields: [sessions.userId],
+        references: [users.id],
+    }),
+}));
+
+export const contentRevisionsRelations = relations(contentRevisions, ({ one }) => ({
+    article: one(articles, {
+        fields: [contentRevisions.articleId],
+        references: [articles.id],
+    }),
+    createdBy: one(users, {
+        fields: [contentRevisions.createdById],
+        references: [users.id],
+    }),
+}));
+
+export const reviewEventsRelations = relations(reviewEvents, ({ one }) => ({
+    article: one(articles, {
+        fields: [reviewEvents.articleId],
+        references: [articles.id],
+    }),
+    revision: one(contentRevisions, {
+        fields: [reviewEvents.revisionId],
+        references: [contentRevisions.id],
+    }),
+    actor: one(users, {
+        fields: [reviewEvents.actorId],
+        references: [users.id],
+    }),
+}));
+
+export const qaChecklistResultsRelations = relations(qaChecklistResults, ({ one }) => ({
+    article: one(articles, {
+        fields: [qaChecklistResults.articleId],
+        references: [articles.id],
+    }),
+    template: one(qaChecklistTemplates, {
+        fields: [qaChecklistResults.templateId],
+        references: [qaChecklistTemplates.id],
+    }),
+    reviewer: one(users, {
+        fields: [qaChecklistResults.reviewerId],
+        references: [users.id],
+    }),
+}));
+
+export const approvalPoliciesRelations = relations(approvalPolicies, ({ one }) => ({
+    domain: one(domains, {
+        fields: [approvalPolicies.domainId],
+        references: [domains.id],
+    }),
+}));
+
+export const citationsRelations = relations(citations, ({ one }) => ({
+    article: one(articles, {
+        fields: [citations.articleId],
+        references: [articles.id],
+    }),
+    createdBy: one(users, {
+        fields: [citations.createdById],
+        references: [users.id],
+    }),
+}));
+
+export const disclosureConfigsRelations = relations(disclosureConfigs, ({ one }) => ({
+    domain: one(domains, {
+        fields: [disclosureConfigs.domainId],
+        references: [domains.id],
+    }),
+}));
+
+export const complianceSnapshotsRelations = relations(complianceSnapshots, ({ one }) => ({
+    domain: one(domains, {
+        fields: [complianceSnapshots.domainId],
+        references: [domains.id],
+    }),
+}));
+
 // ===========================================
 // TYPE EXPORTS
 // ===========================================
@@ -607,3 +924,14 @@ export type NewExpense = typeof expenses.$inferInsert;
 export type Notification = typeof notifications.$inferSelect;
 export type Competitor = typeof competitors.$inferSelect;
 export type BacklinkSnapshot = typeof backlinkSnapshots.$inferSelect;
+export type User = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;
+export type Session = typeof sessions.$inferSelect;
+export type ContentRevision = typeof contentRevisions.$inferSelect;
+export type ReviewEvent = typeof reviewEvents.$inferSelect;
+export type QaChecklistTemplate = typeof qaChecklistTemplates.$inferSelect;
+export type QaChecklistResult = typeof qaChecklistResults.$inferSelect;
+export type ApprovalPolicy = typeof approvalPolicies.$inferSelect;
+export type Citation = typeof citations.$inferSelect;
+export type DisclosureConfig = typeof disclosureConfigs.$inferSelect;
+export type ComplianceSnapshot = typeof complianceSnapshots.$inferSelect;

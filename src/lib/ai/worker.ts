@@ -231,15 +231,19 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
         case 'evaluate': {
             const evalPayload = job.payload as { domain: string; acquisitionCost?: number; niche?: string } | undefined;
 
-            if (!evalPayload || typeof evalPayload.domain !== 'string' || !evalPayload.domain) {
-                await markJobFailed(job.id, 'Invalid payload: domain is required');
+            if (!evalPayload || typeof evalPayload.domain !== 'string' || evalPayload.domain.trim() === '') {
+                await markJobFailed(job.id, 'Failed: invalid payload - missing or invalid domain');
                 break;
             }
 
+            // Optional type checks for extra safety
+            const acquisitionCost = typeof evalPayload.acquisitionCost === 'number' ? evalPayload.acquisitionCost : undefined;
+            const niche = typeof evalPayload.niche === 'string' ? evalPayload.niche : undefined;
+
             try {
                 const evalResult = await evaluateDomain(evalPayload.domain, {
-                    acquisitionCost: evalPayload.acquisitionCost,
-                    niche: evalPayload.niche,
+                    acquisitionCost,
+                    niche,
                 });
                 await markJobComplete(job.id, `Score: ${evalResult.compositeScore}/100 — ${evalResult.recommendation}`);
             } catch (err) {

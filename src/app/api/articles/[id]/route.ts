@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, articles } from '@/lib/db';
-import { requireAuth } from '@/lib/auth';
+import { requireAuth, getRequestUser } from '@/lib/auth';
+import { createRevision } from '@/lib/audit/revisions';
+import { logReviewEvent } from '@/lib/audit/events';
 import { eq, and, ne } from 'drizzle-orm';
 
 // PATCH /api/articles/[id] - Update article content
@@ -55,6 +57,29 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
                 updatedAt: new Date(),
             })
             .where(eq(articles.id, id));
+
+        // Create revision snapshot + audit event
+        const user = getRequestUser(request);
+        const revisionId = await createRevision({
+            articleId: id,
+            title,
+            contentMarkdown: content,
+            metaDescription: metaDescription || null,
+            changeType: 'manual_edit',
+            changeSummary: body.changeSummary || 'Manual edit via dashboard',
+            createdById: user.id || null,
+        });
+
+        if (user.id) {
+            await logReviewEvent({
+                articleId: id,
+                revisionId,
+                actorId: user.id,
+                actorRole: user.role,
+                eventType: 'edited',
+                metadata: { fields: Object.keys(body) },
+            });
+        }
 
         return NextResponse.json({ success: true });
 

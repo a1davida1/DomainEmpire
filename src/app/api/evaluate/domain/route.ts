@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
     } catch (error) {
         console.error('Domain evaluation failed:', error);
         return NextResponse.json(
-            { error: 'Evaluation failed', message: error instanceof Error ? error.message : 'Unknown error' },
+            { error: 'Internal Server Error', message: 'Evaluation failed. Please try again later.' },
             { status: 500 }
         );
     }

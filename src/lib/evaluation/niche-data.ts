@@ -388,7 +388,10 @@ export function detectSubNiche(domainName: string, niche: string): string | unde
     for (const [subNiche, keywords] of Object.entries(subNiches)) {
         let score = 0;
         for (const kw of keywords) {
-            if (name.includes(kw)) score += 1;
+            const isMatch = kw.length <= 3
+                ? (name === kw || name.startsWith(kw) || name.endsWith(kw))
+                : name.includes(kw);
+            if (isMatch) score += 1;
         }
         if (score > bestScore) {
             bestScore = score;
