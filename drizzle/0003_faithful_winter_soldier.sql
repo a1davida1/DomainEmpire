@@ -31,7 +31,7 @@ CREATE TABLE "expenses" (
 	"domain_id" uuid,
 	"category" text NOT NULL,
 	"description" text NOT NULL,
-	"amount" real NOT NULL,
+	"amount" numeric(12, 2) NOT NULL,
 	"currency" text DEFAULT 'USD',
 	"recurring" boolean DEFAULT false,
 	"recurring_interval" text,

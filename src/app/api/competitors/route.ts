@@ -16,8 +16,8 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const domainId = searchParams.get('domainId');
 
-    if (!domainId) {
-        return NextResponse.json({ error: 'domainId is required' }, { status: 400 });
+    if (!domainId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(domainId)) {
+        return NextResponse.json({ error: 'Valid domainId is required' }, { status: 400 });
     }
 
     try {
@@ -27,8 +27,9 @@ export async function GET(request: NextRequest) {
         ]);
         return NextResponse.json({ competitors: comps, keywordGaps: gaps.slice(0, 50) });
     } catch (error) {
+        console.error(`Failed to fetch competitors for ${domainId}:`, error);
         return NextResponse.json(
-            { error: 'Failed to fetch competitors', message: error instanceof Error ? error.message : 'Unknown' },
+            { error: 'Internal Server Error', message: 'Failed to fetch competitors' },
             { status: 500 }
         );
     }
@@ -63,15 +64,18 @@ export async function DELETE(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
-    if (!id) return NextResponse.json({ error: 'id is required' }, { status: 400 });
+    if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+        return NextResponse.json({ error: 'Valid id is required' }, { status: 400 });
+    }
 
     try {
         const success = await removeCompetitor(id);
         if (!success) return NextResponse.json({ error: 'Not found' }, { status: 404 });
         return NextResponse.json({ success: true });
     } catch (error) {
+        console.error(`Failed to remove competitor ${id}:`, error);
         return NextResponse.json(
-            { error: 'Failed to remove competitor', message: error instanceof Error ? error.message : 'Unknown' },
+            { error: 'Internal Server Error', message: 'Failed to remove competitor' },
             { status: 500 }
         );
     }

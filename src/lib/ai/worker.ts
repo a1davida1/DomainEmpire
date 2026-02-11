@@ -25,7 +25,7 @@
  */
 
 import { db, contentQueue, articles, domains } from '@/lib/db';
-import { eq, and, lte, isNull, or, sql, asc, desc, count } from 'drizzle-orm';
+import { eq, and, lte, isNull, or, sql, asc, desc, count, inArray } from 'drizzle-orm';
 import { processOutlineJob, processDraftJob, processHumanizeJob, processSeoOptimizeJob, processMetaJob, processKeywordResearchJob, processResearchJob } from './pipeline';
 import { processDeployJob } from '@/lib/deploy/processor';
 import { checkContentSchedule } from './scheduler';
@@ -102,63 +102,31 @@ async function acquireJobs(limit: number, jobTypes?: string[]) {
     const now = new Date();
     const lockUntil = new Date(now.getTime() + LOCK_DURATION_MS);
 
-    // Build base conditions
-    const conditions = [
-        eq(contentQueue.status, 'pending'),
-        lte(contentQueue.scheduledFor, now),
-        or(
-            isNull(contentQueue.lockedUntil),
-            lte(contentQueue.lockedUntil, now)
-        ),
-    ];
+    // Use a single atomic UPDATE...WHERE id IN (SELECT ... FOR UPDATE SKIP LOCKED)
+    // This prevents race conditions between multiple workers entirely.
+    const jobTypeFilter = jobTypes?.length
+        ? sql`AND ${contentQueue.jobType} IN (${sql.join(jobTypes.map(t => sql`${t}`), sql`, `)})`
+        : sql``;
 
-    // Get pending job IDs (ordered by priority, then age)
-    const pendingJobs = await db
-        .select({
-            id: contentQueue.id,
-            jobType: contentQueue.jobType,
-        })
-        .from(contentQueue)
-        .where(and(...conditions))
-        .orderBy(desc(contentQueue.priority), asc(contentQueue.createdAt))
-        .limit(limit);
+    const lockedJobs = await db.execute<typeof contentQueue.$inferSelect>(sql`
+        UPDATE ${contentQueue}
+        SET status = 'processing',
+            locked_until = ${lockUntil},
+            started_at = ${now}
+        WHERE id IN (
+            SELECT id FROM ${contentQueue}
+            WHERE status = 'pending'
+              AND scheduled_for <= ${now}
+              AND (locked_until IS NULL OR locked_until <= ${now})
+              ${jobTypeFilter}
+            ORDER BY priority DESC, created_at ASC
+            LIMIT ${limit}
+            FOR UPDATE SKIP LOCKED
+        )
+        RETURNING *
+    `);
 
-    if (pendingJobs.length === 0) return [];
-
-    // Filter by job types if specified
-    const filteredJobs = jobTypes
-        ? pendingJobs.filter(j => jobTypes.includes(j.jobType))
-        : pendingJobs;
-
-    if (filteredJobs.length === 0) return [];
-
-    const jobIds = filteredJobs.map(j => j.id);
-
-    // Atomically lock jobs by setting status to 'processing' + lockUntil
-    // Only lock if status is still 'pending' (prevents double-acquisition)
-    const lockedJobs = [];
-    for (const jobId of jobIds) {
-        const result = await db
-            .update(contentQueue)
-            .set({
-                status: 'processing',
-                lockedUntil: lockUntil,
-                startedAt: new Date(),
-            })
-            .where(
-                and(
-                    eq(contentQueue.id, jobId),
-                    eq(contentQueue.status, 'pending') // Only if still pending
-                )
-            )
-            .returning();
-
-        if (result.length > 0) {
-            lockedJobs.push(result[0]);
-        }
-    }
-
-    return lockedJobs;
+    return Array.isArray(lockedJobs) ? lockedJobs : (lockedJobs as unknown as { rows: typeof contentQueue.$inferSelect[] }).rows ?? [];
 }
 
 /**
@@ -205,8 +173,8 @@ async function processJob(job: typeof contentQueue.$inferSelect): Promise<boolea
                     .where(eq(articles.id, job.articleId));
             }
         } else {
-            // Schedule retry with exponential backoff: 2, 4, 8 minutes...
-            const retryDelayMs = Math.pow(2, attempts) * 60 * 1000;
+            // Schedule retry with exponential backoff: 2, 4, 8 minutes... capped at 30 min
+            const retryDelayMs = Math.min(Math.pow(2, attempts) * 60 * 1000, 30 * 60 * 1000);
             const scheduledFor = new Date(Date.now() + retryDelayMs);
 
             await db
@@ -307,14 +275,36 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
                     // Queue a research job which will chain into outline -> draft -> humanize -> SEO -> meta
                     const domainRecord = await db.select({ domain: domains.domain })
                         .from(domains).where(eq(domains.id, article.domainId)).limit(1);
+
+                    if (!domainRecord.length) {
+                        await markJobFailed(job.id, `Domain not found for article: ${article.domainId}`);
+                        break;
+                    }
+
+                    // Guard against duplicate refresh pipelines
+                    const existingJob = await db.select({ id: contentQueue.id })
+                        .from(contentQueue)
+                        .where(and(
+                            eq(contentQueue.articleId, article.id),
+                            eq(contentQueue.jobType, 'research'),
+                            inArray(contentQueue.status, ['pending', 'processing'])
+                        ))
+                        .limit(1);
+
+                    if (existingJob.length > 0) {
+                        await markJobComplete(job.id, `Refresh already in progress for article ${article.id}`);
+                        break;
+                    }
+
                     await db.insert(contentQueue).values({
                         jobType: 'research',
                         domainId: article.domainId,
                         articleId: article.id,
-                        payload: { targetKeyword: article.targetKeyword, domainName: domainRecord[0]?.domain || '' },
+                        payload: { targetKeyword: article.targetKeyword, domainName: domainRecord[0].domain },
                         status: 'pending',
                         priority: 3,
                     });
+
                     // Update refresh timestamp
                     await db.update(articles).set({ lastRefreshedAt: new Date() }).where(eq(articles.id, article.id));
                     await markJobComplete(job.id, `Queued refresh pipeline for article ${article.id}`);

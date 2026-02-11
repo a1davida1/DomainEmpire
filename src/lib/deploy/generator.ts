@@ -36,7 +36,10 @@ function escapeHtml(unsafe: string): string {
 function escapeAttr(unsafe: string): string {
     return unsafe
         .replace(/&/g, "&amp;")
-        .replace(/"/g, "&quot;");
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
 }
 
 /**
@@ -74,10 +77,10 @@ export async function generateSiteFiles(domainId: string): Promise<GeneratedFile
         { path: 'astro.config.mjs', content: generateAstroConfig(config) },
         { path: 'src/layouts/Base.astro', content: generateBaseLayout(config) },
         { path: 'src/pages/index.astro', content: generateIndexPage(config, publishedArticles) },
-        ...publishedArticles.map(a => ({
+        ...await Promise.all(publishedArticles.map(async a => ({
             path: `src/pages/${a.slug}.astro`,
-            content: generateArticlePage(config, a),
-        })),
+            content: await generateArticlePage(config, a),
+        }))),
         { path: 'src/styles/global.css', content: generateGlobalStyles(config.theme) },
         { path: 'public/robots.txt', content: `User-agent: *\nAllow: /\nSitemap: https://${config.domain}/sitemap.xml` },
         { path: 'public/sitemap.xml', content: generateSitemap(config, publishedArticles) },
@@ -130,14 +133,18 @@ import Base from '../layouts/Base.astro';
 </Base>`;
 }
 
-function generateArticlePage(config: SiteConfig, article: typeof articles.$inferSelect): string {
+async function generateArticlePage(config: SiteConfig, article: typeof articles.$inferSelect): Promise<string> {
     // Remove leftover AI placeholders from markdown
     const rawMarkdown = (article.contentMarkdown || '')
         .replace(/\[INTERNAL_LINK.*?\]/g, '')
         .replace(/\[EXTERNAL_LINK.*?\]/g, '')
         .replace(/\[IMAGE.*?\]/g, '');
 
-    const rawHtml = article.contentHtml || (rawMarkdown ? marked.parse(rawMarkdown, { async: false }) : '');
+    let rawHtml = article.contentHtml || '';
+    if (!rawHtml && rawMarkdown) {
+        const result = marked.parse(rawMarkdown, { async: false });
+        rawHtml = typeof result === 'string' ? result : await result;
+    }
 
     // Sanitize HTML to prevent XSS while keeping safe formatting tags
     const htmlContent = sanitizeHtml(rawHtml as string, {

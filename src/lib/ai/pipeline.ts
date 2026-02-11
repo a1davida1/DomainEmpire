@@ -240,10 +240,9 @@ export async function processHumanizeJob(jobId: string): Promise<void> {
     const domainRecord = await db.select().from(domains).where(eq(domains.id, job.domainId!)).limit(1);
     const domain = domainRecord[0];
 
-    // Safely handle missing domain
-    const voiceSeed = domain
-        ? await getOrCreateVoiceSeed(job.domainId!, domain.domain, domain.niche || 'general')
-        : undefined;
+    if (!domain) throw new Error(`Domain lookup failed for article: ${job.domainId}`);
+
+    const voiceSeed = await getOrCreateVoiceSeed(job.domainId!, domain.domain, domain.niche || 'general');
 
     const response = await ai.generate(
         'humanization',
@@ -383,7 +382,10 @@ export async function processMetaJob(jobId: string): Promise<void> {
         domainId: job.domainId,
     });
 
-    const safeSlug = slugify(response.data.suggestedSlug || response.data.title || 'untitled');
+    let safeSlug = slugify(response.data.suggestedSlug || response.data.title || '');
+    if (!safeSlug) {
+        safeSlug = slugify(response.data.title || '') || 'untitled';
+    }
 
     await db.update(articles).set({
         title: response.data.title,

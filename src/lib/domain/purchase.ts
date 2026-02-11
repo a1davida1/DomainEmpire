@@ -2,7 +2,7 @@
  * Domain Purchase Automation
  *
  * Automates domain registration via GoDaddy's purchase API.
- * Includes safety checks (price limits, confirmation required).
+ * Includes safety checks: price limits, confirmation step, DB transaction.
  */
 
 import { db } from '@/lib/db';
@@ -18,6 +18,13 @@ interface PurchaseResult {
     currency?: string;
     orderId?: string;
     error?: string;
+}
+
+export interface AvailabilityResult {
+    available: boolean;
+    domain: string;
+    price: number;
+    currency: string;
 }
 
 interface GoDaddyContact {
@@ -45,19 +52,56 @@ function getRegistrantContact(): GoDaddyContact | null {
     const contact = process.env.GODADDY_REGISTRANT_CONTACT;
     if (!contact) return null;
     try {
-        return JSON.parse(contact) as GoDaddyContact;
+        const parsed = JSON.parse(contact) as GoDaddyContact;
+        if (!parsed.nameFirst || !parsed.nameLast || !parsed.email || !parsed.phone || !parsed.addressMailing) {
+            console.error('GODADDY_REGISTRANT_CONTACT missing required fields');
+            return null;
+        }
+        return parsed;
     } catch {
+        console.error('GODADDY_REGISTRANT_CONTACT is not valid JSON');
         return null;
     }
 }
 
 /**
+ * Check domain availability and price WITHOUT purchasing.
+ * Use this as a confirmation step before calling purchaseDomain.
+ */
+export async function checkAvailability(domain: string): Promise<AvailabilityResult> {
+    const config = getConfig();
+    if (!config) throw new Error('GoDaddy API credentials not configured');
+
+    const availResp = await fetch(
+        `${GD_API}/domains/available?domain=${encodeURIComponent(domain)}&checkType=FULL`,
+        {
+            headers: { 'Authorization': `sso-key ${config.apiKey}:${config.apiSecret}` },
+            signal: AbortSignal.timeout(15000),
+        }
+    );
+
+    if (!availResp.ok) {
+        throw new Error(`Availability check failed: HTTP ${availResp.status}`);
+    }
+
+    const avail = await availResp.json() as { available: boolean; price?: number; currency?: string };
+
+    return {
+        available: avail.available,
+        domain,
+        price: avail.price ? avail.price / 1_000_000 : 0,
+        currency: avail.currency || 'USD',
+    };
+}
+
+/**
  * Purchase a domain via GoDaddy API.
- * Requires GODADDY_REGISTRANT_CONTACT env var as JSON.
+ * Requires confirmed=true to prevent accidental purchases.
+ * Wraps all DB operations in a transaction for atomicity.
  */
 export async function purchaseDomain(
     domain: string,
-    options: { maxPrice?: number; period?: number; privacy?: boolean } = {}
+    options: { maxPrice?: number; period?: number; privacy?: boolean; confirmed?: boolean } = {}
 ): Promise<PurchaseResult> {
     const config = getConfig();
     if (!config) {
@@ -66,35 +110,29 @@ export async function purchaseDomain(
 
     const contact = getRegistrantContact();
     if (!contact) {
-        return { success: false, domain, error: 'GODADDY_REGISTRANT_CONTACT not configured' };
+        return { success: false, domain, error: 'GODADDY_REGISTRANT_CONTACT not configured or invalid' };
     }
 
-    const { maxPrice = 50, period = 1, privacy = true } = options;
+    const { maxPrice = 50, period = 1, privacy = true, confirmed = false } = options;
+
+    if (!confirmed) {
+        return { success: false, domain, error: 'Purchase not confirmed. Set confirmed=true after reviewing the price.' };
+    }
 
     try {
-        // Check availability and price
-        const availResp = await fetch(
-            `${GD_API}/domains/available?domain=${encodeURIComponent(domain)}&checkType=FULL`,
-            { headers: { 'Authorization': `sso-key ${config.apiKey}:${config.apiSecret}` } }
-        );
-
-        if (!availResp.ok) {
-            return { success: false, domain, error: `Availability check failed: HTTP ${availResp.status}` };
-        }
-
-        const avail = await availResp.json() as { available: boolean; price?: number; currency?: string };
+        const avail = await checkAvailability(domain);
 
         if (!avail.available) {
             return { success: false, domain, error: 'Domain is not available for registration' };
         }
 
-        const priceUsd = avail.price ? avail.price / 1_000_000 : 0;
-        if (priceUsd > maxPrice) {
-            return { success: false, domain, price: priceUsd, currency: avail.currency || 'USD',
-                error: `Price $${priceUsd} exceeds max limit of $${maxPrice}` };
+        if (avail.price > maxPrice) {
+            return {
+                success: false, domain, price: avail.price, currency: avail.currency,
+                error: `Price $${avail.price.toFixed(2)} exceeds max limit of $${maxPrice}`,
+            };
         }
 
-        // Purchase
         const purchaseResp = await fetch(`${GD_API}/domains/purchase`, {
             method: 'POST',
             headers: {
@@ -111,41 +149,44 @@ export async function purchaseDomain(
                 contactAdmin: contact, contactBilling: contact,
                 contactRegistrant: contact, contactTech: contact,
             }),
+            signal: AbortSignal.timeout(30000),
         });
 
         if (!purchaseResp.ok) {
             const errorText = await purchaseResp.text();
-            return { success: false, domain, price: priceUsd, error: `Purchase failed: ${errorText}` };
+            return { success: false, domain, error: `Purchase failed: ${errorText}` };
         }
 
         const result = await purchaseResp.json() as { orderId?: number };
 
-        // Create domain record
+        // All DB writes in a single transaction for atomicity
         const tld = domain.split('.').slice(1).join('.');
-        const [newDomain] = await db.insert(domains).values({
-            domain, tld, registrar: 'godaddy',
-            purchaseDate: new Date(), purchasePrice: priceUsd,
-            status: 'parked', bucket: 'build',
-        }).returning({ id: domains.id });
+        const newDomainId = await db.transaction(async (tx) => {
+            const [newDomain] = await tx.insert(domains).values({
+                domain, tld, registrar: 'godaddy',
+                purchaseDate: new Date(), purchasePrice: avail.price,
+                status: 'parked', bucket: 'build',
+            }).returning({ id: domains.id });
 
-        // Update research record
-        await db.update(domainResearch)
-            .set({ decision: 'bought', domainId: newDomain.id })
-            .where(eq(domainResearch.domain, domain));
+            await tx.update(domainResearch)
+                .set({ decision: 'bought', domainId: newDomain.id })
+                .where(eq(domainResearch.domain, domain));
 
-        // Log expense
-        await db.insert(expenses).values({
-            domainId: newDomain.id,
-            category: 'domain_registration',
-            description: `Registration: ${domain} (${period}yr)`,
-            amount: priceUsd,
-            expenseDate: new Date(),
+            await tx.insert(expenses).values({
+                domainId: newDomain.id,
+                category: 'domain_registration',
+                description: `Registration: ${domain} (${period}yr)`,
+                amount: avail.price.toString(),
+                expenseDate: new Date(),
+            });
+
+            return newDomain.id;
         });
 
         return {
-            success: true, domain, price: priceUsd,
-            currency: avail.currency || 'USD',
-            orderId: String(result.orderId || ''),
+            success: true, domain, price: avail.price,
+            currency: avail.currency,
+            orderId: String(result.orderId || newDomainId),
         };
     } catch (error) {
         return { success: false, domain, error: error instanceof Error ? error.message : 'Unknown error' };

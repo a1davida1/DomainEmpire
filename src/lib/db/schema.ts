@@ -1,4 +1,4 @@
-import { pgTable, text, integer, real, boolean, timestamp, jsonb, uuid, index } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, real, boolean, timestamp, jsonb, uuid, index, unique, check, numeric } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 export { sql };
 
@@ -414,7 +414,7 @@ export const expenses = pgTable('expenses', {
         enum: ['domain_registration', 'domain_renewal', 'hosting', 'content', 'ai_api', 'tools', 'design', 'other']
     }).notNull(),
     description: text('description').notNull(),
-    amount: real('amount').notNull(),
+    amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
     currency: text('currency').default('USD'),
     recurring: boolean('recurring').default(false),
     recurringInterval: text('recurring_interval', {
@@ -423,7 +423,11 @@ export const expenses = pgTable('expenses', {
 
     expenseDate: timestamp('expense_date', { mode: 'date' }).notNull(),
     createdAt: timestamp('created_at').defaultNow(),
-});
+}, (t) => ({
+    recurring_check: check('recurring_check', sql`NOT ${t.recurring} OR ${t.recurringInterval} IS NOT NULL`),
+    dateIdx: index('expense_date_idx').on(t.expenseDate),
+    categoryIdx: index('expense_category_idx').on(t.category),
+}));
 
 // ===========================================
 // NOTIFICATIONS: In-app notifications and alerts
@@ -447,7 +451,11 @@ export const notifications = pgTable('notifications', {
     emailSent: boolean('email_sent').default(false),
 
     createdAt: timestamp('created_at').defaultNow(),
-});
+}, (t) => ({
+    isReadIdx: index('notification_is_read_idx').on(t.isRead),
+    domainIdx: index('notification_domain_idx').on(t.domainId),
+    typeIdx: index('notification_type_idx').on(t.type),
+}));
 
 // ===========================================
 // COMPETITORS: Track competitor domains and their performance
@@ -476,7 +484,9 @@ export const competitors = pgTable('competitors', {
 
     lastCheckedAt: timestamp('last_checked_at'),
     createdAt: timestamp('created_at').defaultNow(),
-});
+}, (t) => ({
+    unq: unique().on(t.domainId, t.competitorDomain)
+}));
 
 // ===========================================
 // BACKLINK SNAPSHOTS: Track backlink profile over time

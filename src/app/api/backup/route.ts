@@ -9,7 +9,7 @@ export async function GET(request: NextRequest) {
 
     try {
         const data = await getBackupData();
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const timestamp = new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-');
 
         return new NextResponse(data, {
             status: 200,
@@ -19,8 +19,9 @@ export async function GET(request: NextRequest) {
             },
         });
     } catch (error) {
+        console.error('Database backup failed:', error);
         return NextResponse.json(
-            { error: 'Backup failed', message: error instanceof Error ? error.message : 'Unknown' },
+            { error: 'Internal Server Error', message: 'Failed to generate backup' },
             { status: 500 }
         );
     }

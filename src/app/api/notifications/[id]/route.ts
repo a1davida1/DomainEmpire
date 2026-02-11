@@ -19,8 +19,9 @@ export async function PATCH(
         }
         return NextResponse.json({ success: true });
     } catch (error) {
+        console.error(`Failed to update notification ${id}:`, error);
         return NextResponse.json(
-            { error: 'Failed to update notification', message: error instanceof Error ? error.message : 'Unknown' },
+            { error: 'Internal Server Error', message: 'Failed to update notification' },
             { status: 500 }
         );
     }

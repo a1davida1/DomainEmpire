@@ -29,8 +29,22 @@ export async function GET(request: NextRequest) {
     try {
         const conditions = [];
         if (domainId) conditions.push(eq(expenses.domainId, domainId));
-        if (startDate) conditions.push(gte(expenses.expenseDate, new Date(startDate)));
-        if (endDate) conditions.push(lte(expenses.expenseDate, new Date(endDate)));
+
+        if (startDate) {
+            const date = new Date(startDate);
+            if (Number.isNaN(date.getTime())) {
+                return NextResponse.json({ error: 'Invalid startDate' }, { status: 400 });
+            }
+            conditions.push(gte(expenses.expenseDate, date));
+        }
+
+        if (endDate) {
+            const date = new Date(endDate);
+            if (Number.isNaN(date.getTime())) {
+                return NextResponse.json({ error: 'Invalid endDate' }, { status: 400 });
+            }
+            conditions.push(lte(expenses.expenseDate, date));
+        }
 
         const query = conditions.length > 0
             ? db.select().from(expenses).where(and(...conditions)).orderBy(desc(expenses.expenseDate))
@@ -38,16 +52,17 @@ export async function GET(request: NextRequest) {
 
         const data = await query;
 
-        const totalAmount = data.reduce((sum, e) => sum + e.amount, 0);
+        const totalAmount = data.reduce((sum, e) => sum + Number.parseFloat(e.amount), 0);
         const byCategory: Record<string, number> = {};
         for (const e of data) {
-            byCategory[e.category] = (byCategory[e.category] || 0) + e.amount;
+            byCategory[e.category] = (byCategory[e.category] || 0) + Number.parseFloat(e.amount);
         }
 
         return NextResponse.json({ expenses: data, totalAmount, byCategory });
     } catch (error) {
+        console.error('Failed to fetch expenses:', error);
         return NextResponse.json(
-            { error: 'Failed to fetch expenses', message: error instanceof Error ? error.message : 'Unknown' },
+            { error: 'Internal Server Error', message: 'Failed to fetch expenses' },
             { status: 500 }
         );
     }
@@ -65,8 +80,13 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Validation failed', details: parsed.error.flatten() }, { status: 400 });
         }
 
+        if (parsed.data.recurring && !parsed.data.recurringInterval) {
+            return NextResponse.json({ error: 'recurringInterval is required when recurring is true' }, { status: 400 });
+        }
+
         const [expense] = await db.insert(expenses).values({
             ...parsed.data,
+            amount: parsed.data.amount.toString(),
             domainId: parsed.data.domainId || null,
             recurringInterval: parsed.data.recurringInterval || null,
             expenseDate: new Date(parsed.data.expenseDate),
@@ -74,8 +94,9 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json(expense, { status: 201 });
     } catch (error) {
+        console.error('Failed to create expense:', error);
         return NextResponse.json(
-            { error: 'Failed to create expense', message: error instanceof Error ? error.message : 'Unknown' },
+            { error: 'Internal Server Error', message: 'Failed to create expense' },
             { status: 500 }
         );
     }

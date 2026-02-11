@@ -2,6 +2,27 @@ import { db } from '@/lib/db';
 import { contentQueue } from '@/lib/db/schema';
 import { desc, eq, sql } from 'drizzle-orm';
 import { getQueueHealth } from '@/lib/ai/worker';
+import { revalidatePath } from 'next/cache';
+
+async function retryFailedAction() {
+    'use server';
+    await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/queue/retry`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ limit: 10 }),
+    });
+    revalidatePath('/dashboard/queue');
+}
+
+async function cancelJobAction(formData: FormData) {
+    'use server';
+    const jobId = formData.get('jobId') as string;
+    if (!jobId) return;
+    await db.update(contentQueue)
+        .set({ status: 'cancelled' })
+        .where(eq(contentQueue.id, jobId));
+    revalidatePath('/dashboard/queue');
+}
 
 export default async function QueuePage() {
     const health = await getQueueHealth();
@@ -21,7 +42,16 @@ export default async function QueuePage() {
 
     return (
         <div className="space-y-6">
-            <h1 className="text-3xl font-bold">Job Queue</h1>
+            <div className="flex items-center justify-between">
+                <h1 className="text-3xl font-bold">Job Queue</h1>
+                {health.failed > 0 && (
+                    <form action={retryFailedAction}>
+                        <button type="submit" className="px-4 py-2 bg-yellow-600 text-white rounded-lg text-sm hover:bg-yellow-700">
+                            Retry Failed Jobs
+                        </button>
+                    </form>
+                )}
+            </div>
 
             {/* Health metrics */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -75,6 +105,7 @@ export default async function QueuePage() {
                                 <th className="text-left p-3">Cost</th>
                                 <th className="text-left p-3">Created</th>
                                 <th className="text-left p-3">Error</th>
+                                <th className="text-left p-3">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -91,6 +122,16 @@ export default async function QueuePage() {
                                     </td>
                                     <td className="p-3 text-red-500 text-xs max-w-xs truncate">
                                         {job.errorMessage || '—'}
+                                    </td>
+                                    <td className="p-3">
+                                        {(job.status === 'pending' || job.status === 'processing') && (
+                                            <form action={cancelJobAction}>
+                                                <input type="hidden" name="jobId" value={job.id} />
+                                                <button type="submit" className="text-xs text-red-600 hover:underline">
+                                                    Cancel
+                                                </button>
+                                            </form>
+                                        )}
                                     </td>
                                 </tr>
                             ))}

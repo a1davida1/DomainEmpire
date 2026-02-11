@@ -1,10 +1,9 @@
 import { db } from '@/lib/db';
 import { expenses, revenueSnapshots, domains } from '@/lib/db/schema';
-import { desc, sql, eq, gte } from 'drizzle-orm';
+import { desc, sql, gte } from 'drizzle-orm';
 
 export default async function FinancesPage() {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
 
     const [recentExpenses, expensesByCategory, recentRevenue, allDomains] = await Promise.all([
         db.select().from(expenses).orderBy(desc(expenses.expenseDate)).limit(50),
@@ -14,7 +13,7 @@ export default async function FinancesPage() {
             count: sql<number>`count(*)::int`,
         })
             .from(expenses)
-            .where(gte(expenses.expenseDate, ninetyDaysAgo))
+            .where(gte(expenses.expenseDate, thirtyDaysAgo))
             .groupBy(expenses.category),
         db.select({
             total: sql<number>`sum(${revenueSnapshots.totalRevenue})::real`,
@@ -28,8 +27,9 @@ export default async function FinancesPage() {
         }).from(domains),
     ]);
 
-    const totalExpenses90d = expensesByCategory.reduce((sum, e) => sum + (e.total || 0), 0);
+    const totalExpenses30d = expensesByCategory.reduce((sum, e) => sum + (e.total || 0), 0);
     const totalRevenue30d = recentRevenue[0]?.total || 0;
+    const profit30d = totalRevenue30d - totalExpenses30d;
     const totalInvestment = allDomains.reduce((sum, d) => sum + (d.purchasePrice || 0), 0);
 
     return (
@@ -37,14 +37,20 @@ export default async function FinancesPage() {
             <h1 className="text-3xl font-bold">Finances</h1>
 
             {/* Summary cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                 <div className="bg-card rounded-lg border p-4">
                     <p className="text-sm text-muted-foreground">Revenue (30d)</p>
                     <p className="text-2xl font-bold text-green-600">${totalRevenue30d.toFixed(2)}</p>
                 </div>
                 <div className="bg-card rounded-lg border p-4">
-                    <p className="text-sm text-muted-foreground">Expenses (90d)</p>
-                    <p className="text-2xl font-bold text-red-600">${totalExpenses90d.toFixed(2)}</p>
+                    <p className="text-sm text-muted-foreground">Expenses (30d)</p>
+                    <p className="text-2xl font-bold text-red-600">${totalExpenses30d.toFixed(2)}</p>
+                </div>
+                <div className="bg-card rounded-lg border p-4">
+                    <p className="text-sm text-muted-foreground">Profit (30d)</p>
+                    <p className={`text-2xl font-bold ${profit30d >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        ${profit30d.toFixed(2)}
+                    </p>
                 </div>
                 <div className="bg-card rounded-lg border p-4">
                     <p className="text-sm text-muted-foreground">Total Investment</p>
@@ -54,20 +60,20 @@ export default async function FinancesPage() {
                     <p className="text-sm text-muted-foreground">Portfolio ROI</p>
                     <p className="text-2xl font-bold">
                         {totalInvestment > 0
-                            ? `${((totalRevenue30d * 12 / totalInvestment) * 100).toFixed(1)}%`
+                            ? `${((profit30d * 12 / totalInvestment) * 100).toFixed(1)}%`
                             : 'N/A'}
                     </p>
-                    <p className="text-xs text-muted-foreground">annualized</p>
+                    <p className="text-xs text-muted-foreground">annualized (profit-based)</p>
                 </div>
             </div>
 
             {/* Expenses by category */}
             <div className="bg-card rounded-lg border p-4">
-                <h2 className="text-lg font-semibold mb-3">Expenses by Category (90d)</h2>
+                <h2 className="text-lg font-semibold mb-3">Expenses by Category (30d)</h2>
                 <div className="space-y-2">
                     {expensesByCategory.map(cat => (
                         <div key={cat.category} className="flex items-center justify-between">
-                            <span className="text-sm capitalize">{cat.category.replace(/_/g, ' ')}</span>
+                            <span className="text-sm capitalize">{cat.category.replaceAll('_', ' ')}</span>
                             <div className="flex items-center gap-2">
                                 <span className="text-sm text-muted-foreground">{cat.count} items</span>
                                 <span className="font-medium">${(cat.total || 0).toFixed(2)}</span>
@@ -97,9 +103,9 @@ export default async function FinancesPage() {
                                     <td className="p-3 text-muted-foreground">
                                         {exp.expenseDate ? new Date(exp.expenseDate).toLocaleDateString() : '—'}
                                     </td>
-                                    <td className="p-3 capitalize">{exp.category.replace(/_/g, ' ')}</td>
+                                    <td className="p-3 capitalize">{exp.category.replaceAll('_', ' ')}</td>
                                     <td className="p-3">{exp.description}</td>
-                                    <td className="p-3 text-right font-medium">${exp.amount.toFixed(2)}</td>
+                                    <td className="p-3 text-right font-medium">${Number(exp.amount).toFixed(2)}</td>
                                     <td className="p-3">
                                         {exp.recurring ? (
                                             <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs">

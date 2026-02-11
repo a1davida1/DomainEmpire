@@ -17,6 +17,15 @@ interface EmailOptions {
     message: string;
 }
 
+function escapeHtml(unsafe: string): string {
+    return unsafe
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+}
+
 function getTransporter() {
     const host = process.env.SMTP_HOST;
     const port = parseInt(process.env.SMTP_PORT || '587', 10);
@@ -43,6 +52,11 @@ export async function sendNotificationEmail(options: EmailOptions): Promise<bool
     const severityIcon = options.severity === 'critical' ? '[CRITICAL]'
         : options.severity === 'warning' ? '[WARNING]' : '[INFO]';
 
+    const safeTitle = escapeHtml(options.title);
+    const safeMessage = escapeHtml(options.message);
+    const safeType = escapeHtml(options.type);
+    const safeSeverity = escapeHtml(options.severity);
+
     try {
         await transporter.sendMail({
             from: process.env.SMTP_USER,
@@ -50,11 +64,11 @@ export async function sendNotificationEmail(options: EmailOptions): Promise<bool
             subject: `${severityIcon} Domain Empire: ${options.title}`,
             html: `
                 <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-                    <h2 style="color: #1a1a1a;">${options.title}</h2>
-                    <p style="color: #4a4a4a; font-size: 16px;">${options.message}</p>
+                    <h2 style="color: #1a1a1a;">${safeTitle}</h2>
+                    <p style="color: #4a4a4a; font-size: 16px;">${safeMessage}</p>
                     <hr style="border: 1px solid #eee;">
                     <p style="color: #888; font-size: 12px;">
-                        Type: ${options.type} | Severity: ${options.severity}
+                        Type: ${safeType} | Severity: ${safeSeverity}
                     </p>
                 </div>
             `,

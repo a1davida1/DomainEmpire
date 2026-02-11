@@ -9,7 +9,6 @@ describe('staleness calculation', () => {
         lastRefreshedAt: Date | null;
         pageviews30d: number | null;
         researchData: unknown;
-        updatedAt: Date | null;
     }): { score: number; reasons: string[] } {
         const now = Date.now();
         const reasons: string[] = [];
@@ -40,6 +39,12 @@ describe('staleness calculation', () => {
                 score += weights.noRecentRefresh;
                 reasons.push('Never refreshed');
             }
+        } else {
+            const daysSinceRefresh = (now - article.lastRefreshedAt.getTime()) / (24 * 60 * 60 * 1000);
+            if (daysSinceRefresh > 90) {
+                score += weights.noRecentRefresh;
+                reasons.push(`Last refreshed ${Math.round(daysSinceRefresh)} days ago`);
+            }
         }
 
         return { score: Math.round(score * 100) / 100, reasons };
@@ -51,7 +56,6 @@ describe('staleness calculation', () => {
             lastRefreshedAt: null,
             pageviews30d: 500,
             researchData: { statistics: [] },
-            updatedAt: new Date(),
         });
         expect(result.score).toBeLessThan(0.6);
     });
@@ -62,7 +66,6 @@ describe('staleness calculation', () => {
             lastRefreshedAt: null,
             pageviews30d: 0,
             researchData: null,
-            updatedAt: null,
         });
         expect(result.score).toBeGreaterThan(0.6);
         expect(result.reasons.length).toBeGreaterThan(0);
@@ -73,7 +76,6 @@ describe('staleness calculation', () => {
             publishedAt: new Date(Date.now() - 200 * 24 * 60 * 60 * 1000),
             pageviews30d: 5,
             researchData: { statistics: [] },
-            updatedAt: new Date(),
         };
 
         const neverRefreshed = calculateStaleness({ ...base, lastRefreshedAt: null });
@@ -91,7 +93,6 @@ describe('staleness calculation', () => {
             lastRefreshedAt: null,
             pageviews30d: 100,
             researchData: { statistics: ['some stat'] },
-            updatedAt: new Date(),
         });
 
         const withoutResearch = calculateStaleness({
@@ -99,7 +100,6 @@ describe('staleness calculation', () => {
             lastRefreshedAt: null,
             pageviews30d: 100,
             researchData: null,
-            updatedAt: null,
         });
 
         expect(withoutResearch.score).toBeGreaterThan(withResearch.score);

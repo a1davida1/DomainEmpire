@@ -24,8 +24,9 @@ export async function GET(
         if (!domain.length) return NextResponse.json({ error: 'Domain not found' }, { status: 404 });
         return NextResponse.json({ tags: domain[0].tags || [] });
     } catch (error) {
+        console.error(`Failed to fetch tags for domain ${id}:`, error);
         return NextResponse.json(
-            { error: 'Failed to fetch tags', message: error instanceof Error ? error.message : 'Unknown' },
+            { error: 'Internal Server Error', message: 'Failed to fetch tags' },
             { status: 500 }
         );
     }
@@ -56,8 +57,9 @@ export async function PUT(
         if (!result.length) return NextResponse.json({ error: 'Domain not found' }, { status: 404 });
         return NextResponse.json({ tags: parsed.data.tags });
     } catch (error) {
+        console.error(`Failed to update tags for domain ${id}:`, error);
         return NextResponse.json(
-            { error: 'Failed to update tags', message: error instanceof Error ? error.message : 'Unknown' },
+            { error: 'Internal Server Error', message: 'Failed to update tags' },
             { status: 500 }
         );
     }

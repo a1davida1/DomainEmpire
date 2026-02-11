@@ -129,19 +129,23 @@ export async function getDomainGSCSummary(domain: string, days = 28): Promise<GS
         totalImpressions,
         avgCtr: Math.round(avgCtr * 10000) / 10000,
         avgPosition: Math.round(avgPosition * 10) / 10,
-        topQueries: queryRows.map(r => ({
-            query: r.keys[0],
-            clicks: r.clicks,
-            impressions: r.impressions,
-            ctr: Math.round(r.ctr * 10000) / 10000,
-            position: Math.round(r.position * 10) / 10,
-        })),
-        topPages: pageRows.map(r => ({
-            page: r.keys[0],
-            clicks: r.clicks,
-            impressions: r.impressions,
-            ctr: Math.round(r.ctr * 10000) / 10000,
-            position: Math.round(r.position * 10) / 10,
-        })),
+        topQueries: queryRows
+            .filter(r => r.keys.length > 0)
+            .map(r => ({
+                query: r.keys[0],
+                clicks: r.clicks,
+                impressions: r.impressions,
+                ctr: Math.round(r.ctr * 10000) / 10000,
+                position: Math.round(r.position * 10) / 10,
+            })),
+        topPages: pageRows
+            .filter(r => r.keys.length > 0)
+            .map(r => ({
+                page: r.keys[0],
+                clicks: r.clicks,
+                impressions: r.impressions,
+                ctr: Math.round(r.ctr * 10000) / 10000,
+                position: Math.round(r.position * 10) / 10,
+            })),
     };
 }

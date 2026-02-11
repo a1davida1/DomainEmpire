@@ -6,7 +6,7 @@
  */
 
 import { db } from '@/lib/db';
-import { competitors, domains } from '@/lib/db/schema';
+import { competitors, domains, keywords } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { getAIClient } from '@/lib/ai/openrouter';
 
@@ -129,6 +129,7 @@ export async function removeCompetitor(competitorId: string): Promise<boolean> {
 
 /**
  * Get keyword gaps — keywords competitors rank for that we don't target.
+ * Compares competitor keywords against our tracked keywords for this domain.
  */
 export async function findKeywordGaps(domainId: string): Promise<Array<{
     keyword: string;
@@ -136,21 +137,42 @@ export async function findKeywordGaps(domainId: string): Promise<Array<{
     position: number;
     volume: number;
 }>> {
-    const comps = await getCompetitors(domainId);
+    const [comps, ourKeywords] = await Promise.all([
+        getCompetitors(domainId),
+        db.select({ keyword: keywords.keyword })
+            .from(keywords)
+            .where(eq(keywords.domainId, domainId)),
+    ]);
+
+    // Build a set of our keywords (lowercased for comparison)
+    const ourKeywordSet = new Set(ourKeywords.map(k => k.keyword.toLowerCase()));
+
     const gaps: Array<{ keyword: string; competitorDomain: string; position: number; volume: number }> = [];
 
     for (const comp of comps) {
         const topKw = comp.topKeywords as Array<{ keyword: string; position: number; volume: number }>;
         for (const kw of topKw) {
-            gaps.push({
-                keyword: kw.keyword,
-                competitorDomain: comp.competitorDomain,
-                position: kw.position,
-                volume: kw.volume,
-            });
+            // Only include keywords we're NOT already targeting
+            if (!ourKeywordSet.has(kw.keyword.toLowerCase())) {
+                gaps.push({
+                    keyword: kw.keyword,
+                    competitorDomain: comp.competitorDomain,
+                    position: kw.position,
+                    volume: kw.volume,
+                });
+            }
         }
     }
 
-    // Sort by volume (highest opportunity first)
-    return gaps.sort((a, b) => b.volume - a.volume);
+    // Deduplicate by keyword (keep highest volume entry)
+    const seen = new Map<string, typeof gaps[0]>();
+    for (const gap of gaps) {
+        const key = gap.keyword.toLowerCase();
+        const existing = seen.get(key);
+        if (!existing || gap.volume > existing.volume) {
+            seen.set(key, gap);
+        }
+    }
+
+    return Array.from(seen.values()).sort((a, b) => b.volume - a.volume);
 }

@@ -161,6 +161,11 @@ export async function getTopPages(domain: string, days = 30, limit = 20): Promis
             accountId: config.accountId, startDate, endDate, projectName, limit,
         });
 
+        if (result.errors?.length) {
+            console.error('Cloudflare GraphQL errors (top pages):', result.errors);
+            return [];
+        }
+
         const groups = result.data?.viewer?.accounts?.[0]?.pagesProjectsAnalyticsAdaptiveGroups;
         if (!groups) return [];
 

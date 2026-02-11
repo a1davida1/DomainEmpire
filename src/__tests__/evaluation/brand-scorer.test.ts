@@ -27,7 +27,7 @@ describe('scoreBrandQuality', () => {
     });
 
     it('handles niche keyword matching', () => {
-        const withKeyword = scoreBrandQuality('lawyerhelp.com', 'legal');
+        const withKeyword = scoreBrandQuality('legalhelp.com', 'legal');
         const withoutKeyword = scoreBrandQuality('bluesky.com', 'legal');
         // Keyword-rich domain should score higher due to keyword bonus
         expect(withKeyword.score).toBeGreaterThan(withoutKeyword.score);

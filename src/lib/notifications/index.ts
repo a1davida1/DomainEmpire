@@ -35,6 +35,25 @@ export async function createNotification(options: CreateNotificationOptions): Pr
         sendEmail = false,
     } = options;
 
+    // Deduplicate: skip if same type+title+domainId exists unread in last 24h
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const conditions = [
+        eq(notifications.type, type),
+        eq(notifications.title, title),
+        eq(notifications.isRead, false),
+        sql`${notifications.createdAt} > ${oneDayAgo}`,
+    ];
+    if (domainId) conditions.push(eq(notifications.domainId, domainId));
+
+    const existing = await db.select({ id: notifications.id })
+        .from(notifications)
+        .where(and(...conditions))
+        .limit(1);
+
+    if (existing.length > 0) {
+        return existing[0].id;
+    }
+
     const [notification] = await db.insert(notifications).values({
         type,
         severity,

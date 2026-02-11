@@ -152,15 +152,12 @@ async function startWorker() {
 
                 if (jobs.length > 0) {
                     console.log(`[Worker] Acquired ${jobs.length} new jobs`);
-                    // Process in parallel (fire and forget promise, verified by polling)
-                    // Process in parallel and wait for all to settle
-                    const results = await Promise.allSettled(jobs.map(job => processJob(job)));
-
-                    // Log any unhandled rejections
-                    results.forEach((result, index) => {
-                        if (result.status === 'rejected') {
-                            console.error(`[Worker] Unhandled error processing job ${jobs[index].id}:`, result.reason);
-                        }
+                    // Launch processing without awaiting (fire and forget).
+                    // This allows the worker to continue polling while jobs run.
+                    jobs.forEach(job => {
+                        processJob(job).catch(err => {
+                            console.error(`[Worker] Unhandled error processing job ${job.id}:`, err);
+                        });
                     });
                 }
             }

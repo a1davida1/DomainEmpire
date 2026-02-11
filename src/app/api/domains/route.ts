@@ -145,19 +145,10 @@ export async function POST(request: NextRequest) {
                 revLow = Number.parseInt(range[0], 10) || 0;
                 revHigh = Number.parseInt(range[1], 10) || 0;
             } else {
-                const val = Number.parseInt(clean, 10);
-                // "100-" case -> low=100, high=0? Or high=undefined?
-                // Logic based on original: single value -> high = val? No, "100-" implies lower bound.
-                // If original parsed single value, it usually meant exact or upper?
-                // The requested logic: "when one side is missing... treat missing side as undefined or 0... ensure consistent handling"
-                // Let's safe defaults.
-                if (data.estimatedRevenueAtMaturity.endsWith('-')) {
-                    revLow = val || 0;
-                    revHigh = 0; // or null/undefined if schema allowed
-                } else {
-                    revLow = val || 0;
-                    revHigh = val || 0;
-                }
+                // Handle single value or incomplete range
+                const val = Number.parseInt(clean, 10) || 0;
+                revLow = val;
+                revHigh = val;
             }
         }
 

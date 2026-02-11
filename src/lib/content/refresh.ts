@@ -77,7 +77,7 @@ function calculateStaleness(article: {
         }
     } else {
         const daysSinceRefresh = (now - article.lastRefreshedAt.getTime()) / (24 * 60 * 60 * 1000);
-        if (daysSinceRefresh > 180) {
+        if (daysSinceRefresh > 90) {
             score += STALENESS_CONFIG.weights.noRecentRefresh;
             reasons.push(`Last refreshed ${Math.round(daysSinceRefresh)} days ago`);
         }
@@ -165,7 +165,8 @@ export async function checkAndRefreshStaleContent(): Promise<{
     const stale = await detectStaleArticles();
     let refreshQueued = 0;
 
-    for (const article of stale.slice(0, 5)) {
+    // Queue top 20 stale articles per run (sorted by staleness, most stale first)
+    for (const article of stale.slice(0, 20)) {
         try {
             await queueContentRefresh(article.id);
             refreshQueued++;

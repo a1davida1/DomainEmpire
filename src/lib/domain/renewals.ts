@@ -62,26 +62,38 @@ async function getRdapExpiry(domain: string): Promise<string | null> {
 /**
  * Update renewal dates for all domains from registrar APIs.
  */
-export async function syncRenewalDates(): Promise<number> {
-    const allDomains = await db.select({
+export async function syncRenewalDates(domainId?: string): Promise<number> {
+    const query = db.select({
         id: domains.id, domain: domains.domain, renewalDate: domains.renewalDate,
     }).from(domains);
 
+    if (domainId) {
+        query.where(eq(domains.id, domainId));
+    }
+
+    const allDomains = await query;
     let updated = 0;
 
-    for (const d of allDomains) {
-        const gdExpiry = await getGoDaddyExpiry(d.domain);
-        const expiryStr = gdExpiry?.expires || await getRdapExpiry(d.domain);
+    // Process in batches of 5 for concurrency without overwhelming APIs
+    const BATCH_SIZE = 5;
+    for (let i = 0; i < allDomains.length; i += BATCH_SIZE) {
+        const batch = allDomains.slice(i, i + BATCH_SIZE);
+        const results = await Promise.allSettled(
+            batch.map(async (d) => {
+                const gdExpiry = await getGoDaddyExpiry(d.domain);
+                const expiryStr = gdExpiry?.expires || await getRdapExpiry(d.domain);
 
-        if (expiryStr) {
-            const renewalDate = new Date(expiryStr);
-            if (!isNaN(renewalDate.getTime())) {
-                await db.update(domains).set({ renewalDate }).where(eq(domains.id, d.id));
-                updated++;
-            }
-        }
-
-        await new Promise(resolve => setTimeout(resolve, 500));
+                if (expiryStr) {
+                    const renewalDate = new Date(expiryStr);
+                    if (!Number.isNaN(renewalDate.getTime())) {
+                        await db.update(domains).set({ renewalDate }).where(eq(domains.id, d.id));
+                        return true;
+                    }
+                }
+                return false;
+            })
+        );
+        updated += results.filter(r => r.status === 'fulfilled' && r.value).length;
     }
 
     return updated;

@@ -18,10 +18,12 @@ if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) 
     });
 }
 
-// Fallback in-memory rate limiter for local dev
+// Fallback in-memory rate limiter for local dev with periodic cleanup
 const memoryRateLimit = new Map<string, { count: number; resetTime: number }>();
 const RATE_LIMIT_WINDOW = 60 * 1000;
 const MAX_REQUESTS = 100;
+const CLEANUP_INTERVAL = 30_000;
+let lastCleanup = Date.now();
 
 function checkMemoryRateLimit(ip: string): boolean {
     const now = Date.now();
@@ -34,9 +36,11 @@ function checkMemoryRateLimit(ip: string): boolean {
         memoryRateLimit.set(ip, { count: 1, resetTime: now + RATE_LIMIT_WINDOW });
     }
 
-    if (memoryRateLimit.size > 10000) {
+    // Periodic cleanup every 30s to prevent memory leak
+    if (now - lastCleanup > CLEANUP_INTERVAL) {
+        lastCleanup = now;
         for (const [key, val] of memoryRateLimit.entries()) {
-            if (Date.now() > val.resetTime) memoryRateLimit.delete(key);
+            if (now > val.resetTime) memoryRateLimit.delete(key);
         }
     }
 
@@ -49,7 +53,7 @@ export async function middleware(request: NextRequest) {
         request.headers.get('cf-connecting-ip') ||
         request.headers.get('x-real-ip') ||
         request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-        'unknown';
+        'anonymous';
 
     // Only rate limit API routes
     if (request.nextUrl.pathname.startsWith('/api')) {
@@ -58,12 +62,18 @@ export async function middleware(request: NextRequest) {
             if (!success) {
                 return new NextResponse('Too Many Requests', {
                     status: 429,
-                    headers: { 'X-RateLimit-Remaining': String(remaining) },
+                    headers: {
+                        'X-RateLimit-Remaining': String(remaining),
+                        'Retry-After': '60',
+                    },
                 });
             }
         } else {
             if (!checkMemoryRateLimit(ip)) {
-                return new NextResponse('Too Many Requests', { status: 429 });
+                return new NextResponse('Too Many Requests', {
+                    status: 429,
+                    headers: { 'Retry-After': '60' },
+                });
             }
         }
     }
@@ -74,6 +84,7 @@ export async function middleware(request: NextRequest) {
     response.headers.set('X-Content-Type-Options', 'nosniff');
     response.headers.set('X-Frame-Options', 'DENY');
     response.headers.set('X-XSS-Protection', '1; mode=block');
+    response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
 
     return response;
 }

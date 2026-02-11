@@ -9,7 +9,11 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const domain = searchParams.get('domain');
-    const days = parseInt(searchParams.get('days') || '28', 10);
+    const days = Number.parseInt(searchParams.get('days') || '28', 10);
+
+    if (Number.isNaN(days) || days <= 0) {
+        return NextResponse.json({ error: 'Invalid days parameter' }, { status: 400 });
+    }
 
     if (!domain) {
         return NextResponse.json({ error: 'domain parameter is required' }, { status: 400 });
@@ -22,8 +26,9 @@ export async function GET(request: NextRequest) {
         }
         return NextResponse.json(summary);
     } catch (error) {
+        console.error(`GSC API error for ${domain}:`, error);
         return NextResponse.json(
-            { error: 'Failed to fetch GSC data', message: error instanceof Error ? error.message : 'Unknown' },
+            { error: 'Internal Server Error', message: 'Failed to fetch GSC data' },
             { status: 500 }
         );
     }

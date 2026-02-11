@@ -51,7 +51,6 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/marked": "^5.0.2",
     "@types/node": "^20",
     "@types/nodemailer": "^7.0.9",
     "@types/react": "^19",
