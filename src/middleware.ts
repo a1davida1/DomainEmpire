@@ -1,53 +1,76 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { Ratelimit } from '@upstash/ratelimit';
+import { Redis } from '@upstash/redis';
 
-// Simple in-memory rate limiter
-// Note: In a distributed environment (Vercel/AWS), this should be replaced with Redis (e.g., Upstash)
-const rateLimit = new Map<string, { count: number; resetTime: number }>();
+// Use Upstash Redis if configured, otherwise fall back to in-memory
+let ratelimit: Ratelimit | null = null;
 
-const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
-const MAX_REQUESTS = 100; // 100 requests per minute
+if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
+    ratelimit = new Ratelimit({
+        redis: new Redis({
+            url: process.env.UPSTASH_REDIS_REST_URL,
+            token: process.env.UPSTASH_REDIS_REST_TOKEN,
+        }),
+        limiter: Ratelimit.slidingWindow(100, '1 m'),
+        analytics: true,
+        prefix: 'domain-empire',
+    });
+}
 
-export function middleware(request: NextRequest) {
-    // Extract client IP - prefer platform-provided real IP when available
-    // Note: x-forwarded-for is untrusted in production unless behind configured trusted proxies
+// Fallback in-memory rate limiter for local dev
+const memoryRateLimit = new Map<string, { count: number; resetTime: number }>();
+const RATE_LIMIT_WINDOW = 60 * 1000;
+const MAX_REQUESTS = 100;
+
+function checkMemoryRateLimit(ip: string): boolean {
+    const now = Date.now();
+    const record = memoryRateLimit.get(ip);
+
+    if (record && now < record.resetTime) {
+        if (record.count >= MAX_REQUESTS) return false;
+        record.count++;
+    } else {
+        memoryRateLimit.set(ip, { count: 1, resetTime: now + RATE_LIMIT_WINDOW });
+    }
+
+    if (memoryRateLimit.size > 10000) {
+        for (const [key, val] of memoryRateLimit.entries()) {
+            if (Date.now() > val.resetTime) memoryRateLimit.delete(key);
+        }
+    }
+
+    return true;
+}
+
+export async function middleware(request: NextRequest) {
     const ip =
-        (request as any).ip ||                                            // Vercel/platform-provided
-        request.headers.get('cf-connecting-ip') ||                        // Cloudflare
-        request.headers.get('x-real-ip') ||                               // nginx
-        request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||  // First IP in chain
+        (request as unknown as { ip?: string }).ip ||
+        request.headers.get('cf-connecting-ip') ||
+        request.headers.get('x-real-ip') ||
+        request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
         'unknown';
 
     // Only rate limit API routes
     if (request.nextUrl.pathname.startsWith('/api')) {
-        const now = Date.now();
-        const record = rateLimit.get(ip);
-
-        if (record && now < record.resetTime) {
-            if (record.count >= MAX_REQUESTS) {
-                return new NextResponse('Too Many Requests', { status: 429 });
+        if (ratelimit) {
+            const { success, remaining } = await ratelimit.limit(ip);
+            if (!success) {
+                return new NextResponse('Too Many Requests', {
+                    status: 429,
+                    headers: { 'X-RateLimit-Remaining': String(remaining) },
+                });
             }
-            record.count++;
         } else {
-            rateLimit.set(ip, {
-                count: 1,
-                resetTime: now + RATE_LIMIT_WINDOW,
-            });
-        }
-
-        // Cleanup old entries periodically (simple optimization)
-        if (rateLimit.size > 10000) {
-            for (const [key, val] of rateLimit.entries()) {
-                if (Date.now() > val.resetTime) {
-                    rateLimit.delete(key);
-                }
+            if (!checkMemoryRateLimit(ip)) {
+                return new NextResponse('Too Many Requests', { status: 429 });
             }
         }
     }
 
     const response = NextResponse.next();
 
-    // Add security headers
+    // Security headers
     response.headers.set('X-Content-Type-Options', 'nosniff');
     response.headers.set('X-Frame-Options', 'DENY');
     response.headers.set('X-XSS-Protection', '1; mode=block');

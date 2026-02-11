@@ -97,12 +97,22 @@ async function processJob(job: typeof contentQueue.$inferSelect) {
         console.error(`[Worker] Failed job ${job.id}:`, error);
 
         // Worker handles failure updates (Single Source of Truth)
+        // Conditional retry logic
+        const attempts = (job.attempts || 0) + 1;
+        const maxAttempts = job.maxAttempts || 3;
+        const nextStatus = attempts < maxAttempts ? 'pending' : 'failed';
+        const retryTime = nextStatus === 'pending'
+            ? new Date(Date.now() + Math.pow(2, attempts) * 60 * 1000)
+            : undefined;
+
         await db
             .update(contentQueue)
             .set({
-                status: 'failed',
+                status: nextStatus,
                 errorMessage: error instanceof Error ? error.message : String(error),
-                attempts: sql`${contentQueue.attempts} + 1`,
+                attempts: attempts,
+                scheduledFor: retryTime,
+                lockedUntil: null
             })
             .where(eq(contentQueue.id, job.id));
 
@@ -143,7 +153,15 @@ async function startWorker() {
                 if (jobs.length > 0) {
                     console.log(`[Worker] Acquired ${jobs.length} new jobs`);
                     // Process in parallel (fire and forget promise, verified by polling)
-                    jobs.forEach(job => processJob(job));
+                    // Process in parallel and wait for all to settle
+                    const results = await Promise.allSettled(jobs.map(job => processJob(job)));
+
+                    // Log any unhandled rejections
+                    results.forEach((result, index) => {
+                        if (result.status === 'rejected') {
+                            console.error(`[Worker] Unhandled error processing job ${jobs[index].id}:`, result.reason);
+                        }
+                    });
                 }
             }
 

@@ -175,7 +175,7 @@ export default async function ArticlesPage({ searchParams }: PageProps) {
                     asChild={page > 1}
                 >
                     {page > 1 ? (
-                        <Link href={`/dashboard/content/articles?page=${page - 1}&q=${query}${params.status ? `&status=${params.status}` : ''}`}>
+                        <Link href={`/dashboard/content/articles?page=${page - 1}&q=${encodeURIComponent(query)}${params.status ? `&status=${params.status}` : ''}`}>
                             <ChevronLeft className="mr-2 h-4 w-4" />
                             Previous
                         </Link>
@@ -196,7 +196,7 @@ export default async function ArticlesPage({ searchParams }: PageProps) {
                     asChild={allArticles.length >= limit}
                 >
                     {allArticles.length >= limit ? (
-                        <Link href={`/dashboard/content/articles?page=${page + 1}&q=${query}${params.status ? `&status=${params.status}` : ''}`}>
+                        <Link href={`/dashboard/content/articles?page=${page + 1}&q=${encodeURIComponent(query)}${params.status ? `&status=${params.status}` : ''}`}>
                             Next
                             <ChevronRight className="ml-2 h-4 w-4" />
                         </Link>

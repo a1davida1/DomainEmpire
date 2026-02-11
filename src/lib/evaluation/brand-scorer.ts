@@ -93,11 +93,11 @@ function countSyllables(word: string): number {
     if (cleaned.length <= 3) return 1;
 
     let count = 0;
-    const vowels = 'aeiouy';
+    const vowels = /[aeiouy]/;
     let prevVowel = false;
 
     for (const char of cleaned) {
-        const isVowel = vowels.includes(char);
+        const isVowel = vowels.test(char);
         if (isVowel && !prevVowel) count++;
         prevVowel = isVowel;
     }
@@ -105,7 +105,7 @@ function countSyllables(word: string): number {
     // Adjust for silent e
     if (cleaned.endsWith('e') && count > 1) count--;
     // Adjust for -le endings
-    if (cleaned.endsWith('le') && cleaned.length > 3 && !vowels.includes(cleaned[cleaned.length - 3])) count++;
+    if (cleaned.endsWith('le') && cleaned.length > 3 && !vowels.test(cleaned[cleaned.length - 3])) count++;
 
     return Math.max(1, count);
 }
@@ -119,6 +119,7 @@ function isPronounceable(name: string): boolean {
 
     // Check vowel distribution — names with no vowels are unpronounceable
     const vowelCount = (cleaned.match(/[aeiouy]/gi) || []).length;
+    if (cleaned.length === 0) return false;
     const ratio = vowelCount / cleaned.length;
 
     return ratio >= 0.2 && ratio <= 0.8;

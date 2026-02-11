@@ -372,7 +372,7 @@ async function logApiCall(stage: string, result: { model: string; inputTokens: n
         outputTokens: result.outputTokens,
         cost: result.cost,
         durationMs: result.durationMs,
-    }).catch(() => {}); // Don't fail on log error
+    }).catch(() => { }); // Don't fail on log error
 }
 
 // ─── Signal Builders (with fallbacks) ───────────────────────
@@ -792,8 +792,8 @@ function buildQuickResult(
 
     const recommendation: EvaluationResult['recommendation'] =
         compositeScore >= 75 ? 'buy' :
-        compositeScore >= 50 ? 'conditional' :
-        compositeScore >= 30 ? 'pass' : 'hard_pass';
+            compositeScore >= 50 ? 'conditional' :
+                compositeScore >= 30 ? 'pass' : 'hard_pass';
 
     const articlesNeeded = (nicheProfile.articlesForAuthority[0] + nicheProfile.articlesForAuthority[1]) / 2;
     const contentCost = articlesNeeded * 7.5;
@@ -987,25 +987,31 @@ async function persistEvaluation(result: EvaluationResult, _niche: string): Prom
         decision: result.recommendation === 'strong_buy' || result.recommendation === 'buy'
             ? 'buy' as const
             : result.recommendation === 'conditional'
-            ? 'watchlist' as const
-            : 'pass' as const,
+                ? 'watchlist' as const
+                : 'pass' as const,
         decisionReason: result.aiSummary,
     };
 
     if (existing.length > 0) {
-        // Append to evaluation history
-        const prevHistory = (existing[0].evaluationHistory as Array<typeof historyEntry>) || [];
+        // Append to evaluation history atomically
         await db.update(domainResearch)
             .set({
                 ...data,
-                evaluationHistory: [...prevHistory, historyEntry],
+                evaluationHistory: sql`${domainResearch.evaluationHistory} || ${JSON.stringify([historyEntry])}::jsonb`
             })
             .where(eq(domainResearch.id, existing[0].id));
     } else {
         await db.insert(domainResearch).values({
             ...data,
             evaluationHistory: [historyEntry],
-        });
+        })
+            .onConflictDoUpdate({
+                target: domainResearch.domain,
+                set: {
+                    ...data,
+                    evaluationHistory: sql`${domainResearch.evaluationHistory} || ${JSON.stringify([historyEntry])}::jsonb`
+                }
+            });
     }
 }
 

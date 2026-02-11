@@ -26,10 +26,11 @@ export const MODEL_CONFIG = {
 } as const;
 
 // Pricing per 1K tokens (approximate, check OpenRouter for current)
-const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+const MODEL_PRICING: Record<string, { input: number; output: number; perRequestFee?: number }> = {
     'x-ai/grok-3-fast': { input: 0.005, output: 0.025 },
     'anthropic/claude-sonnet-4-5-20250929': { input: 0.003, output: 0.015 },
     'anthropic/claude-3-5-haiku-20241022': { input: 0.0008, output: 0.004 },
+    'perplexity/sonar-reasoning': { input: 0.001, output: 0.005, perRequestFee: 0.01 },
 };
 
 export interface AIResponse {

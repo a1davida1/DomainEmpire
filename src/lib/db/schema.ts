@@ -183,6 +183,10 @@ export const articles = pgTable('articles', {
     bounceRate: real('bounce_rate'),
     revenue30d: real('revenue_30d').default(0),
 
+    // Content freshness
+    lastRefreshedAt: timestamp('last_refreshed_at'),
+    stalenessScore: real('staleness_score'),
+
     // Timestamps
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow(),
@@ -250,7 +254,8 @@ export const contentQueue = pgTable('content_queue', {
             'generate_outline', 'generate_draft', 'humanize',
             'seo_optimize', 'generate_meta', 'deploy',
             'fetch_analytics', 'keyword_research', 'bulk_seed',
-            'research', 'evaluate'
+            'research', 'evaluate', 'content_refresh',
+            'fetch_gsc', 'check_backlinks', 'check_renewals'
         ]
     }).notNull(),
 
@@ -291,7 +296,7 @@ export const contentQueue = pgTable('content_queue', {
 // ===========================================
 export const domainResearch = pgTable('domain_research', {
     id: uuid('id').primaryKey().defaultRandom(),
-    domain: text('domain').notNull(),
+    domain: text('domain').notNull().unique(),
     tld: text('tld').notNull(),
 
     // Availability
@@ -399,6 +404,110 @@ export const apiCallLogs = pgTable('api_call_logs', {
 });
 
 // ===========================================
+// EXPENSES: Track all portfolio costs for ROI calculations
+// ===========================================
+export const expenses = pgTable('expenses', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    domainId: uuid('domain_id').references(() => domains.id, { onDelete: 'set null' }),
+
+    category: text('category', {
+        enum: ['domain_registration', 'domain_renewal', 'hosting', 'content', 'ai_api', 'tools', 'design', 'other']
+    }).notNull(),
+    description: text('description').notNull(),
+    amount: real('amount').notNull(),
+    currency: text('currency').default('USD'),
+    recurring: boolean('recurring').default(false),
+    recurringInterval: text('recurring_interval', {
+        enum: ['monthly', 'quarterly', 'yearly']
+    }),
+
+    expenseDate: timestamp('expense_date', { mode: 'date' }).notNull(),
+    createdAt: timestamp('created_at').defaultNow(),
+});
+
+// ===========================================
+// NOTIFICATIONS: In-app notifications and alerts
+// ===========================================
+export const notifications = pgTable('notifications', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    domainId: uuid('domain_id').references(() => domains.id, { onDelete: 'cascade' }),
+
+    type: text('type', {
+        enum: ['renewal_warning', 'job_failed', 'deploy_failed', 'traffic_drop',
+            'revenue_milestone', 'content_stale', 'domain_expiring', 'backlink_lost', 'info']
+    }).notNull(),
+    severity: text('severity', {
+        enum: ['info', 'warning', 'critical']
+    }).notNull().default('info'),
+
+    title: text('title').notNull(),
+    message: text('message').notNull(),
+    actionUrl: text('action_url'),
+    isRead: boolean('is_read').default(false),
+    emailSent: boolean('email_sent').default(false),
+
+    createdAt: timestamp('created_at').defaultNow(),
+});
+
+// ===========================================
+// COMPETITORS: Track competitor domains and their performance
+// ===========================================
+export const competitors = pgTable('competitors', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    domainId: uuid('domain_id').notNull().references(() => domains.id, { onDelete: 'cascade' }),
+    competitorDomain: text('competitor_domain').notNull(),
+
+    // Tracked metrics
+    estimatedTraffic: integer('estimated_traffic'),
+    domainAuthority: integer('domain_authority'),
+    totalKeywords: integer('total_keywords'),
+    topKeywords: jsonb('top_keywords').$type<Array<{
+        keyword: string;
+        position: number;
+        volume: number;
+    }>>().default([]),
+
+    // Content analysis
+    totalPages: integer('total_pages'),
+    avgContentLength: integer('avg_content_length'),
+    publishFrequency: text('publish_frequency'),
+
+    notes: text('notes'),
+
+    lastCheckedAt: timestamp('last_checked_at'),
+    createdAt: timestamp('created_at').defaultNow(),
+});
+
+// ===========================================
+// BACKLINK SNAPSHOTS: Track backlink profile over time
+// ===========================================
+export const backlinkSnapshots = pgTable('backlink_snapshots', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    domainId: uuid('domain_id').notNull().references(() => domains.id, { onDelete: 'cascade' }),
+
+    totalBacklinks: integer('total_backlinks').default(0),
+    referringDomains: integer('referring_domains').default(0),
+    domainAuthority: integer('domain_authority'),
+
+    topBacklinks: jsonb('top_backlinks').$type<Array<{
+        source: string;
+        target: string;
+        anchor: string;
+        authority: number;
+        firstSeen: string;
+    }>>().default([]),
+
+    lostBacklinks: jsonb('lost_backlinks').$type<Array<{
+        source: string;
+        target: string;
+        lostDate: string;
+    }>>().default([]),
+
+    snapshotDate: timestamp('snapshot_date', { mode: 'date' }).notNull(),
+    createdAt: timestamp('created_at').defaultNow(),
+});
+
+// ===========================================
 // RELATIONS
 // ===========================================
 export const domainsRelations = relations(domains, ({ many, one }) => ({
@@ -406,6 +515,10 @@ export const domainsRelations = relations(domains, ({ many, one }) => ({
     articles: many(articles),
     monetizationProfile: one(monetizationProfiles),
     revenueSnapshots: many(revenueSnapshots),
+    expenses: many(expenses),
+    notifications: many(notifications),
+    competitors: many(competitors),
+    backlinkSnapshots: many(backlinkSnapshots),
     redirectTarget: one(domains, {
         fields: [domains.redirectTargetId],
         references: [domains.id],
@@ -437,6 +550,34 @@ export const monetizationProfilesRelations = relations(monetizationProfiles, ({ 
     }),
 }));
 
+export const expensesRelations = relations(expenses, ({ one }) => ({
+    domain: one(domains, {
+        fields: [expenses.domainId],
+        references: [domains.id],
+    }),
+}));
+
+export const notificationsRelations = relations(notifications, ({ one }) => ({
+    domain: one(domains, {
+        fields: [notifications.domainId],
+        references: [domains.id],
+    }),
+}));
+
+export const competitorsRelations = relations(competitors, ({ one }) => ({
+    domain: one(domains, {
+        fields: [competitors.domainId],
+        references: [domains.id],
+    }),
+}));
+
+export const backlinkSnapshotsRelations = relations(backlinkSnapshots, ({ one }) => ({
+    domain: one(domains, {
+        fields: [backlinkSnapshots.domainId],
+        references: [domains.id],
+    }),
+}));
+
 // ===========================================
 // TYPE EXPORTS
 // ===========================================
@@ -451,3 +592,8 @@ export type ContentQueueJob = typeof contentQueue.$inferSelect;
 export type DomainResearch = typeof domainResearch.$inferSelect;
 export type RevenueSnapshot = typeof revenueSnapshots.$inferSelect;
 export type ApiCallLog = typeof apiCallLogs.$inferSelect;
+export type Expense = typeof expenses.$inferSelect;
+export type NewExpense = typeof expenses.$inferInsert;
+export type Notification = typeof notifications.$inferSelect;
+export type Competitor = typeof competitors.$inferSelect;
+export type BacklinkSnapshot = typeof backlinkSnapshots.$inferSelect;

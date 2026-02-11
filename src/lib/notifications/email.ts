@@ -1,0 +1,68 @@
+/**
+ * Email Notification Transport
+ *
+ * Sends email alerts for critical notifications using nodemailer.
+ *
+ * Required env vars (all optional - email disabled if not set):
+ * - SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS
+ * - NOTIFICATION_EMAIL (recipient)
+ */
+
+import nodemailer from 'nodemailer';
+
+interface EmailOptions {
+    type: string;
+    severity: string;
+    title: string;
+    message: string;
+}
+
+function getTransporter() {
+    const host = process.env.SMTP_HOST;
+    const port = parseInt(process.env.SMTP_PORT || '587', 10);
+    const user = process.env.SMTP_USER;
+    const pass = process.env.SMTP_PASS;
+    if (!host || !user || !pass) return null;
+
+    return nodemailer.createTransport({
+        host,
+        port,
+        secure: port === 465,
+        auth: { user, pass },
+    });
+}
+
+/**
+ * Send a notification email. No-ops if SMTP is not configured.
+ */
+export async function sendNotificationEmail(options: EmailOptions): Promise<boolean> {
+    const transporter = getTransporter();
+    const recipient = process.env.NOTIFICATION_EMAIL;
+    if (!transporter || !recipient) return false;
+
+    const severityIcon = options.severity === 'critical' ? '[CRITICAL]'
+        : options.severity === 'warning' ? '[WARNING]' : '[INFO]';
+
+    try {
+        await transporter.sendMail({
+            from: process.env.SMTP_USER,
+            to: recipient,
+            subject: `${severityIcon} Domain Empire: ${options.title}`,
+            html: `
+                <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+                    <h2 style="color: #1a1a1a;">${options.title}</h2>
+                    <p style="color: #4a4a4a; font-size: 16px;">${options.message}</p>
+                    <hr style="border: 1px solid #eee;">
+                    <p style="color: #888; font-size: 12px;">
+                        Type: ${options.type} | Severity: ${options.severity}
+                    </p>
+                </div>
+            `,
+            text: `${options.title}\n\n${options.message}\n\nType: ${options.type} | Severity: ${options.severity}`,
+        });
+        return true;
+    } catch (error) {
+        console.error('Failed to send email:', error);
+        return false;
+    }
+}

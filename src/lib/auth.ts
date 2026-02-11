@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
-import { createHmac, randomBytes } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 const AUTH_COOKIE_NAME = 'domain-empire-auth';
 
@@ -21,14 +21,27 @@ export async function verifyAuth(): Promise<boolean> {
     const [nonce, hash] = authToken.value.split(':');
     if (!nonce || !hash) return false;
 
-    const expectedHash = createHmac('sha256', process.env.AUTH_SECRET || 'fallback-secret-change-me')
+    const expectedHash = createHmac('sha256', getAuthSecret())
         .update((process.env.ADMIN_PASSWORD || '') + nonce)
         .digest('hex');
-    return hash === expectedHash;
+
+    const hashBuffer = Buffer.from(hash, 'hex');
+    const expectedBuffer = Buffer.from(expectedHash, 'hex');
+
+    if (hashBuffer.length !== expectedBuffer.length) return false;
+    return timingSafeEqual(hashBuffer, expectedBuffer);
+}
+
+function getAuthSecret(): string {
+    const secret = process.env.AUTH_SECRET;
+    if (!secret && process.env.NODE_ENV === 'production') {
+        throw new Error('AUTH_SECRET must be set in production');
+    }
+    return secret || 'fallback-secret-change-me';
 }
 
 export function hashPassword(password: string): string {
-    const secret = process.env.AUTH_SECRET || 'fallback-secret-change-me';
+    const secret = getAuthSecret();
     return createHmac('sha256', secret).update(password).digest('hex');
 }
 
@@ -45,7 +58,7 @@ export async function createAuthCookie(password: string): Promise<boolean> {
 
     const cookieStore = await cookies();
     const nonce = randomBytes(16).toString('hex');
-    const hash = createHmac('sha256', process.env.AUTH_SECRET || 'fallback-secret-change-me')
+    const hash = createHmac('sha256', getAuthSecret())
         .update(password + nonce)
         .digest('hex');
     const token = `${nonce}:${hash}`;

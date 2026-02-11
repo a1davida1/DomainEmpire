@@ -14,17 +14,10 @@ for (const [key, count] of Object.entries(expectedSignatures)) {
     const fn = (PROMPTS as any)[key];
     // fn.length returns number of arguments expected
     if (fn.length < count) {
-        // Note: fn.length ignores optional parameters if they have defaults, 
-        // but here they are explicit args or optional ? args. 
-        // Optional arguments count in .length ONLY if they are before required ones (which is invalid TS).
-        // Actually, optional args `(a, b?)` -> length is 1.
-        // Wait, `voiceSeed` is optional.
-        // So length might be 4 for article, 4 for comparison, 2 for calculator?
-        // Let's check. Default is to check if it accepts ENOUGH arguments.
-        // We can just log the length.
-        console.log(`PROMPTS.${key} accepts ${fn.length} required arguments`);
+        console.error(`ERROR: PROMPTS.${key} requires ${count} args, but accepts ${fn.length}`);
+        errors++;
     } else {
-        console.log(`PROMPTS.${key} accepts ${fn.length}+ arguments`);
+        console.log(`PROMPTS.${key} signature OK (${fn.length} args)`);
     }
 }
 
@@ -45,7 +38,9 @@ try {
         errors++;
     }
 
-    console.log('PROMPTS.costGuide content verification: PASS');
+    if (errors === 0) {
+        console.log('PROMPTS.costGuide content verification: PASS');
+    }
 
 } catch (e) {
     console.error('Verification failed:', e);

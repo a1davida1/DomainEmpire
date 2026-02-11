@@ -103,7 +103,7 @@ export async function updateNameservers(
         throw new Error(`At least 2 nameservers required, got ${nameservers.length}`);
     }
 
-    const response = await gdFetch(`/domains/${domain}`, {
+    const response = await gdFetch(`/domains/${encodeURIComponent(domain)}`, {
         method: 'PATCH',
         body: JSON.stringify({ nameServers: nameservers }),
     });
@@ -128,7 +128,7 @@ export async function addTxtRecord(
     value: string,
     ttl = 3600
 ): Promise<void> {
-    const response = await gdFetch(`/domains/${domain}/records/TXT/${name}`, {
+    const response = await gdFetch(`/domains/${encodeURIComponent(domain)}/records/TXT/${encodeURIComponent(name)}`, {
         method: 'PUT',
         body: JSON.stringify([{ data: value, ttl }]),
     });
@@ -144,7 +144,7 @@ export async function addTxtRecord(
  */
 export async function verifyDomainAccess(domain: string): Promise<boolean> {
     try {
-        const response = await gdFetch(`/domains/${domain}`);
+        const response = await gdFetch(`/domains/${encodeURIComponent(domain)}`);
         return response.ok;
     } catch {
         return false;

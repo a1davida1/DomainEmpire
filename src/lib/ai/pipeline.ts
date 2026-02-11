@@ -144,6 +144,11 @@ export async function processDraftJob(jobId: string): Promise<void> {
     // Load outline from DB to avoid payload bloat
     const articleRecord = await db.select().from(articles).where(eq(articles.id, job.articleId!)).limit(1);
     const article = articleRecord[0];
+
+    if (!article) {
+        throw new Error(`Article not found: ${job.articleId}`);
+    }
+
     const outline = article.headerStructure as any; // Cast for prompt construction
 
     if (!outline) throw new Error('Outline not found for article');
@@ -151,6 +156,11 @@ export async function processDraftJob(jobId: string): Promise<void> {
     // Fetch domain for voice seed
     const domainRecord = await db.select().from(domains).where(eq(domains.id, job.domainId!)).limit(1);
     const domain = domainRecord[0];
+
+    if (!domain) {
+        throw new Error(`Domain not found: ${job.domainId}`);
+    }
+
     const voiceSeed = await getOrCreateVoiceSeed(job.domainId!, domain.domain, domain.niche || 'general');
 
     const contentType = getContentType(payload.targetKeyword);
@@ -229,7 +239,11 @@ export async function processHumanizeJob(jobId: string): Promise<void> {
     // Fetch domain for voice seed persistence
     const domainRecord = await db.select().from(domains).where(eq(domains.id, job.domainId!)).limit(1);
     const domain = domainRecord[0];
-    const voiceSeed = await getOrCreateVoiceSeed(job.domainId!, domain.domain, domain.niche || 'general');
+
+    // Safely handle missing domain
+    const voiceSeed = domain
+        ? await getOrCreateVoiceSeed(job.domainId!, domain.domain, domain.niche || 'general')
+        : undefined;
 
     const response = await ai.generate(
         'humanization',
@@ -369,10 +383,12 @@ export async function processMetaJob(jobId: string): Promise<void> {
         domainId: job.domainId,
     });
 
+    const safeSlug = slugify(response.data.suggestedSlug || response.data.title || 'untitled');
+
     await db.update(articles).set({
         title: response.data.title,
         metaDescription: response.data.metaDescription,
-        slug: response.data.suggestedSlug,
+        slug: safeSlug,
         status: 'review', // Ready for human review
         generationPasses: 4,
     }).where(eq(articles.id, job.articleId!));

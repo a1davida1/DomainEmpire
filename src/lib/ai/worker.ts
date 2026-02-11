@@ -24,12 +24,16 @@
  * - fetch_analytics: Pull analytics data
  */
 
-import { db, contentQueue, articles } from '@/lib/db';
+import { db, contentQueue, articles, domains } from '@/lib/db';
 import { eq, and, lte, isNull, or, sql, asc, desc, count } from 'drizzle-orm';
 import { processOutlineJob, processDraftJob, processHumanizeJob, processSeoOptimizeJob, processMetaJob, processKeywordResearchJob, processResearchJob } from './pipeline';
 import { processDeployJob } from '@/lib/deploy/processor';
 import { checkContentSchedule } from './scheduler';
 import { evaluateDomain } from '@/lib/evaluation/evaluator';
+import { checkAndRefreshStaleContent } from '@/lib/content/refresh';
+import { checkRenewals } from '@/lib/domain/renewals';
+import { checkBacklinks } from '@/lib/analytics/backlinks';
+import { getDomainGSCSummary } from '@/lib/analytics/search-console';
 
 const LOCK_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 const JOB_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes max per job
@@ -257,17 +261,102 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
             await processDeployJob(job.id);
             break;
         case 'evaluate': {
-            const evalPayload = job.payload as { domain: string; acquisitionCost?: number; niche?: string };
-            const evalResult = await evaluateDomain(evalPayload.domain, {
-                acquisitionCost: evalPayload.acquisitionCost,
-                niche: evalPayload.niche,
-            });
-            await markJobComplete(job.id, `Score: ${evalResult.compositeScore}/100 — ${evalResult.recommendation}`);
+            const evalPayload = job.payload as { domain: string; acquisitionCost?: number; niche?: string } | undefined;
+
+            if (!evalPayload || typeof evalPayload.domain !== 'string' || !evalPayload.domain) {
+                await markJobFailed(job.id, 'Invalid payload: domain is required');
+                break;
+            }
+
+            try {
+                const evalResult = await evaluateDomain(evalPayload.domain, {
+                    acquisitionCost: evalPayload.acquisitionCost,
+                    niche: evalPayload.niche,
+                });
+                await markJobComplete(job.id, `Score: ${evalResult.compositeScore}/100 — ${evalResult.recommendation}`);
+            } catch (err) {
+                await markJobFailed(job.id, err instanceof Error ? err.message : String(err));
+            }
             break;
         }
-        case 'fetch_analytics':
-            await markJobComplete(job.id, 'Analytics fetch not yet implemented');
+        case 'fetch_analytics': {
+            // Fetch Cloudflare + GSC analytics for the domain
+            if (job.domainId) {
+                const domainRecord = await db.select({ domain: domains.domain })
+                    .from(domains).where(eq(domains.id, job.domainId)).limit(1);
+                if (domainRecord.length) {
+                    const { getDomainAnalytics } = await import('@/lib/analytics/cloudflare');
+                    const cfData = await getDomainAnalytics(domainRecord[0].domain);
+                    const gscData = await getDomainGSCSummary(domainRecord[0].domain);
+                    await markJobComplete(job.id, `CF: ${cfData.length} days, GSC: ${gscData ? 'ok' : 'n/a'}`);
+                } else {
+                    await markJobFailed(job.id, 'Domain not found');
+                }
+            } else {
+                await markJobFailed(job.id, 'No domainId provided');
+            }
             break;
+        }
+        case 'content_refresh': {
+            // Refresh a stale article — re-run research + regeneration
+            if (job.articleId) {
+                const articleRecord = await db.select({ id: articles.id, domainId: articles.domainId, targetKeyword: articles.targetKeyword })
+                    .from(articles).where(eq(articles.id, job.articleId)).limit(1);
+                if (articleRecord.length) {
+                    const article = articleRecord[0];
+                    // Queue a research job which will chain into outline -> draft -> humanize -> SEO -> meta
+                    const domainRecord = await db.select({ domain: domains.domain })
+                        .from(domains).where(eq(domains.id, article.domainId)).limit(1);
+                    await db.insert(contentQueue).values({
+                        jobType: 'research',
+                        domainId: article.domainId,
+                        articleId: article.id,
+                        payload: { targetKeyword: article.targetKeyword, domainName: domainRecord[0]?.domain || '' },
+                        status: 'pending',
+                        priority: 3,
+                    });
+                    // Update refresh timestamp
+                    await db.update(articles).set({ lastRefreshedAt: new Date() }).where(eq(articles.id, article.id));
+                    await markJobComplete(job.id, `Queued refresh pipeline for article ${article.id}`);
+                } else {
+                    await markJobFailed(job.id, 'Article not found');
+                }
+            } else {
+                await markJobFailed(job.id, 'No articleId provided');
+            }
+            break;
+        }
+        case 'fetch_gsc': {
+            if (job.domainId) {
+                const domainRecord = await db.select({ domain: domains.domain })
+                    .from(domains).where(eq(domains.id, job.domainId)).limit(1);
+                if (domainRecord.length) {
+                    const summary = await getDomainGSCSummary(domainRecord[0].domain);
+                    await markJobComplete(job.id, summary
+                        ? `Clicks: ${summary.totalClicks}, Impressions: ${summary.totalImpressions}`
+                        : 'GSC not configured or no data');
+                } else {
+                    await markJobFailed(job.id, 'Domain not found');
+                }
+            } else {
+                await markJobFailed(job.id, 'No domainId provided');
+            }
+            break;
+        }
+        case 'check_backlinks': {
+            if (job.domainId) {
+                await checkBacklinks(job.domainId);
+                await markJobComplete(job.id, 'Backlink snapshot saved');
+            } else {
+                await markJobFailed(job.id, 'No domainId provided');
+            }
+            break;
+        }
+        case 'check_renewals': {
+            await checkRenewals();
+            await markJobComplete(job.id, 'Renewal check complete');
+            break;
+        }
         default:
             throw new Error(`Unknown job type: ${job.jobType}`);
     }
@@ -349,6 +438,8 @@ export async function runWorkerContinuously(options: WorkerOptions = {}): Promis
             // Run scheduler check approximately every hour
             if (now - lastSchedulerCheck > SCHEDULER_CHECK_INTERVAL) {
                 await checkContentSchedule().catch((err: unknown) => console.error('[Scheduler] Error:', err));
+                await checkAndRefreshStaleContent().catch((err: unknown) => console.error('[ContentRefresh] Error:', err));
+                await checkRenewals().catch((err: unknown) => console.error('[Renewals] Error:', err));
                 lastSchedulerCheck = now;
             }
 

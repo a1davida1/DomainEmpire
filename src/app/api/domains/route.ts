@@ -47,7 +47,10 @@ export async function GET(request: NextRequest) {
         const conditions: ReturnType<typeof eq>[] = [];
 
         if (status) {
-            conditions.push(eq(domains.status, status as any));
+            const validStatuses = ['parked', 'active', 'redirect', 'forsale', 'defensive'];
+            if (validStatuses.includes(status)) {
+                conditions.push(eq(domains.status, status as any));
+            }
         }
         if (niche) {
             conditions.push(eq(domains.niche, niche));
@@ -139,10 +142,22 @@ export async function POST(request: NextRequest) {
             const clean = data.estimatedRevenueAtMaturity.replaceAll(/[$,]/g, '');
             const range = clean.split('-');
             if (range.length === 2) {
-                revLow = Number.parseInt(range[0]) || 0;
-                revHigh = Number.parseInt(range[1]) || 0;
+                revLow = Number.parseInt(range[0], 10) || 0;
+                revHigh = Number.parseInt(range[1], 10) || 0;
             } else {
-                revHigh = Number.parseInt(clean) || 0;
+                const val = Number.parseInt(clean, 10);
+                // "100-" case -> low=100, high=0? Or high=undefined?
+                // Logic based on original: single value -> high = val? No, "100-" implies lower bound.
+                // If original parsed single value, it usually meant exact or upper?
+                // The requested logic: "when one side is missing... treat missing side as undefined or 0... ensure consistent handling"
+                // Let's safe defaults.
+                if (data.estimatedRevenueAtMaturity.endsWith('-')) {
+                    revLow = val || 0;
+                    revHigh = 0; // or null/undefined if schema allowed
+                } else {
+                    revLow = val || 0;
+                    revHigh = val || 0;
+                }
             }
         }
 

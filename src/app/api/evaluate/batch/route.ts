@@ -9,8 +9,8 @@ const FULL_MODE_DELAY_MS = 2000;
 const batchSchema = z.object({
     domains: z.array(
         z.string().min(3).max(253).regex(
-            /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z]{2,})+$/i,
-            'Invalid domain format'
+            /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$/i,
+            'Invalid domain format (must start/end alphanumeric, dots separate labels)'
         )
     ).min(1).max(20),
     acquisitionCosts: z.record(z.string(), z.number().min(0)).optional(),
@@ -53,11 +53,15 @@ export async function POST(request: NextRequest) {
         const errors: Array<{ domain: string; error: string }> = [];
 
         // In quick mode, run all in parallel. In full mode, run sequentially with delay.
+        const normalizedCosts = acquisitionCosts
+            ? Object.fromEntries(Object.entries(acquisitionCosts).map(([k, v]) => [k.toLowerCase(), v]))
+            : {};
+
         if (quickMode) {
             const settled = await Promise.allSettled(
                 uniqueDomains.map(domain =>
                     evaluateDomain(domain, {
-                        acquisitionCost: acquisitionCosts?.[domain],
+                        acquisitionCost: normalizedCosts[domain.toLowerCase()],
                         quickMode: true,
                         forceRefresh,
                     })
@@ -80,7 +84,7 @@ export async function POST(request: NextRequest) {
                 const domain = uniqueDomains[i];
                 try {
                     const result = await evaluateDomain(domain, {
-                        acquisitionCost: acquisitionCosts?.[domain],
+                        acquisitionCost: normalizedCosts[domain.toLowerCase()],
                         quickMode: false,
                         forceRefresh,
                     });

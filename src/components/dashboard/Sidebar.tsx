@@ -15,6 +15,9 @@ import {
     LogOut,
     ChevronLeft,
     ChevronRight,
+    ListTodo,
+    Wallet,
+    Swords,
 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -26,6 +29,9 @@ const navigation = [
     { name: 'Keywords', href: '/dashboard/keywords', icon: Search },
     { name: 'Analytics', href: '/dashboard/analytics', icon: BarChart3 },
     { name: 'Revenue', href: '/dashboard/revenue', icon: DollarSign },
+    { name: 'Finances', href: '/dashboard/finances', icon: Wallet },
+    { name: 'Competitors', href: '/dashboard/competitors', icon: Swords },
+    { name: 'Queue', href: '/dashboard/queue', icon: ListTodo },
     { name: 'Research', href: '/dashboard/research', icon: Beaker },
     { name: 'Settings', href: '/dashboard/settings', icon: Settings },
 ];

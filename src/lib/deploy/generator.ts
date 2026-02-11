@@ -6,6 +6,7 @@ import { db, articles, domains, monetizationProfiles } from '@/lib/db';
 import { eq, and } from 'drizzle-orm';
 import { getMonetizationScripts } from '@/lib/monetization/scripts';
 import { marked } from 'marked';
+import sanitizeHtml from 'sanitize-html';
 
 interface SiteConfig {
     domain: string;
@@ -21,6 +22,21 @@ interface SiteConfig {
 interface GeneratedFile {
     path: string;
     content: string;
+}
+
+function escapeHtml(unsafe: string): string {
+    return unsafe
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+function escapeAttr(unsafe: string): string {
+    return unsafe
+        .replace(/&/g, "&amp;")
+        .replace(/"/g, "&quot;");
 }
 
 /**
@@ -115,23 +131,39 @@ import Base from '../layouts/Base.astro';
 }
 
 function generateArticlePage(config: SiteConfig, article: typeof articles.$inferSelect): string {
-    // Sanitize content to remove any leftover AI placeholders
+    // Remove leftover AI placeholders from markdown
     const rawMarkdown = (article.contentMarkdown || '')
         .replace(/\[INTERNAL_LINK.*?\]/g, '')
         .replace(/\[EXTERNAL_LINK.*?\]/g, '')
         .replace(/\[IMAGE.*?\]/g, '');
 
-    const htmlContent = article.contentHtml || (rawMarkdown ? marked.parse(rawMarkdown, { async: false }) : '');
+    const rawHtml = article.contentHtml || (rawMarkdown ? marked.parse(rawMarkdown, { async: false }) : '');
 
-    // Safety: escape title/description for attributes
-    const safeTitle = article.title.replace(/"/g, '&quot;');
-    const safeDesc = (article.metaDescription || '').replace(/"/g, '&quot;');
+    // Sanitize HTML to prevent XSS while keeping safe formatting tags
+    const htmlContent = sanitizeHtml(rawHtml as string, {
+        allowedTags: sanitizeHtml.defaults.allowedTags.concat([
+            'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'img', 'figure', 'figcaption',
+            'details', 'summary', 'mark', 'abbr', 'time', 'del', 'ins',
+        ]),
+        allowedAttributes: {
+            ...sanitizeHtml.defaults.allowedAttributes,
+            img: ['src', 'alt', 'title', 'width', 'height', 'loading'],
+            a: ['href', 'title', 'rel', 'target'],
+            time: ['datetime'],
+            abbr: ['title'],
+        },
+        allowedSchemes: ['http', 'https', 'mailto'],
+    });
+
+    const escapedTitleHtml = escapeHtml(article.title);
+    const escapedTitleAttr = escapeAttr(article.title);
+    const escapedDescAttr = escapeAttr(article.metaDescription || '');
 
     return `---
 import Base from '../layouts/Base.astro';
 ---
-<Base title="${safeTitle}" description="${safeDesc}">
-  <article><h1>${safeTitle}</h1><Fragment set:html={${JSON.stringify(htmlContent)}} /></article>
+<Base title="${escapedTitleAttr}" description="${escapedDescAttr}">
+  <article><h1>${escapedTitleHtml}</h1><Fragment set:html={${JSON.stringify(htmlContent)}} /></article>
 </Base>`;
 }
 

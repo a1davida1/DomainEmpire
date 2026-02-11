@@ -14,6 +14,7 @@ async function main() {
         console.log('No domain found. Creating test domain...');
         const [newDomain] = await db.insert(domains).values({
             domain: 'spacex-test.com',
+            tld: 'com',
             niche: 'space-technology',
             status: 'active',
         }).returning();
@@ -51,6 +52,11 @@ async function main() {
     const start = Date.now();
     while (Date.now() - start < 60000) { // 60s timeout
         const [updatedJob] = await db.select().from(contentQueue).where(eq(contentQueue.id, job.id));
+
+        if (!updatedJob) {
+            console.error('❌ Job not found in queue (deleted?)');
+            process.exit(1);
+        }
 
         if (updatedJob.status === 'completed') {
             console.log('✅ Job Completed!');
