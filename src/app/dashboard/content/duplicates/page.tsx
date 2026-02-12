@@ -67,7 +67,7 @@ export default function DuplicatesPage() {
             <div className="flex flex-col gap-2">
                 <h1 className="text-3xl font-bold tracking-tight">Duplicate Content Detection</h1>
                 <p className="text-muted-foreground">
-                    Analyze your domain's articles to find potential duplicate content issues that could hurt SEO.
+                    Analyze your domain&apos;s articles to find potential duplicate content issues that could hurt SEO.
                 </p>
             </div>
 

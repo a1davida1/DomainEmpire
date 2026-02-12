@@ -95,7 +95,7 @@ export async function generateArticlePdf(
 
     try {
         // Try puppeteer for real PDF generation (optional dependency)
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
+         
         const puppeteer = await import(/* webpackIgnore: true */ 'puppeteer' as string);
         const browser = await puppeteer.default.launch({
             headless: true,

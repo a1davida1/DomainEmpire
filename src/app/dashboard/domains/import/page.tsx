@@ -170,7 +170,7 @@ export default function ImportDomainsPage() {
                             <li><code>tier</code> - 1, 2, or 3</li>
                             <li><code>niche</code>, <code>subNiche</code> - text</li>
                             <li><code>siteTemplate</code> - authority, comparison, calculator, review</li>
-                            <li><code>tags</code> - comma-separated, e.g., "premium,health"</li>
+                            <li><code>tags</code> - comma-separated, e.g., &quot;premium,health&quot;</li>
                         </ul>
                     </div>
                 </CardContent>

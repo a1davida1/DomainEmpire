@@ -15,6 +15,7 @@ import {
     BarChart3,
     Trash2
 } from 'lucide-react';
+import ContentTypeConfig from '@/components/dashboard/ContentTypeConfig';
 import { db, domains, articles, keywords } from '@/lib/db';
 import { eq, sql, and, isNull } from 'drizzle-orm';
 
@@ -176,7 +177,7 @@ export default async function DomainDetailPage({ params }: PageProps) {
                             </div>
                             <div>
                                 <p className="text-2xl font-bold">
-                                    ${domain.purchasePrice?.toFixed(2) || '0.00'}
+                                    ${Number(domain.purchasePrice || 0).toFixed(2)}
                                 </p>
                                 <p className="text-sm text-muted-foreground">Purchase Price</p>
                             </div>
@@ -277,7 +278,7 @@ export default async function DomainDetailPage({ params }: PageProps) {
                             <div>
                                 <p className="text-sm font-medium text-muted-foreground">Purchase Price</p>
                                 <p className="font-medium">
-                                    {domain.purchasePrice ? `$${domain.purchasePrice.toFixed(2)}` : 'Not set'}
+                                    {domain.purchasePrice ? `$${Number(domain.purchasePrice).toFixed(2)}` : 'Not set'}
                                 </p>
                             </div>
                             <div>
@@ -291,7 +292,7 @@ export default async function DomainDetailPage({ params }: PageProps) {
                             <div>
                                 <p className="text-sm font-medium text-muted-foreground">Renewal Price</p>
                                 <p className="font-medium">
-                                    {domain.renewalPrice ? `$${domain.renewalPrice.toFixed(2)}` : 'Not set'}
+                                    {domain.renewalPrice ? `$${Number(domain.renewalPrice).toFixed(2)}` : 'Not set'}
                                 </p>
                             </div>
                         </div>
@@ -322,6 +323,12 @@ export default async function DomainDetailPage({ params }: PageProps) {
                     </CardContent>
                 </Card>
             </div>
+
+            {/* Content Type Configuration */}
+            <ContentTypeConfig
+                domainId={id}
+                currentMix={(domain.contentConfig as Record<string, unknown>)?.contentTypeMix as Record<string, number> | null ?? null}
+            />
 
             {/* Recent Articles */}
             <Card>

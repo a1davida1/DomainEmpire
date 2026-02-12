@@ -25,7 +25,7 @@
  */
 
 import { db, contentQueue, articles, domains, keywords } from '@/lib/db';
-import { eq, and, lte, isNull, or, sql, asc, desc, count, inArray } from 'drizzle-orm';
+import { eq, and, lte, gt, isNull, or, sql, asc, desc, count, inArray } from 'drizzle-orm';
 import { processOutlineJob, processDraftJob, processHumanizeJob, processSeoOptimizeJob, processMetaJob, processKeywordResearchJob, processResearchJob } from './pipeline';
 import { processDeployJob } from '@/lib/deploy/processor';
 import { checkContentSchedule } from './scheduler';
@@ -597,7 +597,7 @@ export async function getQueueHealth() {
             and(
                 eq(contentQueue.status, 'completed'),
                 lte(contentQueue.completedAt, new Date()),
-                sql`${contentQueue.completedAt} > ${oneDayAgo}`
+                gt(contentQueue.completedAt, oneDayAgo)
             )
         );
 
@@ -609,7 +609,7 @@ export async function getQueueHealth() {
         .where(
             and(
                 eq(contentQueue.status, 'completed'),
-                sql`${contentQueue.completedAt} > ${oneHourAgo}`
+                gt(contentQueue.completedAt, oneHourAgo)
             )
         );
 
@@ -617,7 +617,7 @@ export async function getQueueHealth() {
     const recentTotal = await db
         .select({ count: count() })
         .from(contentQueue)
-        .where(sql`${contentQueue.createdAt} > ${oneDayAgo}`);
+        .where(gt(contentQueue.createdAt, oneDayAgo));
 
     const recentFailed = await db
         .select({ count: count() })
@@ -625,7 +625,7 @@ export async function getQueueHealth() {
         .where(
             and(
                 eq(contentQueue.status, 'failed'),
-                sql`${contentQueue.createdAt} > ${oneDayAgo}`
+                gt(contentQueue.createdAt, oneDayAgo)
             )
         );
 

@@ -117,7 +117,7 @@ async function processJob(job: typeof contentQueue.$inferSelect) {
             .where(eq(contentQueue.id, job.id));
 
     } finally {
-        // @ts-ignore - Create safe clearance
+        // @ts-expect-error - timeoutId type mismatch between Node/Browser
         if (timeoutId) clearTimeout(timeoutId);
     }
 }

@@ -116,7 +116,7 @@ export default async function QueuePage() {
                                         <StatusBadge status={job.status || 'pending'} />
                                     </td>
                                     <td className="p-3">{job.attempts}/{job.maxAttempts}</td>
-                                    <td className="p-3">{job.apiCost ? `$${job.apiCost.toFixed(4)}` : '—'}</td>
+                                    <td className="p-3">{job.apiCost ? `$${Number(job.apiCost).toFixed(4)}` : '—'}</td>
                                     <td className="p-3 text-muted-foreground">
                                         {job.createdAt ? new Date(job.createdAt).toLocaleString() : '—'}
                                     </td>

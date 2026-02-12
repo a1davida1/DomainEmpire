@@ -104,6 +104,9 @@ export default async function ReviewQueuePage() {
         return [q.articleId, { allPassed: q.allPassed, passed, total }];
     }));
 
+    // eslint-disable-next-line react-hooks/purity
+    const now = Date.now(); // Server Component — runs once at render time
+
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
@@ -138,7 +141,7 @@ export default async function ReviewQueuePage() {
                                     const qa = qaMap.get(article.id);
                                     const waitingSince = article.reviewRequestedAt ? new Date(article.reviewRequestedAt) : null;
                                     const waitingDays = waitingSince
-                                        ? Math.floor((Date.now() - waitingSince.getTime()) / (1000 * 60 * 60 * 24))
+                                        ? Math.floor((now - waitingSince.getTime()) / (1000 * 60 * 60 * 24))
                                         : null;
 
                                     return (

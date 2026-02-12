@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Get existing profile or create one
-        let profile = await db.query.monetizationProfiles.findFirst({
+        const profile = await db.query.monetizationProfiles.findFirst({
             where: eq(monetizationProfiles.domainId, domainId),
         });
 
