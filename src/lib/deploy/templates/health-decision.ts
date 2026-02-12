@@ -13,6 +13,8 @@ import {
     buildSchemaJsonLd,
     wrapInAstroLayout,
     generateDataSourcesSection,
+    buildOpenGraphTags,
+    buildFreshnessBadge,
     type DisclosureInfo,
     type ArticleDatasetInfo,
 } from './shared';
@@ -47,10 +49,13 @@ export async function generateHealthDecisionPage(
     const medicalDisclaimerHtml = buildMedicalDisclaimerHtml();
     const doctorCtaHtml = buildDoctorCtaHtml();
     const titleHtml = escapeHtml(article.title);
+    const freshnessBadge = buildFreshnessBadge(article, datasets);
+    const ogTags = buildOpenGraphTags(article, domain);
 
     const body = `${disclaimerHtml}
   ${schemaLd}
   ${medicalDisclaimerHtml}
+  ${freshnessBadge}
   <article>
     <h1>${titleHtml}</h1>
     <Fragment set:html={${JSON.stringify(contentHtml)}} />
@@ -59,5 +64,5 @@ export async function generateHealthDecisionPage(
   ${dataSourcesHtml}
   ${trustHtml}`;
 
-    return wrapInAstroLayout(article.title, article.metaDescription || '', body);
+    return wrapInAstroLayout(article.title, article.metaDescription || '', body, ogTags);
 }

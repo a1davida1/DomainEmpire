@@ -4,10 +4,10 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
     Globe, DollarSign, FileText, Cpu, TrendingUp, AlertTriangle,
-    Plus, Rocket, Activity, Clock
+    Plus, Rocket, Activity, Clock, Mail
 } from 'lucide-react';
 import Link from 'next/link';
-import { db, domains, articles, monetizationProfiles, contentQueue } from '@/lib/db';
+import { db, domains, articles, monetizationProfiles, contentQueue, subscribers } from '@/lib/db';
 import { eq, count, sum, and, gte, lt, desc, sql, isNull } from 'drizzle-orm';
 
 const TARGET_WEEKLY_ARTICLES = Number(process.env.TARGET_WEEKLY_ARTICLES) || 85;
@@ -73,6 +73,11 @@ async function getDashboardMetrics() {
             .from(domains)
             .where(and(eq(domains.isDeployed, true), isNull(domains.deletedAt)));
 
+        // Get subscriber count
+        const subscriberCount = await db
+            .select({ count: count() })
+            .from(subscribers);
+
         return {
             domains: domainCount[0]?.count ?? 0,
             articles: articleCount[0]?.count ?? 0,
@@ -81,6 +86,7 @@ async function getDashboardMetrics() {
             pendingJobs: pendingJobs[0]?.count ?? 0,
             apiCost: Number(apiCosts[0]?.total ?? 0),
             deployedDomains: deployedCount[0]?.count ?? 0,
+            subscribers: subscriberCount[0]?.count ?? 0,
         };
     } catch (error) {
         // Return zeros if database isn't connected yet
@@ -93,6 +99,7 @@ async function getDashboardMetrics() {
             pendingJobs: 0,
             apiCost: 0,
             deployedDomains: 0,
+            subscribers: 0,
         };
     }
 }
@@ -300,7 +307,7 @@ export default async function DashboardPage() {
             </div>
 
             {/* Metrics Grid */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
                 <MetricCard
                     title="Total Domains"
                     value={metrics.domains}
@@ -316,6 +323,12 @@ export default async function DashboardPage() {
                     title="Published Articles"
                     value={metrics.articles}
                     icon={FileText}
+                />
+                <MetricCard
+                    title="Subscribers"
+                    value={metrics.subscribers}
+                    icon={Mail}
+                    subtitle="email captures"
                 />
                 <MetricCard
                     title="API Cost (30d)"

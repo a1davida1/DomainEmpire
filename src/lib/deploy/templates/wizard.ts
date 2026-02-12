@@ -205,10 +205,102 @@ function buildWizardScript(config: WizardConfig): string {
     return valid;
   }
 
+  // Safe expression evaluator — NO eval/new Function.
+  // Supports: field refs, string/number literals, ==, !=, >=, <=, >, <, &&, ||, includes()
   function evalCondition(cond) {
     try {
-      var fn = new Function(Object.keys(answers).concat(['return (' + cond + ')']));
-      return fn.apply(null, Object.keys(answers).map(function(k){return answers[k]}));
+      // Tokenize
+      var tokens = [];
+      var i = 0;
+      while(i < cond.length) {
+        if(cond[i]===' '||cond[i]==='\t'){i++;continue}
+        if(cond[i]==="'" || cond[i]==='"'){
+          var q=cond[i],j=i+1;
+          while(j<cond.length&&cond[j]!==q)j++;
+          tokens.push({t:'str',v:cond.slice(i+1,j)});i=j+1;continue;
+        }
+        if('0123456789'.indexOf(cond[i])!==-1||(cond[i]==='-'&&i+1<cond.length&&'0123456789'.indexOf(cond[i+1])!==-1)){
+          var j=i;if(cond[j]==='-')j++;
+          while(j<cond.length&&'0123456789.'.indexOf(cond[j])!==-1)j++;
+          tokens.push({t:'num',v:parseFloat(cond.slice(i,j))});i=j;continue;
+        }
+        if(cond.slice(i,i+2)==='=='){tokens.push({t:'op',v:'=='});i+=2;continue}
+        if(cond.slice(i,i+2)==='!='){tokens.push({t:'op',v:'!='});i+=2;continue}
+        if(cond.slice(i,i+2)==='>='){tokens.push({t:'op',v:'>='});i+=2;continue}
+        if(cond.slice(i,i+2)==='<='){tokens.push({t:'op',v:'<='});i+=2;continue}
+        if(cond.slice(i,i+2)==='&&'){tokens.push({t:'op',v:'&&'});i+=2;continue}
+        if(cond.slice(i,i+2)==='||'){tokens.push({t:'op',v:'||'});i+=2;continue}
+        if(cond[i]==='>'){tokens.push({t:'op',v:'>'});i++;continue}
+        if(cond[i]==='<'){tokens.push({t:'op',v:'<'});i++;continue}
+        if(cond[i]==='('){tokens.push({t:'lp'});i++;continue}
+        if(cond[i]===')'){tokens.push({t:'rp'});i++;continue}
+        // Identifier (field name) or .includes()
+        var j=i;
+        while(j<cond.length&&/[a-zA-Z0-9_.]/.test(cond[j]))j++;
+        var word=cond.slice(i,j);
+        if(word==='.includes'){tokens.push({t:'op',v:'includes'});i=j;continue}
+        if(word==='true'){tokens.push({t:'bool',v:true});i=j;continue}
+        if(word==='false'){tokens.push({t:'bool',v:false});i=j;continue}
+        if(word.indexOf('.includes')!==-1){
+          var parts=word.split('.includes');
+          tokens.push({t:'ref',v:parts[0]});
+          tokens.push({t:'op',v:'includes'});
+          i=j;continue;
+        }
+        tokens.push({t:'ref',v:word});i=j;
+      }
+      // Resolve a token to its value
+      function resolve(tok){
+        if(tok.t==='ref') return answers[tok.v]!==undefined?answers[tok.v]:'';
+        if(tok.t==='num') return tok.v;
+        if(tok.t==='str') return tok.v;
+        if(tok.t==='bool') return tok.v;
+        return tok.v;
+      }
+      // Simple recursive descent: expr = comparison ((&&/||) comparison)*
+      var pos=0;
+      function peek(){return tokens[pos]}
+      function next(){return tokens[pos++]}
+      function parseComparison(){
+        var left=next();
+        var leftVal=resolve(left);
+        var op=peek();
+        if(!op||op.t!=='op')return !!leftVal;
+        if(op.v==='&&'||op.v==='||')return !!leftVal;
+        next(); // consume op
+        if(op.v==='includes'){
+          // skip optional (
+          if(peek()&&peek().t==='lp')next();
+          var arg=next();
+          if(peek()&&peek().t==='rp')next();
+          var argVal=resolve(arg);
+          if(Array.isArray(leftVal))return leftVal.indexOf(argVal)!==-1;
+          return String(leftVal).indexOf(String(argVal))!==-1;
+        }
+        var right=next();
+        var rightVal=resolve(right);
+        var l=typeof leftVal==='string'&&!isNaN(Number(leftVal))&&typeof rightVal==='number'?Number(leftVal):leftVal;
+        var r=typeof rightVal==='string'&&!isNaN(Number(rightVal))&&typeof leftVal==='number'?Number(rightVal):rightVal;
+        if(op.v==='==')return l==r;
+        if(op.v==='!=')return l!=r;
+        if(op.v==='>=')return Number(l)>=Number(r);
+        if(op.v==='<=')return Number(l)<=Number(r);
+        if(op.v==='>')return Number(l)>Number(r);
+        if(op.v==='<')return Number(l)<Number(r);
+        return false;
+      }
+      function parseExpr(){
+        var result=parseComparison();
+        while(pos<tokens.length){
+          var op=peek();
+          if(!op||op.t!=='op')break;
+          if(op.v==='&&'){next();result=result&&parseComparison()}
+          else if(op.v==='||'){next();result=result||parseComparison()}
+          else break;
+        }
+        return !!result;
+      }
+      return parseExpr();
     } catch(e) { return false; }
   }
 

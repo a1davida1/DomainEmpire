@@ -59,6 +59,7 @@ function extractSiteTitle(domain: string): string {
 }
 
 interface SiteConfig {
+    domainId: string;
     domain: string;
     title: string;
     description: string;
@@ -124,6 +125,7 @@ export async function generateSiteFiles(domainId: string): Promise<GeneratedFile
     }
 
     const config: SiteConfig = {
+        domainId,
         domain: domain.domain,
         title: extractSiteTitle(domain.domain),
         description: `Expert guides about ${domain.niche || 'various topics'}`,
@@ -258,16 +260,53 @@ function generateBaseLayout(
   <div class="footer-bottom">${footerLinksHtml}<p>&copy; ${new Date().getFullYear()} ${escapeHtml(config.title)}</p></div>
 </footer>`;
             break;
-        case 'newsletter':
+        case 'newsletter': {
+            const captureUrl = process.env.CAPTURE_API_URL || `https://${config.domain}/api/capture`;
             footerContent = `<footer>
   <div class="footer-newsletter">
     <h3>Stay Updated</h3>
     <p>Get the latest guides delivered to your inbox.</p>
-    <form onsubmit="return false"><input type="email" placeholder="your@email.com" required><button type="submit">Subscribe</button></form>
+    <form id="newsletter-form"><input type="email" id="newsletter-email" placeholder="your@email.com" required><button type="submit">Subscribe</button></form>
+    <p id="newsletter-msg" style="display:none;margin-top:0.5rem;font-weight:600;color:#16a34a"></p>
   </div>
   <div class="footer-bottom">${footerLinksHtml}<p>&copy; ${new Date().getFullYear()} ${escapeHtml(config.title)}</p></div>
+<script>
+(function(){
+  var form=document.getElementById('newsletter-form');
+  var msg=document.getElementById('newsletter-msg');
+  if(!form)return;
+  form.addEventListener('submit',function(e){
+    e.preventDefault();
+    var email=document.getElementById('newsletter-email').value;
+    if(!email)return;
+    var btn=form.querySelector('button');
+    btn.disabled=true;
+    btn.textContent='Sending...';
+    fetch(${JSON.stringify(captureUrl)},{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({domainId:${JSON.stringify(config.domainId)},email:email,source:'newsletter'})
+    }).then(function(r){
+      if(r.ok){
+        msg.textContent='Thanks! You\\'ll hear from us soon.';
+        msg.style.display='';
+        form.querySelector('input').value='';
+      } else { throw new Error('fail'); }
+    }).catch(function(){
+      msg.textContent='Something went wrong. Please try again.';
+      msg.style.color='#dc2626';
+      msg.style.display='';
+    }).finally(function(){
+      btn.disabled=false;
+      btn.textContent='Subscribe';
+      setTimeout(function(){msg.style.display='none';msg.style.color='#16a34a'},4000);
+    });
+  });
+})();
+</script>
 </footer>`;
             break;
+        }
         case 'multi-column':
             footerContent = `<footer>
   ${footerLinksHtml}
@@ -356,7 +395,7 @@ async function generateArticlePage(
         case 'comparison':
             return generateComparisonPage(article, config.domain, disclosure, articleDatasetInfo);
         case 'lead_capture':
-            return generateLeadCapturePage(article, config.domain, disclosure, articleDatasetInfo);
+            return generateLeadCapturePage(article, config.domain, disclosure, articleDatasetInfo, config.domainId);
         case 'faq':
             return generateFaqPage(article, config.domain, disclosure, articleDatasetInfo);
         case 'cost_guide':

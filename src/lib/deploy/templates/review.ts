@@ -15,6 +15,9 @@ import {
     buildSchemaJsonLd,
     wrapInAstroLayout,
     generateDataSourcesSection,
+    buildOpenGraphTags,
+    buildFreshnessBadge,
+    buildPrintButton,
     type DisclosureInfo,
     type ArticleDatasetInfo,
 } from './shared';
@@ -141,8 +144,13 @@ export async function generateReviewPage(
         verdictHtml = buildVerdictBoxHtml(data.verdict);
     }
 
+    const freshnessBadge = buildFreshnessBadge(article, datasets);
+    const ogTags = buildOpenGraphTags(article, domain);
+    const printBtn = buildPrintButton('review');
+
     const body = `${disclaimerHtml}
   ${schemaLd}
+  ${freshnessBadge}${printBtn}
   <article>
     <h1>${titleHtml}</h1>
     ${reviewCardsHtml}
@@ -152,5 +160,5 @@ export async function generateReviewPage(
   ${dataSourcesHtml}
   ${trustHtml}`;
 
-    return wrapInAstroLayout(article.title, article.metaDescription || '', body);
+    return wrapInAstroLayout(article.title, article.metaDescription || '', body, ogTags);
 }

@@ -27,7 +27,28 @@ const NICHES = [
 const REGISTRARS = ['godaddy', 'namecheap', 'cloudflare', 'other'] as const;
 const STATUSES = ['parked', 'active', 'redirect', 'forsale', 'defensive'] as const;
 const BUCKETS = ['build', 'redirect', 'park', 'defensive'] as const;
-const TEMPLATES = ['authority', 'comparison', 'calculator', 'review'] as const;
+const TEMPLATES = [
+    { value: 'authority', label: 'Authority', desc: 'Wide sidebar, magazine grid' },
+    { value: 'comparison', label: 'Comparison', desc: 'Wide single-col, card grid' },
+    { value: 'calculator', label: 'Calculator', desc: 'Medium, tool-first' },
+    { value: 'review', label: 'Review', desc: 'Wide sidebar, rating cards' },
+    { value: 'tool', label: 'Tool', desc: 'Full-width, app-like' },
+    { value: 'hub', label: 'Hub', desc: 'Wide portal, 3-col cards' },
+    { value: 'decision', label: 'Decision', desc: 'Narrow, guide-focused' },
+    { value: 'cost_guide', label: 'Cost Guide', desc: 'Wide left sidebar, pricing' },
+    { value: 'niche', label: 'Niche Blog', desc: 'Narrow, reading-focused' },
+    { value: 'info', label: 'Info / Wiki', desc: 'Wide left sidebar, reference' },
+    { value: 'consumer', label: 'Consumer', desc: 'Wide, newsletter footer' },
+    { value: 'brand', label: 'Brand', desc: 'Medium, premium feel' },
+    { value: 'magazine', label: 'Magazine', desc: 'Wide, editorial layout' },
+    { value: 'landing', label: 'Landing Page', desc: 'Full-width, CTA-driven' },
+    { value: 'docs', label: 'Docs', desc: 'Wide left sidebar, minimal' },
+    { value: 'storefront', label: 'Storefront', desc: 'Wide, product showcase' },
+    { value: 'minimal', label: 'Minimal', desc: 'Narrow, ultra-clean' },
+    { value: 'dashboard', label: 'Dashboard', desc: 'Full-width, data-heavy' },
+    { value: 'newsletter', label: 'Newsletter', desc: 'Narrow, email-style' },
+    { value: 'community', label: 'Community', desc: 'Wide sidebar, forum-like' },
+] as const;
 
 interface Props {
     domain: Domain;
@@ -179,11 +200,11 @@ export default function DomainEditForm({ domain }: Props) {
                             />
                         </div>
 
-                        <div className="space-y-2">
-                            <Label>Site Template</Label>
+                        <div className="space-y-2 sm:col-span-2">
+                            <Label>Site Layout</Label>
                             <Select
                                 value={formData.siteTemplate}
-                                onValueChange={(v) => updateField('siteTemplate', v as typeof TEMPLATES[number])}
+                                onValueChange={(v) => updateField('siteTemplate', v as typeof formData.siteTemplate)}
                                 disabled={loading}
                             >
                                 <SelectTrigger>
@@ -191,7 +212,10 @@ export default function DomainEditForm({ domain }: Props) {
                                 </SelectTrigger>
                                 <SelectContent>
                                     {TEMPLATES.map((t) => (
-                                        <SelectItem key={t} value={t} className="capitalize">{t}</SelectItem>
+                                        <SelectItem key={t.value} value={t.value}>
+                                            <span className="font-medium">{t.label}</span>
+                                            <span className="ml-2 text-muted-foreground text-xs">{t.desc}</span>
+                                        </SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>

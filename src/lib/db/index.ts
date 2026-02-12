@@ -21,11 +21,14 @@ export function getDb(): PostgresJsDatabase<typeof schema> {
     }
 
     // For serverless environments, use connection pooling
+    // Only set ssl explicitly if DATABASE_SSL or production mode —
+    // otherwise let postgres.js use the ?ssl= param from the URL
+    const forceSsl = process.env.DATABASE_SSL === 'true' || process.env.NODE_ENV === 'production';
     const client = postgres(connectionString, {
         max: 10,
         idle_timeout: 20,
         connect_timeout: 10,
-        ssl: process.env.DATABASE_SSL === 'true' || process.env.NODE_ENV === 'production' ? 'require' : undefined,
+        ...(forceSsl ? { ssl: 'require' as const } : {}),
     });
 
     _db = drizzle(client, { schema });

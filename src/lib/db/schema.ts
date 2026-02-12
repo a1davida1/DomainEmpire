@@ -59,6 +59,10 @@ export const domains = pgTable('domains', {
     estimatedMonthlyRevenueLow: real('estimated_monthly_revenue_low'),
     estimatedMonthlyRevenueHigh: real('estimated_monthly_revenue_high'),
 
+    // Health
+    healthScore: real('health_score'),
+    healthUpdatedAt: timestamp('health_updated_at'),
+
     // Notes
     notes: text('notes'),
     tags: jsonb('tags').$type<string[]>().default([]),
@@ -200,6 +204,7 @@ export const articles = pgTable('articles', {
         enum: ['none', 'low', 'medium', 'high']
     }).default('none'),
     lastReviewedAt: timestamp('last_reviewed_at'),
+    reviewRequestedAt: timestamp('review_requested_at'),
     lastReviewedBy: uuid('last_reviewed_by').references(() => users.id, { onDelete: 'set null' }),
     publishedBy: uuid('published_by').references(() => users.id, { onDelete: 'set null' }),
 
@@ -906,6 +911,100 @@ export const articleDatasets = pgTable('article_datasets', {
 }));
 
 // ===========================================
+// SUBSCRIBERS: Email captures from deployed sites
+// ===========================================
+export const subscribers = pgTable('subscribers', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    domainId: uuid('domain_id').notNull().references(() => domains.id, { onDelete: 'cascade' }),
+    articleId: uuid('article_id').references(() => articles.id, { onDelete: 'set null' }),
+
+    // Contact info
+    email: text('email').notNull(),
+    name: text('name'),
+    phone: text('phone'),
+
+    // Source tracking
+    source: text('source', {
+        enum: ['lead_form', 'newsletter', 'wizard', 'popup', 'scroll_cta']
+    }).notNull().default('lead_form'),
+
+    // Custom form data (arbitrary fields from leadGenConfig)
+    formData: jsonb('form_data').$type<Record<string, string>>().default({}),
+
+    // Status
+    status: text('status', {
+        enum: ['active', 'unsubscribed', 'bounced']
+    }).notNull().default('active'),
+
+    // Value tracking
+    estimatedValue: real('estimated_value'),
+    convertedAt: timestamp('converted_at'),
+
+    // Metadata
+    ipAddress: text('ip_address'),
+    userAgent: text('user_agent'),
+    referrer: text('referrer'),
+
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+}, (t) => ({
+    domainIdx: index('subscriber_domain_idx').on(t.domainId),
+    emailIdx: index('subscriber_email_idx').on(t.email),
+    sourceIdx: index('subscriber_source_idx').on(t.source),
+    statusIdx: index('subscriber_status_idx').on(t.status),
+    domainEmailUnq: unique('subscriber_domain_email_unq').on(t.domainId, t.email),
+}));
+
+// ===========================================
+// A/B TESTS: Title and CTA testing
+// ===========================================
+export const abTests = pgTable('ab_tests', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    articleId: uuid('article_id').notNull().references(() => articles.id, { onDelete: 'cascade' }),
+    testType: text('test_type', {
+        enum: ['title', 'meta_description', 'cta']
+    }).notNull(),
+    status: text('status', {
+        enum: ['active', 'completed', 'cancelled']
+    }).notNull().default('active'),
+    variants: jsonb('variants').$type<Array<{
+        id: string;
+        value: string;
+        impressions: number;
+        clicks: number;
+        conversions: number;
+    }>>().notNull(),
+    winnerId: text('winner_id'),
+    confidenceLevel: real('confidence_level'),
+    startedAt: timestamp('started_at').defaultNow(),
+    completedAt: timestamp('completed_at'),
+    createdAt: timestamp('created_at').defaultNow(),
+}, (t) => ({
+    articleIdx: index('ab_test_article_idx').on(t.articleId),
+    statusIdx: index('ab_test_status_idx').on(t.status),
+}));
+
+// ===========================================
+// COMPETITOR SNAPSHOTS: Historical SERP tracking
+// ===========================================
+export const competitorSnapshots = pgTable('competitor_snapshots', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    competitorId: uuid('competitor_id').notNull().references(() => competitors.id, { onDelete: 'cascade' }),
+    snapshotDate: timestamp('snapshot_date', { mode: 'date' }).notNull(),
+    estimatedTraffic: integer('estimated_traffic'),
+    domainAuthority: integer('domain_authority'),
+    topKeywords: jsonb('top_keywords').$type<Array<{
+        keyword: string;
+        position: number;
+        volume: number;
+    }>>().default([]),
+    createdAt: timestamp('created_at').defaultNow(),
+}, (t) => ({
+    competitorIdx: index('comp_snapshot_competitor_idx').on(t.competitorId),
+    dateIdx: index('comp_snapshot_date_idx').on(t.snapshotDate),
+}));
+
+// ===========================================
 // IDEMPOTENCY KEYS: Prevent duplicate mutations from retries
 // ===========================================
 export const idempotencyKeys = pgTable('idempotency_keys', {
@@ -937,6 +1036,7 @@ export const domainsRelations = relations(domains, ({ many, one }) => ({
     disclosureConfig: one(disclosureConfigs),
     complianceSnapshots: many(complianceSnapshots),
     datasets: many(datasets),
+    subscribers: many(subscribers),
     redirectTarget: one(domains, {
         fields: [domains.redirectTargetId],
         references: [domains.id],
@@ -1106,6 +1206,31 @@ export const articleDatasetsRelations = relations(articleDatasets, ({ one }) => 
     }),
 }));
 
+export const subscribersRelations = relations(subscribers, ({ one }) => ({
+    domain: one(domains, {
+        fields: [subscribers.domainId],
+        references: [domains.id],
+    }),
+    article: one(articles, {
+        fields: [subscribers.articleId],
+        references: [articles.id],
+    }),
+}));
+
+export const abTestsRelations = relations(abTests, ({ one }) => ({
+    article: one(articles, {
+        fields: [abTests.articleId],
+        references: [articles.id],
+    }),
+}));
+
+export const competitorSnapshotsRelations = relations(competitorSnapshots, ({ one }) => ({
+    competitor: one(competitors, {
+        fields: [competitorSnapshots.competitorId],
+        references: [competitors.id],
+    }),
+}));
+
 // ===========================================
 // TYPE EXPORTS
 // ===========================================
@@ -1140,3 +1265,8 @@ export type Dataset = typeof datasets.$inferSelect;
 export type NewDataset = typeof datasets.$inferInsert;
 export type ArticleDataset = typeof articleDatasets.$inferSelect;
 export type NewArticleDataset = typeof articleDatasets.$inferInsert;
+export type Subscriber = typeof subscribers.$inferSelect;
+export type NewSubscriber = typeof subscribers.$inferInsert;
+export type AbTest = typeof abTests.$inferSelect;
+export type NewAbTest = typeof abTests.$inferInsert;
+export type CompetitorSnapshot = typeof competitorSnapshots.$inferSelect;

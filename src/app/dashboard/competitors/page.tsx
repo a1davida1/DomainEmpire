@@ -3,6 +3,7 @@ import { competitors, domains } from '@/lib/db/schema';
 import { desc } from 'drizzle-orm';
 import { addCompetitor } from '@/lib/competitors/monitor';
 import { revalidatePath } from 'next/cache';
+import Link from 'next/link';
 
 async function addCompetitorAction(formData: FormData) {
     'use server';
@@ -79,6 +80,7 @@ export default async function CompetitorsPage() {
                                         <th className="text-right p-3">Pages</th>
                                         <th className="text-left p-3">Frequency</th>
                                         <th className="text-left p-3">Last Checked</th>
+                                        <th className="text-right p-3">History</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -108,6 +110,15 @@ export default async function CompetitorsPage() {
                                                 <td className="p-3">{comp.publishFrequency || '—'}</td>
                                                 <td className="p-3 text-muted-foreground">
                                                     {comp.lastCheckedAt ? new Date(comp.lastCheckedAt).toLocaleDateString() : 'Never'}
+                                                </td>
+                                                <td className="p-3 text-right">
+                                                    <Link
+                                                        href={`/dashboard/competitors/${comp.id}/history`}
+                                                        className="px-2 py-1 bg-muted rounded text-xs hover:bg-muted/80"
+                                                        title="View SERP history snapshots"
+                                                    >
+                                                        View History
+                                                    </Link>
                                                 </td>
                                             </tr>
                                         );

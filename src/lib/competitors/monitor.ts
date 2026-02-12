@@ -6,8 +6,8 @@
  */
 
 import { db } from '@/lib/db';
-import { competitors, domains, keywords } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { competitors, competitorSnapshots, domains, keywords } from '@/lib/db/schema';
+import { eq, desc } from 'drizzle-orm';
 import { getAIClient } from '@/lib/ai/openrouter';
 
 interface CompetitorAnalysis {
@@ -97,6 +97,15 @@ export async function refreshCompetitor(competitorId: string): Promise<void> {
     const analysis = await analyzeCompetitor(comp.competitorDomain, niche);
 
     if (analysis) {
+        // Snapshot current state before overwriting
+        await db.insert(competitorSnapshots).values({
+            competitorId,
+            snapshotDate: new Date(),
+            estimatedTraffic: comp.estimatedTraffic,
+            domainAuthority: comp.domainAuthority,
+            topKeywords: comp.topKeywords,
+        });
+
         await db.update(competitors).set({
             estimatedTraffic: analysis.estimatedTraffic,
             totalPages: analysis.totalPages,
@@ -106,6 +115,17 @@ export async function refreshCompetitor(competitorId: string): Promise<void> {
             lastCheckedAt: new Date(),
         }).where(eq(competitors.id, competitorId));
     }
+}
+
+/**
+ * Get competitor history (snapshots over time).
+ */
+export async function getCompetitorHistory(competitorId: string, limit = 30) {
+    return db.select()
+        .from(competitorSnapshots)
+        .where(eq(competitorSnapshots.competitorId, competitorId))
+        .orderBy(desc(competitorSnapshots.snapshotDate))
+        .limit(limit);
 }
 
 /**

@@ -37,6 +37,7 @@ import { getDomainGSCSummary } from '@/lib/analytics/search-console';
 import { snapshotCompliance } from '@/lib/compliance/metrics';
 import { purgeExpiredSessions } from '@/lib/auth';
 import { checkStaleDatasets } from '@/lib/datasets/freshness';
+import { runAllMonitoringChecks } from '@/lib/monitoring/triggers';
 
 const LOCK_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 const JOB_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes max per job
@@ -521,6 +522,7 @@ export async function runWorkerContinuously(options: WorkerOptions = {}): Promis
                 await snapshotCompliance().catch((err: unknown) => console.error('[Compliance] Error:', err));
                 await checkStaleDatasets().catch((err: unknown) => console.error('[DatasetFreshness] Error:', err));
                 await purgeExpiredSessions().catch((err: unknown) => console.error('[SessionPurge] Error:', err));
+                await runAllMonitoringChecks().catch((err: unknown) => console.error('[Monitoring] Error:', err));
                 lastSchedulerCheck = now;
             }
 

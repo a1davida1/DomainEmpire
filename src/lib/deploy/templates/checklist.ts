@@ -13,6 +13,9 @@ import {
     buildSchemaJsonLd,
     wrapInAstroLayout,
     generateDataSourcesSection,
+    buildOpenGraphTags,
+    buildFreshnessBadge,
+    buildPrintButton,
     type DisclosureInfo,
     type ArticleDatasetInfo,
 } from './shared';
@@ -65,7 +68,7 @@ function buildProgressHtml(totalSteps: number): string {
 </div>`;
 }
 
-function buildPrintButton(): string {
+function buildChecklistPrintButton(): string {
     return `<button class="print-btn" type="button" onclick="window.print()">Print this checklist</button>`;
 }
 
@@ -108,7 +111,7 @@ export async function generateChecklistPage(
 
     if (steps.length > 0) {
         const progressHtml = buildProgressHtml(steps.length);
-        const printBtnHtml = buildPrintButton();
+        const printBtnHtml = buildChecklistPrintButton();
 
         const stepItems: string[] = [];
         for (let i = 0; i < steps.length; i++) {
@@ -134,8 +137,13 @@ export async function generateChecklistPage(
         contentBlock = `<Fragment set:html={${JSON.stringify(fullHtml)}} />`;
     }
 
+    const freshnessBadge = buildFreshnessBadge(article, datasets);
+    const ogTags = buildOpenGraphTags(article, domain);
+    const printBtnGlobal = buildPrintButton('checklist');
+
     const body = `${disclaimerHtml}
   ${schemaLd}
+  ${freshnessBadge}${printBtnGlobal}
   <article>
     <h1>${titleHtml}</h1>
     ${contentBlock}
@@ -144,5 +152,5 @@ export async function generateChecklistPage(
   ${trustHtml}
   ${steps.length > 0 ? buildChecklistScript() : ''}`;
 
-    return wrapInAstroLayout(article.title, article.metaDescription || '', body);
+    return wrapInAstroLayout(article.title, article.metaDescription || '', body, ogTags);
 }

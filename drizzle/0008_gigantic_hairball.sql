@@ -1,0 +1,1 @@
+ALTER TABLE "articles" ADD COLUMN "review_requested_at" timestamp;

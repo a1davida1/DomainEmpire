@@ -13,6 +13,9 @@ import {
     buildSchemaJsonLd,
     wrapInAstroLayout,
     generateDataSourcesSection,
+    buildOpenGraphTags,
+    buildFreshnessBadge,
+    buildPrintButton,
     type DisclosureInfo,
     type ArticleDatasetInfo,
 } from './shared';
@@ -281,9 +284,13 @@ export async function generateCalculatorPage(
     }
 
     const titleHtml = escapeHtml(article.title);
+    const freshnessBadge = buildFreshnessBadge(article, datasets);
+    const ogTags = buildOpenGraphTags(article, domain);
+    const printBtn = buildPrintButton('calculator');
 
     const body = `${disclaimerHtml}
   ${schemaLd}
+  ${freshnessBadge}${printBtn}
   <article>
     <h1>${titleHtml}</h1>
     ${calculatorHtml}
@@ -293,5 +300,5 @@ export async function generateCalculatorPage(
   ${trustHtml}
   ${config ? buildCalculatorScript(config) : ''}`;
 
-    return wrapInAstroLayout(article.title, article.metaDescription || '', body);
+    return wrapInAstroLayout(article.title, article.metaDescription || '', body, ogTags);
 }
