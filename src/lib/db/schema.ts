@@ -1,4 +1,4 @@
-import { pgTable, text, integer, real, boolean, timestamp, jsonb, uuid, index, unique, check, numeric } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, real, boolean, timestamp, jsonb, uuid, index, uniqueIndex, unique, check, numeric } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 export { sql };
 
@@ -192,8 +192,38 @@ export const articles = pgTable('articles', {
         enum: ['none', 'low', 'medium', 'high']
     }).default('none'),
     lastReviewedAt: timestamp('last_reviewed_at'),
-    lastReviewedBy: uuid('last_reviewed_by'),
-    publishedBy: uuid('published_by'),
+    lastReviewedBy: uuid('last_reviewed_by').references(() => users.id, { onDelete: 'set null' }),
+    publishedBy: uuid('published_by').references(() => users.id, { onDelete: 'set null' }),
+
+    // Content Type & Structured Config
+    contentType: text('content_type', {
+        enum: ['article', 'comparison', 'calculator', 'cost_guide', 'lead_capture', 'health_decision', 'checklist', 'faq', 'review']
+    }).default('article'),
+    calculatorConfig: jsonb('calculator_config').$type<{
+        inputs: Array<{ id: string; label: string; type: 'number' | 'select' | 'range'; default?: number; min?: number; max?: number; step?: number; options?: Array<{ label: string; value: number }> }>;
+        outputs: Array<{ id: string; label: string; format: 'currency' | 'percent' | 'number'; decimals?: number }>;
+        formula?: string;
+        assumptions?: string[];
+        methodology?: string;
+    }>(),
+    comparisonData: jsonb('comparison_data').$type<{
+        options: Array<{ name: string; url?: string; badge?: string; scores: Record<string, number | string> }>;
+        columns: Array<{ key: string; label: string; type: 'number' | 'text' | 'rating'; sortable?: boolean }>;
+        defaultSort?: string;
+        verdict?: string;
+    }>(),
+    leadGenConfig: jsonb('lead_gen_config').$type<{
+        fields: Array<{ name: string; label: string; type: 'text' | 'email' | 'tel' | 'select' | 'number'; required?: boolean; options?: string[] }>;
+        consentText: string;
+        endpoint: string;
+        successMessage: string;
+        disclosureAboveFold?: string;
+        privacyPolicyUrl?: string;
+    }>(),
+    costGuideData: jsonb('cost_guide_data').$type<{
+        ranges?: Array<{ label?: string; low: number; high: number; average?: number; dataPoints?: number[] }>;
+        factors?: Array<{ name: string; impact: 'low' | 'medium' | 'high'; description: string }>;
+    }>(),
 
     // Timestamps
     createdAt: timestamp('created_at').defaultNow(),
@@ -202,6 +232,7 @@ export const articles = pgTable('articles', {
     domainIdx: index('article_domain_idx').on(t.domainId),
     statusIdx: index('article_status_idx').on(t.status),
     createdIdx: index('article_created_idx').on(t.createdAt),
+    contentTypeIdx: index('article_content_type_idx').on(t.contentType),
 }));
 
 // ===========================================
@@ -263,7 +294,8 @@ export const contentQueue = pgTable('content_queue', {
             'seo_optimize', 'generate_meta', 'deploy',
             'fetch_analytics', 'keyword_research', 'bulk_seed',
             'research', 'evaluate', 'content_refresh',
-            'fetch_gsc', 'check_backlinks', 'check_renewals'
+            'fetch_gsc', 'check_backlinks', 'check_renewals',
+            'check_datasets'
         ]
     }).notNull(),
 
@@ -366,7 +398,11 @@ export const revenueSnapshots = pgTable('revenue_snapshots', {
     ctr: real('ctr'),
 
     createdAt: timestamp('created_at').defaultNow(),
-});
+}, (t) => ({
+    domainIdx: index('revenue_snapshot_domain_idx').on(t.domainId),
+    dateIdx: index('revenue_snapshot_date_idx').on(t.snapshotDate),
+    unq: uniqueIndex('revenue_snapshot_domain_date_uidx').on(t.domainId, t.snapshotDate),
+}));
 
 // ===========================================
 // SITE TEMPLATES: Reusable site templates
@@ -611,6 +647,7 @@ export const reviewEvents = pgTable('review_events', {
     actorIdx: index('review_event_actor_idx').on(t.actorId),
     typeIdx: index('review_event_type_idx').on(t.eventType),
     createdIdx: index('review_event_created_idx').on(t.createdAt),
+    unq: uniqueIndex('review_event_article_type_actor_uidx').on(t.articleId, t.eventType, t.actorId),
 }));
 
 // ===========================================
@@ -726,6 +763,8 @@ export const complianceSnapshots = pgTable('compliance_snapshots', {
         articlesWithQaPassed: number;
         disclosureComplianceRate: number;
         meaningfulEditRatio: number;
+        totalPublished: number;
+        totalInReview: number;
     }>().default({
         ymylApprovalRate: 0,
         citationCoverageRatio: 0,
@@ -734,11 +773,64 @@ export const complianceSnapshots = pgTable('compliance_snapshots', {
         articlesWithQaPassed: 0,
         disclosureComplianceRate: 0,
         meaningfulEditRatio: 0,
+        totalPublished: 0,
+        totalInReview: 0,
     }),
     createdAt: timestamp('created_at').defaultNow(),
 }, (t) => ({
     domainIdx: index('compliance_snapshot_domain_idx').on(t.domainId),
     dateIdx: index('compliance_snapshot_date_idx').on(t.snapshotDate),
+    unq: uniqueIndex('compliance_snapshot_domain_date_uidx').on(t.domainId, t.snapshotDate),
+}));
+
+// ===========================================
+// DATASETS: External data sources with provenance tracking
+// ===========================================
+export const datasets = pgTable('datasets', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: text('name').notNull(),
+    sourceUrl: text('source_url'),
+    sourceTitle: text('source_title'),
+    publisher: text('publisher'),
+
+    // Freshness tracking
+    retrievedAt: timestamp('retrieved_at').defaultNow(),
+    effectiveDate: timestamp('effective_date', { mode: 'date' }),
+    expiresAt: timestamp('expires_at'),
+    freshnessClass: text('freshness_class', {
+        enum: ['realtime', 'weekly', 'monthly', 'quarterly', 'annual']
+    }).default('monthly'),
+
+    // Data storage
+    data: jsonb('data').default({}),
+    dataHash: text('data_hash'),
+    version: integer('version').default(1),
+
+    // Scope
+    domainId: uuid('domain_id').references(() => domains.id, { onDelete: 'set null' }),
+    createdById: uuid('created_by_id').references(() => users.id, { onDelete: 'set null' }),
+
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+}, (t) => ({
+    nameIdx: index('dataset_name_idx').on(t.name),
+    expiresIdx: index('dataset_expires_idx').on(t.expiresAt),
+    domainIdx: index('dataset_domain_idx').on(t.domainId),
+}));
+
+// ===========================================
+// ARTICLE DATASETS: Join table linking articles to data sources
+// ===========================================
+export const articleDatasets = pgTable('article_datasets', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    articleId: uuid('article_id').notNull().references(() => articles.id, { onDelete: 'cascade' }),
+    datasetId: uuid('dataset_id').notNull().references(() => datasets.id, { onDelete: 'cascade' }),
+    usage: text('usage'),
+    createdAt: timestamp('created_at').defaultNow(),
+}, (t) => ({
+    unq: unique('article_dataset_unq').on(t.articleId, t.datasetId),
+    articleIdx: index('article_dataset_article_idx').on(t.articleId),
+    datasetIdx: index('article_dataset_dataset_idx').on(t.datasetId),
 }));
 
 // ===========================================
@@ -756,6 +848,7 @@ export const domainsRelations = relations(domains, ({ many, one }) => ({
     approvalPolicies: many(approvalPolicies),
     disclosureConfig: one(disclosureConfigs),
     complianceSnapshots: many(complianceSnapshots),
+    datasets: many(datasets),
     redirectTarget: one(domains, {
         fields: [domains.redirectTargetId],
         references: [domains.id],
@@ -782,6 +875,7 @@ export const articlesRelations = relations(articles, ({ one, many }) => ({
     reviewEvents: many(reviewEvents),
     qaResults: many(qaChecklistResults),
     citations: many(citations),
+    articleDatasets: many(articleDatasets),
 }));
 
 export const monetizationProfilesRelations = relations(monetizationProfiles, ({ one }) => ({
@@ -905,6 +999,25 @@ export const complianceSnapshotsRelations = relations(complianceSnapshots, ({ on
     }),
 }));
 
+export const datasetsRelations = relations(datasets, ({ one, many }) => ({
+    domain: one(domains, {
+        fields: [datasets.domainId],
+        references: [domains.id],
+    }),
+    articleDatasets: many(articleDatasets),
+}));
+
+export const articleDatasetsRelations = relations(articleDatasets, ({ one }) => ({
+    article: one(articles, {
+        fields: [articleDatasets.articleId],
+        references: [articles.id],
+    }),
+    dataset: one(datasets, {
+        fields: [articleDatasets.datasetId],
+        references: [datasets.id],
+    }),
+}));
+
 // ===========================================
 // TYPE EXPORTS
 // ===========================================
@@ -935,3 +1048,7 @@ export type ApprovalPolicy = typeof approvalPolicies.$inferSelect;
 export type Citation = typeof citations.$inferSelect;
 export type DisclosureConfig = typeof disclosureConfigs.$inferSelect;
 export type ComplianceSnapshot = typeof complianceSnapshots.$inferSelect;
+export type Dataset = typeof datasets.$inferSelect;
+export type NewDataset = typeof datasets.$inferInsert;
+export type ArticleDataset = typeof articleDatasets.$inferSelect;
+export type NewArticleDataset = typeof articleDatasets.$inferInsert;

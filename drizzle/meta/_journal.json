@@ -29,6 +29,13 @@
       "when": 1770827227839,
       "tag": "0003_faithful_winter_soldier",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1770840802267,
+      "tag": "0004_mean_anthem",
+      "breakpoints": true
     }
   ]
 }

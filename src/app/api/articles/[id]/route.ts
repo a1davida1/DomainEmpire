@@ -4,6 +4,37 @@ import { requireAuth, getRequestUser } from '@/lib/auth';
 import { createRevision } from '@/lib/audit/revisions';
 import { logReviewEvent } from '@/lib/audit/events';
 import { eq, and, ne } from 'drizzle-orm';
+import { z } from 'zod';
+
+import { calculatorConfigSchema, comparisonDataSchema, leadGenConfigSchema } from '@/lib/validation/articles';
+
+const VALID_CONTENT_TYPES = ['article', 'comparison', 'calculator', 'cost_guide', 'lead_capture', 'health_decision', 'checklist', 'faq', 'review'];
+
+const jsonbSchemas: Record<string, z.ZodType> = {
+    calculatorConfig: calculatorConfigSchema,
+    comparisonData: comparisonDataSchema,
+    leadGenConfig: leadGenConfigSchema,
+};
+
+/** Validate optional JSONB fields, returning a 400 response on failure or null on success. */
+function validateJsonbFields(
+    body: Record<string, unknown>,
+    updateData: Record<string, unknown>,
+): NextResponse | null {
+    for (const [field, schema] of Object.entries(jsonbSchemas)) {
+        if (body[field] === undefined) continue;
+        if (body[field] === null) { updateData[field] = null; continue; }
+        const parsed = schema.safeParse(body[field]);
+        if (!parsed.success) {
+            return NextResponse.json(
+                { error: `Invalid ${field}`, details: (parsed.error as z.ZodError).flatten().fieldErrors },
+                { status: 400 },
+            );
+        }
+        updateData[field] = body[field];
+    }
+    return null;
+}
 
 // PATCH /api/articles/[id] - Update article content
 export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
@@ -15,14 +46,17 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
 
     try {
         const body = await request.json();
-        const { title, slug, content, targetKeyword, metaDescription } = body;
+        const { title, slug, content, targetKeyword, metaDescription, contentType } = body;
 
         // Basic validation
         if (!title || !slug) {
             return NextResponse.json({ error: 'Title and slug are required' }, { status: 400 });
         }
 
-        // Check if article exists
+        if (contentType && !VALID_CONTENT_TYPES.includes(contentType)) {
+            return NextResponse.json({ error: `Invalid contentType. Must be one of: ${VALID_CONTENT_TYPES.join(', ')}` }, { status: 400 });
+        }
+
         const existingDefault = await db.query.articles.findFirst({
             where: eq(articles.id, id),
         });
@@ -47,19 +81,29 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
         }
 
         // Update article
+        const updateData: Record<string, unknown> = {
+            title,
+            slug,
+            contentMarkdown: content,
+            targetKeyword,
+            metaDescription,
+            updatedAt: new Date(),
+        };
+        if (contentType !== undefined) updateData.contentType = contentType;
+
+        const jsonbError = validateJsonbFields(body, updateData);
+        if (jsonbError) return jsonbError;
+
         await db.update(articles)
-            .set({
-                title,
-                slug,
-                contentMarkdown: content,
-                targetKeyword,
-                metaDescription,
-                updatedAt: new Date(),
-            })
+            .set(updateData)
             .where(eq(articles.id, id));
 
         // Create revision snapshot + audit event
         const user = getRequestUser(request);
+        if (!user) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
         const revisionId = await createRevision({
             articleId: id,
             title,

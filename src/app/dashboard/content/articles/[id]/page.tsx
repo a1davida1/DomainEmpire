@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
-import { ArrowLeft, ExternalLink } from 'lucide-react';
+import { ArrowLeft, ExternalLink, History, ScrollText, ClipboardCheck, Quote, AlertTriangle } from 'lucide-react';
 import Link from 'next/link';
 
 interface PageProps {
@@ -44,6 +44,16 @@ export default async function ArticlePage({ params }: PageProps) {
                                 } capitalize`}>
                                 {article.status}
                             </Badge>
+                            {article.ymylLevel && article.ymylLevel !== 'none' && (
+                                <Badge variant="outline" className={
+                                    article.ymylLevel === 'high' ? 'bg-red-100 text-red-800 border-red-200' :
+                                    article.ymylLevel === 'medium' ? 'bg-yellow-100 text-yellow-800 border-yellow-200' :
+                                    'bg-blue-100 text-blue-800 border-blue-200'
+                                }>
+                                    <AlertTriangle className="h-3 w-3 mr-1" />
+                                    YMYL {article.ymylLevel}
+                                </Badge>
+                            )}
                         </div>
                         <p className="text-muted-foreground text-sm">
                             {article.domain.domain} • {article.wordCount || 0} words
@@ -80,6 +90,30 @@ export default async function ArticlePage({ params }: PageProps) {
                 </div>
 
                 <div className="space-y-6">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Article Actions</CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-2">
+                            <Link href={`/dashboard/content/articles/${id}/review`} className="flex items-center gap-2 p-2 rounded-md hover:bg-muted text-sm">
+                                <ClipboardCheck className="h-4 w-4 text-emerald-600" />
+                                Review & QA Checklist
+                            </Link>
+                            <Link href={`/dashboard/content/articles/${id}/revisions`} className="flex items-center gap-2 p-2 rounded-md hover:bg-muted text-sm">
+                                <History className="h-4 w-4 text-blue-600" />
+                                Revision History
+                            </Link>
+                            <Link href={`/dashboard/content/articles/${id}/audit`} className="flex items-center gap-2 p-2 rounded-md hover:bg-muted text-sm">
+                                <ScrollText className="h-4 w-4 text-purple-600" />
+                                Audit Log
+                            </Link>
+                            <Link href={`/dashboard/content/articles/${id}/citations`} className="flex items-center gap-2 p-2 rounded-md hover:bg-muted text-sm">
+                                <Quote className="h-4 w-4 text-orange-600" />
+                                Citations & Sources
+                            </Link>
+                        </CardContent>
+                    </Card>
+
                     <InterlinkManager articleId={id} />
 
                     <Card>

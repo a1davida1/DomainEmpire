@@ -34,6 +34,9 @@ import { checkAndRefreshStaleContent } from '@/lib/content/refresh';
 import { checkRenewals } from '@/lib/domain/renewals';
 import { checkBacklinks } from '@/lib/analytics/backlinks';
 import { getDomainGSCSummary } from '@/lib/analytics/search-console';
+import { snapshotCompliance } from '@/lib/compliance/metrics';
+import { purgeExpiredSessions } from '@/lib/auth';
+import { checkStaleDatasets } from '@/lib/datasets/freshness';
 
 const LOCK_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 const JOB_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes max per job
@@ -351,6 +354,11 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
             await markJobComplete(job.id, 'Renewal check complete');
             break;
         }
+        case 'check_datasets': {
+            const staleCount = await checkStaleDatasets();
+            await markJobComplete(job.id, `Found ${staleCount} stale dataset(s)`);
+            break;
+        }
         default:
             throw new Error(`Unknown job type: ${job.jobType}`);
     }
@@ -434,6 +442,9 @@ export async function runWorkerContinuously(options: WorkerOptions = {}): Promis
                 await checkContentSchedule().catch((err: unknown) => console.error('[Scheduler] Error:', err));
                 await checkAndRefreshStaleContent().catch((err: unknown) => console.error('[ContentRefresh] Error:', err));
                 await checkRenewals().catch((err: unknown) => console.error('[Renewals] Error:', err));
+                await snapshotCompliance().catch((err: unknown) => console.error('[Compliance] Error:', err));
+                await checkStaleDatasets().catch((err: unknown) => console.error('[DatasetFreshness] Error:', err));
+                await purgeExpiredSessions().catch((err: unknown) => console.error('[SessionPurge] Error:', err));
                 lastSchedulerCheck = now;
             }
 

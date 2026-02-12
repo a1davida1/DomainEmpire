@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { Button } from '@/components/ui/button';
 import { History, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
+import { lcsDiff } from '@/lib/audit/revisions';
 
 type Revision = {
     id: string;
@@ -35,31 +35,6 @@ const CHANGE_TYPE_COLORS: Record<string, string> = {
     bulk_refresh: 'bg-orange-100 text-orange-800',
 };
 
-function simpleDiff(a: string, b: string): { type: 'same' | 'add' | 'remove'; line: string }[] {
-    const aLines = a.split('\n');
-    const bLines = b.split('\n');
-    const result: { type: 'same' | 'add' | 'remove'; line: string }[] = [];
-    const aSet = new Set(aLines);
-    const bSet = new Set(bLines);
-
-    let ai = 0, bi = 0;
-    while (ai < aLines.length || bi < bLines.length) {
-        if (ai < aLines.length && bi < bLines.length && aLines[ai] === bLines[bi]) {
-            result.push({ type: 'same', line: aLines[ai] });
-            ai++; bi++;
-        } else if (bi < bLines.length && !aSet.has(bLines[bi])) {
-            result.push({ type: 'add', line: bLines[bi] });
-            bi++;
-        } else if (ai < aLines.length && !bSet.has(aLines[ai])) {
-            result.push({ type: 'remove', line: aLines[ai] });
-            ai++;
-        } else {
-            if (ai < aLines.length) { result.push({ type: 'remove', line: aLines[ai] }); ai++; }
-            if (bi < bLines.length) { result.push({ type: 'add', line: bLines[bi] }); bi++; }
-        }
-    }
-    return result;
-}
 
 export default function RevisionsPage() {
     const params = useParams();
@@ -156,7 +131,7 @@ export default function RevisionsPage() {
                                             </p>
                                             <div className="font-mono text-xs bg-muted/30 rounded p-3 max-h-96 overflow-auto">
                                                 {diffPair.older ? (
-                                                    simpleDiff(
+                                                    lcsDiff(
                                                         diffPair.older.contentMarkdown || '',
                                                         diffPair.newer.contentMarkdown || ''
                                                     ).map((line, i) => (
@@ -164,8 +139,8 @@ export default function RevisionsPage() {
                                                             key={i}
                                                             className={
                                                                 line.type === 'add' ? 'bg-green-100 text-green-800' :
-                                                                line.type === 'remove' ? 'bg-red-100 text-red-800 line-through' :
-                                                                ''
+                                                                    line.type === 'remove' ? 'bg-red-100 text-red-800 line-through' :
+                                                                        ''
                                                             }
                                                         >
                                                             {line.type === 'add' ? '+ ' : line.type === 'remove' ? '- ' : '  '}

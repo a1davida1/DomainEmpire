@@ -17,6 +17,7 @@ import { PROMPTS } from './prompts';
 import { getOrCreateVoiceSeed } from './voice-seed';
 import { createRevision } from '@/lib/audit/revisions';
 import { classifyYmylLevel } from '@/lib/review/ymyl';
+import { calculatorConfigSchema, comparisonDataSchema } from '@/lib/validation/articles';
 
 // Helper to slugify string
 function slugify(text: string) {
@@ -28,14 +29,47 @@ function slugify(text: string) {
         .replace(/-+$/, '');            // Trim - from end of text
 }
 
-// Helper to detect content type from keyword
-function getContentType(keyword: string): 'article' | 'comparison' | 'calculator' | 'costGuide' | 'leadCapture' | 'healthDecision' {
+// Content type enum values matching schema
+type ContentType = 'article' | 'comparison' | 'calculator' | 'cost_guide' | 'lead_capture' | 'health_decision' | 'checklist' | 'faq' | 'review';
+
+// Helper: word-boundary test to avoid false positives like "Elvis" → "vs"
+function wb(keyword: string, pattern: RegExp): boolean {
+    return pattern.test(keyword);
+}
+
+// Helper to detect content type from keyword using word-boundary matching
+export function getContentType(keyword: string): ContentType {
     const lower = keyword.toLowerCase();
-    if (lower.includes(' vs ') || lower.includes(' versus ')) return 'comparison';
-    if (lower.includes('calculator') || lower.includes('estimator') || lower.includes('tool')) return 'calculator';
-    if (lower.includes('cost') || lower.includes('price') || lower.includes('how much')) return 'costGuide';
-    if (lower.includes('case') || lower.includes('lawyer') || lower.includes('attorney') || lower.includes('claim')) return 'leadCapture';
-    if (lower.includes('safe') || lower.includes('side effects') || lower.includes('treatment') || lower.includes('symptom')) return 'healthDecision';
+
+    // Comparison: "vs", "versus", "compared to"
+    if (wb(lower, /\bvs\b/) || wb(lower, /\bversus\b/) || lower.includes('compared to')) return 'comparison';
+
+    // Calculator: exact tool-type words (not "tool" in "stool" or "toolkit")
+    if (wb(lower, /\bcalculator\b/) || wb(lower, /\bestimator\b/) || wb(lower, /\bcompute\b/)) return 'calculator';
+    if (wb(lower, /\btool\b/) && !wb(lower, /\btoolkit\b/) && !wb(lower, /\btoolbox\b/) && !wb(lower, /\btools\b/)) return 'calculator';
+
+    // Cost guide
+    if (wb(lower, /\bcost\b/) || wb(lower, /\bprice\b/) || lower.includes('how much') || wb(lower, /\bfee\b/)) return 'cost_guide';
+
+    // Lead capture — exclude "case study", "showcase"
+    if (wb(lower, /\blawyer\b/) || wb(lower, /\battorney\b/) || lower.includes('get a quote')) return 'lead_capture';
+    if (wb(lower, /\bclaim\b/) && !lower.includes('claim to')) return 'lead_capture';
+    if (wb(lower, /\bcase\b/) && !lower.includes('case study') && !lower.includes('showcase')) return 'lead_capture';
+
+    // Health decision
+    if (wb(lower, /\bsafe\b\b/) || lower.includes('side effects') || wb(lower, /\btreatment\b/) || wb(lower, /\bsymptom\b/) || wb(lower, /\bdiagnosis\b/)) return 'health_decision';
+
+    // FAQ
+    if (wb(lower, /\bfaq\b/) || wb(lower, /\bquestions\b/) || lower.includes('q&a') || wb(lower, /\banswered\b/)) return 'faq';
+
+    // Checklist
+    if (wb(lower, /\bchecklist\b/) || lower.includes('step by step') || lower.includes('steps to')) return 'checklist';
+
+    // Review — exclude "best practices", "best way to"
+    if (wb(lower, /\breview\b/)) return 'review';
+    if (wb(lower, /\bbest\s/) && !lower.includes('best practice') && !lower.includes('best way to')) return 'review';
+    if (wb(lower, /\btop\s\d/)) return 'review';
+
     return 'article';
 }
 
@@ -56,6 +90,45 @@ export async function processOutlineJob(jobId: string): Promise<void> {
     const article = articleRecord[0];
     const researchData = article?.researchData;
 
+    // Detect content type early for outline customization
+    const detectedType = getContentType(payload.targetKeyword);
+
+    // Build content-type-specific outline instructions
+    let typeSpecificInstructions = '';
+    let typeSpecificJsonFields = '';
+
+    if (detectedType === 'calculator') {
+        typeSpecificInstructions = `
+This is a CALCULATOR/TOOL page. In addition to the outline, design the calculator:
+- Define input fields (what the user enters)
+- Define output fields (what the calculator shows)
+- Describe the formula/logic
+- List key assumptions
+- Include a methodology section explaining the math`;
+        typeSpecificJsonFields = `,
+  "calculatorConfig": {
+    "inputs": [{ "id": "loan_amount", "label": "Loan Amount", "type": "number", "default": 250000, "min": 0, "max": 10000000, "step": 1000 }],
+    "outputs": [{ "id": "monthly_payment", "label": "Monthly Payment", "format": "currency", "decimals": 2 }],
+    "formula": "description of the formula logic",
+    "assumptions": ["30-year fixed rate", "No PMI"],
+    "methodology": "Explanation of how calculations work"
+  }`;
+    } else if (detectedType === 'comparison') {
+        typeSpecificInstructions = `
+This is a COMPARISON page. In addition to the outline, design the comparison table:
+- Define 3-8 options being compared
+- Define comparison columns/criteria
+- Include a verdict/recommendation
+- Each option should have scores for each column`;
+        typeSpecificJsonFields = `,
+  "comparisonData": {
+    "options": [{ "name": "Option A", "badge": "Best Overall", "scores": { "price": 4, "features": 5 } }],
+    "columns": [{ "key": "price", "label": "Price", "type": "rating", "sortable": true }],
+    "defaultSort": "price",
+    "verdict": "Our top pick is..."
+  }`;
+    }
+
     // Generate outline
     const outlinePrompt = `
 You are an expert SEO content strategist. Create a detailed outline for:
@@ -64,6 +137,7 @@ CONTEXT: ${payload.domainName}
 
 RESEARCH DATA (Use these facts):
 ${JSON.stringify(researchData || {})}
+${typeSpecificInstructions}
 
 Requirements:
 1. Compelling H1 (with keyword)
@@ -81,7 +155,7 @@ Respond with JSON:
     { "heading": "H2", "level": 2, "subheadings": [{ "heading": "H3", "level": 3 }], "notes": "Notes" }
   ],
   "faqs": [{ "question": "Q", "answerHint": "A" }],
-  "estimatedWordCount": 2500
+  "estimatedWordCount": 2500${typeSpecificJsonFields}
 }`;
 
     const response = await ai.generateJSON<{
@@ -90,6 +164,19 @@ Respond with JSON:
         outline: Array<{ heading: string; level: number; subheadings?: Array<{ heading: string; level: number }>; notes?: string }>;
         faqs: Array<{ question: string; answerHint: string }>;
         estimatedWordCount: number;
+        calculatorConfig?: {
+            inputs: Array<{ id: string; label: string; type: string; default?: number; min?: number; max?: number; step?: number; options?: Array<{ label: string; value: number }> }>;
+            outputs: Array<{ id: string; label: string; format: string; decimals?: number }>;
+            formula?: string;
+            assumptions?: string[];
+            methodology?: string;
+        };
+        comparisonData?: {
+            options: Array<{ name: string; badge?: string; scores: Record<string, number> }>;
+            columns: Array<{ key: string; label: string; type: string; sortable?: boolean }>;
+            defaultSort?: string;
+            verdict?: string;
+        };
     }>(
         'outlineGeneration',
         outlinePrompt
@@ -107,12 +194,31 @@ Respond with JSON:
         domainId: job.domainId, // Added for completeness
     });
 
-    // Update article with outline data
-    await db.update(articles).set({
+    // Update article with outline data + content type + structured config
+    const outlineUpdate: Record<string, unknown> = {
         title: response.data.title,
         metaDescription: response.data.metaDescription,
         headerStructure: response.data.outline,
-    }).where(eq(articles.id, job.articleId!));
+        contentType: detectedType,
+    };
+    // Persist structured config from AI response if present (with validation)
+    if (response.data.calculatorConfig) {
+        const parsed = calculatorConfigSchema.safeParse(response.data.calculatorConfig);
+        if (parsed.success) {
+            outlineUpdate.calculatorConfig = parsed.data;
+        } else {
+            console.warn(`[Pipeline] Invalid calculatorConfig from AI for article ${job.articleId}:`, parsed.error.format());
+        }
+    }
+    if (response.data.comparisonData) {
+        const parsed = comparisonDataSchema.safeParse(response.data.comparisonData);
+        if (parsed.success) {
+            outlineUpdate.comparisonData = parsed.data;
+        } else {
+            console.warn(`[Pipeline] Invalid comparisonData from AI for article ${job.articleId}:`, parsed.error.format());
+        }
+    }
+    await db.update(articles).set(outlineUpdate).where(eq(articles.id, job.articleId!));
 
     await createRevision({
         articleId: job.articleId!,
@@ -174,18 +280,20 @@ export async function processDraftJob(jobId: string): Promise<void> {
 
     const voiceSeed = await getOrCreateVoiceSeed(job.domainId!, domain.domain, domain.niche || 'general');
 
-    const contentType = getContentType(payload.targetKeyword);
+    // Use contentType already set by outline stage; fall back to re-detection
+    const contentType = (article.contentType as ContentType) || getContentType(payload.targetKeyword);
+
     let prompt = '';
 
     if (contentType === 'calculator') {
         prompt = PROMPTS.calculator(payload.targetKeyword, article.researchData, voiceSeed);
     } else if (contentType === 'comparison') {
         prompt = PROMPTS.comparison(outline, payload.targetKeyword, payload.domainName, article.researchData, voiceSeed);
-    } else if (contentType === 'costGuide') {
+    } else if (contentType === 'cost_guide') {
         prompt = PROMPTS.costGuide(outline, payload.targetKeyword, payload.domainName, article.researchData, voiceSeed);
-    } else if (contentType === 'leadCapture') {
+    } else if (contentType === 'lead_capture') {
         prompt = PROMPTS.leadCapture(outline, payload.targetKeyword, payload.domainName, article.researchData, voiceSeed);
-    } else if (contentType === 'healthDecision') {
+    } else if (contentType === 'health_decision') {
         prompt = PROMPTS.healthDecision(outline, payload.targetKeyword, payload.domainName, article.researchData, voiceSeed);
     } else {
         prompt = PROMPTS.article(outline, payload.targetKeyword, payload.domainName, article.researchData, voiceSeed);

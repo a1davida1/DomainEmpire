@@ -20,6 +20,7 @@ import {
     Swords,
     ClipboardCheck,
     ShieldCheck,
+    Gauge,
 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -35,6 +36,7 @@ const navigation = [
     { name: 'Competitors', href: '/dashboard/competitors', icon: Swords },
     { name: 'Review', href: '/dashboard/review', icon: ClipboardCheck },
     { name: 'Compliance', href: '/dashboard/compliance', icon: ShieldCheck },
+    { name: 'KPIs', href: '/dashboard/kpis', icon: Gauge },
     { name: 'Queue', href: '/dashboard/queue', icon: ListTodo },
     { name: 'Research', href: '/dashboard/research', icon: Beaker },
     { name: 'Settings', href: '/dashboard/settings', icon: Settings },
