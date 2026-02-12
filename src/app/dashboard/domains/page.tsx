@@ -1,7 +1,7 @@
+import { Suspense } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import {
     Table,
@@ -11,9 +11,14 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table';
-import { Plus, Search, Filter, ExternalLink, MoreHorizontal } from 'lucide-react';
+import { Plus, ExternalLink } from 'lucide-react';
 import { db, domains } from '@/lib/db';
+import { isNull } from 'drizzle-orm';
+import { formatDate } from '@/lib/format-utils';
+import { cn } from '@/lib/utils';
 import { DeployAllButton } from '@/components/dashboard/DeployAllButton';
+import { DomainSearch } from '@/components/dashboard/DomainSearch';
+import { DomainActions } from '@/components/dashboard/DomainActions';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,9 +36,28 @@ const tierLabels: Record<number, string> = {
     3: 'Hold',
 };
 
-async function getDomains() {
+interface DomainsPageProps {
+    readonly searchParams: Promise<{ readonly q?: string; readonly status?: string; readonly tier?: string }>;
+}
+
+async function getDomains(filters: { q?: string; status?: string; tier?: string }) {
     try {
-        const allDomains = await db.select().from(domains).orderBy(domains.tier, domains.domain);
+        let allDomains = await db.select().from(domains).where(isNull(domains.deletedAt)).orderBy(domains.tier, domains.domain);
+
+        if (filters.q) {
+            const query = filters.q.toLowerCase();
+            allDomains = allDomains.filter(d => d.domain.toLowerCase().includes(query) || d.niche?.toLowerCase().includes(query));
+        }
+        if (filters.status) {
+            allDomains = allDomains.filter(d => d.status === filters.status);
+        }
+        if (filters.tier) {
+            const tier = Number.parseInt(filters.tier, 10);
+            if (!Number.isNaN(tier)) {
+                allDomains = allDomains.filter(d => d.tier === tier);
+            }
+        }
+
         return { data: allDomains, error: null };
     } catch (error) {
         console.error('Failed to fetch domains:', error);
@@ -41,8 +65,10 @@ async function getDomains() {
     }
 }
 
-export default async function DomainsPage() {
-    const { data: allDomains, error } = await getDomains();
+export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
+    const { searchParams } = props;
+    const params = await searchParams;
+    const { data: allDomains, error } = await getDomains(params);
 
     if (error) {
         return (
@@ -55,11 +81,13 @@ export default async function DomainsPage() {
         );
     }
 
-    // Group by status for summary
-    const statusCounts = allDomains.reduce((acc, d) => {
+    // Count all domains for summary (unfiltered)
+    const unfilteredDomains = await db.select().from(domains).where(isNull(domains.deletedAt));
+    const statusCounts = unfilteredDomains.reduce((acc, d) => {
         acc[d.status] = (acc[d.status] || 0) + 1;
         return acc;
     }, {} as Record<string, number>);
+    const totalCount = unfilteredDomains.length;
 
     return (
         <div className="space-y-6">
@@ -68,7 +96,7 @@ export default async function DomainsPage() {
                 <div>
                     <h1 className="text-3xl font-bold">Domains</h1>
                     <p className="text-muted-foreground">
-                        Manage your domain portfolio ({allDomains.length} total)
+                        Manage your domain portfolio ({totalCount} total)
                     </p>
                 </div>
                 <div className="flex gap-2">
@@ -105,19 +133,9 @@ export default async function DomainsPage() {
             </div>
 
             {/* Search and Filter */}
-            <div className="flex gap-4">
-                <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                        placeholder="Search domains..."
-                        className="pl-9"
-                    />
-                </div>
-                <Button variant="outline">
-                    <Filter className="mr-2 h-4 w-4" />
-                    Filters
-                </Button>
-            </div>
+            <Suspense>
+                <DomainSearch />
+            </Suspense>
 
             {/* Domains Table */}
             <Card>
@@ -139,12 +157,18 @@ export default async function DomainsPage() {
                             {allDomains.length === 0 ? (
                                 <TableRow>
                                     <TableCell colSpan={8} className="h-24 text-center">
-                                        <p className="text-muted-foreground">No domains yet.</p>
-                                        <Link href="/dashboard/domains/new">
-                                            <Button variant="link" className="mt-2">
-                                                Add your first domain
-                                            </Button>
-                                        </Link>
+                                        <p className="text-muted-foreground">
+                                            {params.q || params.status || params.tier
+                                                ? 'No domains match your filters.'
+                                                : 'No domains yet.'}
+                                        </p>
+                                        {!params.q && !params.status && !params.tier && (
+                                            <Link href="/dashboard/domains/new">
+                                                <Button variant="link" className="mt-2">
+                                                    Add your first domain
+                                                </Button>
+                                            </Link>
+                                        )}
                                     </TableCell>
                                 </TableRow>
                             ) : (
@@ -172,7 +196,7 @@ export default async function DomainsPage() {
                                         <TableCell>
                                             <Badge
                                                 variant="secondary"
-                                                className={`${statusColors[domain.status] || 'bg-gray-500'} text-white`}
+                                                className={cn(statusColors[domain.status] || 'bg-gray-500', 'text-white')}
                                             >
                                                 {domain.status}
                                             </Badge>
@@ -202,18 +226,16 @@ export default async function DomainsPage() {
                                             )}
                                         </TableCell>
                                         <TableCell>
-                                            {domain.renewalDate ? (
-                                                <span className="text-sm">
-                                                    {new Date(domain.renewalDate).toLocaleDateString()}
-                                                </span>
-                                            ) : (
-                                                <span className="text-muted-foreground">—</span>
-                                            )}
+                                            <span className="text-sm">
+                                                {formatDate(domain.renewalDate)}
+                                            </span>
                                         </TableCell>
                                         <TableCell>
-                                            <Button variant="ghost" size="icon">
-                                                <MoreHorizontal className="h-4 w-4" />
-                                            </Button>
+                                            <DomainActions
+                                                domainId={domain.id}
+                                                domainName={domain.domain}
+                                                isDeployed={domain.isDeployed ?? false}
+                                            />
                                         </TableCell>
                                     </TableRow>
                                 ))

@@ -1,6 +1,6 @@
 import { db } from '@/lib/db';
 import { articles, reviewEvents, qaChecklistResults, contentRevisions, citations, complianceSnapshots, disclosureConfigs, domains } from '@/lib/db/schema';
-import { eq, sql, and, gte } from 'drizzle-orm';
+import { eq, sql, and, gte, isNull } from 'drizzle-orm';
 
 export type ComplianceMetrics = {
     ymylApprovalRate: number;
@@ -81,21 +81,23 @@ export async function calculateComplianceMetrics(domainId?: string): Promise<Com
         : 1;
 
     // Average time in review: pair each submission with the SUBSEQUENT approval
+    const submitEvents = db.select({
+        articleId: reviewEvents.articleId,
+        createdAt: reviewEvents.createdAt
+    })
+        .from(reviewEvents)
+        .innerJoin(articles, eq(articles.id, reviewEvents.articleId))
+        .where(and(eq(reviewEvents.eventType, 'submitted_for_review'), articleDomainFilter))
+        .as('submit_events');
+
     const [reviewTimeStats] = await db.select({
         avgHours: sql<number>`coalesce(
             avg(extract(epoch from (approved_events.created_at - submit_events.created_at)) / 3600),
             0
         )::float`,
-    }).from(
-        sql`(
-            select ${reviewEvents.articleId} as article_id, ${reviewEvents.createdAt} as created_at
-            from ${reviewEvents}
-            inner join ${articles} on ${articles.id} = ${reviewEvents.articleId}
-            where ${reviewEvents.eventType} = 'submitted_for_review'
-              and ${articleDomainFilter}
-        ) submit_events`
-    ).innerJoin(
-        sql`lateral (
+    }).from(submitEvents)
+        .innerJoin(
+            sql`lateral (
             select ${reviewEvents.createdAt} as created_at
             from ${reviewEvents}
             where ${reviewEvents.articleId} = submit_events.article_id
@@ -104,8 +106,8 @@ export async function calculateComplianceMetrics(domainId?: string): Promise<Com
             order by ${reviewEvents.createdAt} asc
             limit 1
         ) approved_events`,
-        sql`true`
-    );
+            sql`true`
+        );
 
     const avgTimeInReview = reviewTimeStats?.avgHours || 0;
 
@@ -162,7 +164,7 @@ export async function getComplianceTrend(domainId?: string, days = 30) {
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     const filter = domainId
         ? and(eq(complianceSnapshots.domainId, domainId), gte(complianceSnapshots.snapshotDate, since))
-        : gte(complianceSnapshots.snapshotDate, since);
+        : and(isNull(complianceSnapshots.domainId), gte(complianceSnapshots.snapshotDate, since));
 
     return db.select()
         .from(complianceSnapshots)

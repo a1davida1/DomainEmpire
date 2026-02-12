@@ -6,36 +6,52 @@ interface ScriptConfig {
     customBody?: string;
 }
 
+/** Sanitize an ad network ID to prevent script injection — allow only alphanumeric, hyphens, and dashes. */
+function sanitizeNetworkId(id: string): string {
+    return id.replaceAll(/[^a-zA-Z0-9\-_:.]/g, '');
+}
+
 export function getMonetizationScripts(config: ScriptConfig) {
     const headScripts: string[] = [];
     const bodyScripts: string[] = [];
 
+    const safeId = config.adNetworkId ? sanitizeNetworkId(config.adNetworkId) : '';
+
     // Google AdSense
-    if (config.adNetwork === 'adsense' && config.adNetworkId) {
+    if (config.adNetwork === 'adsense' && safeId) {
         headScripts.push(`
-            <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${config.adNetworkId}"
+            <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${safeId}"
              crossorigin="anonymous"></script>
         `);
     }
 
-    // Ezoic (Placeholder)
-    if (config.adNetwork === 'ezoic' && config.adNetworkId) {
+    // Ezoic
+    if (config.adNetwork === 'ezoic' && safeId) {
         headScripts.push(`
-            <script>var ezoicId = ${config.adNetworkId};</script>
+            <script>var ezoicId = ${JSON.stringify(safeId)};</script>
             <script src="//go.ezoic.net/ezoic.js"></script>
         `);
     }
 
-    // Google Analytics (Global Fallback via Env if not in profile, can be added here)
-    if (process.env.NEXT_PUBLIC_GA_ID) {
+    // Mediavine
+    if (config.adNetwork === 'mediavine' && safeId) {
+        headScripts.push(`
+            <script async src="https://scripts.mediavine.com/tags/${safeId}.js"></script>
+        `);
+    }
+
+    // Google Analytics (Global Fallback via Env if not in profile)
+    const gaId = process.env.NEXT_PUBLIC_GA_ID;
+    if (gaId) {
+        const safeGaId = sanitizeNetworkId(gaId);
         headScripts.push(`
             <!-- Google tag (gtag.js) -->
-            <script async src="https://www.googletagmanager.com/gtag/js?id=${process.env.NEXT_PUBLIC_GA_ID}"></script>
+            <script async src="https://www.googletagmanager.com/gtag/js?id=${safeGaId}"></script>
             <script>
               window.dataLayer = window.dataLayer || [];
               function gtag(){dataLayer.push(arguments);}
               gtag('js', new Date());
-              gtag('config', '${process.env.NEXT_PUBLIC_GA_ID}');
+              gtag('config', ${JSON.stringify(safeGaId)});
             </script>
         `);
     }

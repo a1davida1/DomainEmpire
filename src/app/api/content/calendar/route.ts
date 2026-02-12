@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, articles, domains } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
-import { eq, gte, lt, and } from 'drizzle-orm';
+import { eq, gte, lt, and, isNull } from 'drizzle-orm';
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // GET /api/content/calendar - Content calendar view based on creation date
 export async function GET(request: NextRequest) {
@@ -9,9 +11,20 @@ export async function GET(request: NextRequest) {
     if (authError) return authError;
 
     const { searchParams } = new URL(request.url);
-    const startDate = searchParams.get('start') || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    const endDate = searchParams.get('end') || new Date().toISOString().split('T')[0];
+    const rawStart = searchParams.get('start');
+    const rawEnd = searchParams.get('end');
     const domainId = searchParams.get('domainId');
+
+    // Validate date formats if provided
+    if (rawStart && !ISO_DATE_RE.test(rawStart)) {
+        return NextResponse.json({ error: 'Invalid start date format. Use YYYY-MM-DD.' }, { status: 400 });
+    }
+    if (rawEnd && !ISO_DATE_RE.test(rawEnd)) {
+        return NextResponse.json({ error: 'Invalid end date format. Use YYYY-MM-DD.' }, { status: 400 });
+    }
+
+    const startDate = rawStart || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const endDate = rawEnd || new Date().toISOString().split('T')[0];
 
     try {
         // Compute nextDay to include articles created on endDate (exclusive upper bound)
@@ -21,6 +34,7 @@ export async function GET(request: NextRequest) {
         const conditions = [
             gte(articles.createdAt, new Date(startDate)),
             lt(articles.createdAt, nextDay),
+            isNull(articles.deletedAt),
         ];
 
         if (domainId) {
@@ -71,6 +85,6 @@ export async function GET(request: NextRequest) {
         });
     } catch (error) {
         console.error('Content calendar failed:', error);
-        return NextResponse.json({ error: 'Failed to get calendar' }, { status: 500 });
+        return NextResponse.json({ error: 'Internal Server Error', message: 'Failed to get calendar' }, { status: 500 });
     }
 }

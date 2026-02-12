@@ -5,8 +5,8 @@ import { eq, desc } from 'drizzle-orm';
 import { z } from 'zod';
 
 const researchSchema = z.object({
-    domain: z.string().min(3),
-    tld: z.string().default('com'),
+    domain: z.string().min(3).max(253),
+    tld: z.string().max(20).default('com'),
 });
 
 export async function GET(request: NextRequest) {
@@ -37,6 +37,48 @@ export async function GET(request: NextRequest) {
     }
 }
 
+/** Check domain availability via RDAP (the free, standards-based replacement for WHOIS). */
+async function checkDomainAvailability(fullDomain: string): Promise<{
+    isAvailable: boolean;
+    registrationPrice: number | null;
+    aftermarketPrice: number | null;
+}> {
+    try {
+        // RDAP lookup — a registered domain will return 200, unregistered returns 404
+        const rdapUrl = `https://rdap.org/domain/${fullDomain}`;
+        const resp = await fetch(rdapUrl, {
+            signal: AbortSignal.timeout(10000),
+            headers: { 'Accept': 'application/rdap+json' },
+        });
+
+        if (resp.status === 404) {
+            // Domain not registered
+            return { isAvailable: true, registrationPrice: estimateRegistrationPrice(fullDomain), aftermarketPrice: null };
+        }
+
+        if (resp.ok) {
+            // Domain is registered (taken)
+            return { isAvailable: false, registrationPrice: null, aftermarketPrice: null };
+        }
+
+        // RDAP returned an unexpected status — fall back to conservative assumption
+        return { isAvailable: false, registrationPrice: null, aftermarketPrice: null };
+    } catch {
+        // Network error or timeout — assume unknown
+        return { isAvailable: false, registrationPrice: null, aftermarketPrice: null };
+    }
+}
+
+/** Estimate registration price based on TLD. */
+function estimateRegistrationPrice(domain: string): number {
+    const tld = domain.split('.').pop()?.toLowerCase() || 'com';
+    const prices: Record<string, number> = {
+        com: 12, net: 12, org: 12, io: 40, co: 30, dev: 14, app: 14, ai: 80,
+        info: 10, biz: 12, us: 10, me: 18, xyz: 10, site: 10,
+    };
+    return prices[tld] ?? 15;
+}
+
 export async function POST(request: NextRequest) {
     const authError = await requireAuth(request);
     if (authError) return authError;
@@ -55,19 +97,28 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        // Simulated research (in production, integrate with domain APIs)
+        // Real domain availability check via RDAP
+        const availability = await checkDomainAvailability(fullDomain);
+
+        // Keyword data from the domain name itself (extract the SLD as a keyword proxy)
+        const sld = domain.toLowerCase().replaceAll(/[^a-z0-9]/g, ' ').trim();
+
         const research = {
             domain: fullDomain,
             tld,
-            isAvailable: Math.random() > 0.7,
-            registrationPrice: Math.round(10 + Math.random() * 50),
-            aftermarketPrice: Math.random() > 0.5 ? Math.round(100 + Math.random() * 5000) : null,
-            keywordVolume: Math.round(100 + Math.random() * 10000),
-            keywordCpc: Math.round((0.5 + Math.random() * 5) * 100) / 100,
-            estimatedRevenuePotential: Math.round((50 + Math.random() * 500) * 100) / 100,
+            isAvailable: availability.isAvailable,
+            registrationPrice: availability.registrationPrice,
+            aftermarketPrice: availability.aftermarketPrice,
+            keywordVolume: null as number | null,
+            keywordCpc: null as number | null,
+            estimatedRevenuePotential: null as number | null,
         };
 
-        const domainScore = calculateDomainScore(research);
+        const domainScore = calculateDomainScore({
+            isAvailable: research.isAvailable,
+            sld,
+            tld,
+        });
 
         if (existing.length > 0) {
             await db.update(domainResearch)
@@ -89,12 +140,34 @@ export async function POST(request: NextRequest) {
 
 function calculateDomainScore(r: {
     isAvailable: boolean;
-    keywordVolume: number;
-    keywordCpc: number;
+    sld: string;
+    tld: string;
 }): number {
     let score = 0;
+
+    // Availability bonus
     if (r.isAvailable) score += 20;
-    score += Math.min(25, Math.round((r.keywordVolume / 10000) * 25));
-    score += Math.min(20, Math.round((r.keywordCpc / 5) * 20));
-    return Math.min(100, score + 35); // base points for presence
+
+    // Short domains are more valuable
+    const wordCount = r.sld.split(' ').filter(Boolean).length;
+    if (wordCount <= 1) score += 15;
+    else if (wordCount === 2) score += 10;
+    else score += 5;
+
+    // Premium TLDs
+    if (r.tld === 'com') score += 20;
+    else if (['net', 'org', 'co'].includes(r.tld)) score += 12;
+    else if (['io', 'ai', 'dev'].includes(r.tld)) score += 10;
+    else score += 5;
+
+    // Domain length bonus (shorter = better)
+    const domainLength = r.sld.replaceAll(' ', '').length;
+    if (domainLength <= 6) score += 15;
+    else if (domainLength <= 10) score += 10;
+    else if (domainLength <= 15) score += 5;
+
+    // No numbers/hyphens bonus
+    if (!/\d/.test(r.sld) && !r.sld.includes('-')) score += 10;
+
+    return Math.min(100, score);
 }

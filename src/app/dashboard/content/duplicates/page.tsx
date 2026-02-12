@@ -176,7 +176,7 @@ export default function DuplicatesPage() {
                                                     <div className="text-xs text-muted-foreground">Similarity</div>
                                                 </div>
                                                 <Button variant="outline" size="sm" asChild>
-                                                    <Link href={`/articles/${dup.articleA.id}/edit`}>
+                                                    <Link href={`/dashboard/content/${dup.articleA.id}`}>
                                                         Edit <ArrowRight className="ml-2 h-3 w-3" />
                                                     </Link>
                                                 </Button>

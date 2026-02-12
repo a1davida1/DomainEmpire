@@ -1,11 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { getAIClient } from '@/lib/ai/openrouter';
+import { aiLimiter, getClientIp } from '@/lib/rate-limit';
 
 // POST /api/articles/suggest-titles - Generate title ideas
 export async function POST(request: NextRequest) {
     const authError = await requireAuth(request);
     if (authError) return authError;
+
+    const ip = getClientIp(request) || 'unknown';
+    const limit = aiLimiter(ip);
+    if (!limit.allowed) {
+        return NextResponse.json(
+            { error: 'Too many AI requests. Please slow down.' },
+            { status: 429, headers: limit.headers }
+        );
+    }
 
     try {
         const body = await request.json();
@@ -46,6 +56,6 @@ export async function POST(request: NextRequest) {
 
     } catch (error) {
         console.error('Title suggestion failed:', error);
-        return NextResponse.json({ error: 'Failed to suggest titles' }, { status: 500 });
+        return NextResponse.json({ error: 'Internal Server Error', message: 'Failed to suggest titles' }, { status: 500 });
     }
 }

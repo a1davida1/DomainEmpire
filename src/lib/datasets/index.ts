@@ -5,9 +5,8 @@
  */
 
 import { db, datasets, articleDatasets } from '@/lib/db';
-import { eq, and, lte, sql } from 'drizzle-orm';
-import type { NewDataset } from '@/lib/db/schema';
-import { createHash } from 'crypto';
+import { eq, lte, and } from 'drizzle-orm';
+import { createHash } from 'node:crypto';
 
 /**
  * Recursively sort object keys at every nesting level for deterministic stringification.
@@ -18,7 +17,7 @@ function deepSortObject(value: unknown): unknown {
     if (value instanceof Date) return value.toISOString();
 
     const sorted: Record<string, unknown> = {};
-    const keys = Object.keys(value as Record<string, unknown>).sort();
+    const keys = Object.keys(value as Record<string, unknown>).sort((a, b) => a.localeCompare(b));
     for (const key of keys) {
         sorted[key] = deepSortObject((value as Record<string, unknown>)[key]);
     }
@@ -50,7 +49,7 @@ export async function createDataset(input: {
     domainId?: string;
 }): Promise<typeof datasets.$inferSelect> {
     const storedData = input.data ?? null;
-    const dataHash = storedData !== null ? hashData(storedData) : null;
+    const dataHash = (storedData === null) ? null : hashData(storedData);
 
     const [created] = await db.insert(datasets).values({
         name: input.name,
@@ -61,7 +60,7 @@ export async function createDataset(input: {
         expiresAt: input.expiresAt,
         freshnessClass: input.freshnessClass || 'monthly',
         data: storedData || {},
-        dataHash,
+        dataHash: dataHash || null,
         version: 1,
         domainId: input.domainId,
         retrievedAt: new Date(),

@@ -90,6 +90,6 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Invalid request', details: error.issues }, { status: 400 });
         }
         console.error('Bulk deploy failed:', error);
-        return NextResponse.json({ error: 'Failed to queue bulk deployment' }, { status: 500 });
+        return NextResponse.json({ error: 'Internal Server Error', message: 'Failed to queue bulk deployment' }, { status: 500 });
     }
 }

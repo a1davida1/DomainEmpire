@@ -11,9 +11,9 @@ export const domains = pgTable('domains', {
     tld: text('tld').notNull(),
     registrar: text('registrar').default('godaddy'),
     purchaseDate: timestamp('purchase_date', { mode: 'date' }),
-    purchasePrice: real('purchase_price'),
+    purchasePrice: numeric('purchase_price', { precision: 12, scale: 2 }),
     renewalDate: timestamp('renewal_date', { mode: 'date' }),
-    renewalPrice: real('renewal_price'),
+    renewalPrice: numeric('renewal_price', { precision: 12, scale: 2 }),
 
     // Classification
     status: text('status', {
@@ -27,7 +27,7 @@ export const domains = pgTable('domains', {
     subNiche: text('sub_niche'),
 
     // Redirect config
-    redirectTargetId: uuid('redirect_target_id'),
+    redirectTargetId: uuid('redirect_target_id').references((): any => domains.id, { onDelete: 'set null' }),
 
     // Deployment
     githubRepo: text('github_repo'),
@@ -35,7 +35,12 @@ export const domains = pgTable('domains', {
     isDeployed: boolean('is_deployed').default(false),
     lastDeployedAt: timestamp('last_deployed_at'),
     siteTemplate: text('site_template', {
-        enum: ['authority', 'comparison', 'calculator', 'review', 'tool', 'hub', 'decision', 'cost_guide', 'niche', 'info', 'consumer', 'brand']
+        enum: [
+            'authority', 'comparison', 'calculator', 'review', 'tool', 'hub',
+            'decision', 'cost_guide', 'niche', 'info', 'consumer', 'brand',
+            'magazine', 'landing', 'docs', 'storefront', 'minimal', 'dashboard',
+            'newsletter', 'community',
+        ]
     }).default('authority'),
     // Organization & Infrastructure
     vertical: text('vertical'), // 'Legal', 'Insurance', 'Health', etc.
@@ -83,6 +88,7 @@ export const domains = pgTable('domains', {
     // Timestamps
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow(),
+    deletedAt: timestamp('deleted_at'),
 }, (t) => ({
     statusIdx: index('domain_status_idx').on(t.status),
     tierIdx: index('domain_tier_idx').on(t.tier),
@@ -100,12 +106,12 @@ export const keywords = pgTable('keywords', {
 
     // Search metrics
     monthlyVolume: integer('monthly_volume'),
-    cpc: real('cpc'),
+    cpc: numeric('cpc', { precision: 12, scale: 2 }),
     difficulty: integer('difficulty'),
     serpPosition: integer('serp_position'),
 
     // Content mapping
-    articleId: uuid('article_id'),
+    articleId: uuid('article_id').references(() => articles.id, { onDelete: 'set null' }),
     intent: text('intent', {
         enum: ['informational', 'transactional', 'navigational', 'commercial']
     }).default('informational'),
@@ -123,6 +129,8 @@ export const keywords = pgTable('keywords', {
     domainIdx: index('keyword_domain_idx').on(t.domainId),
     statusIdx: index('keyword_status_idx').on(t.status),
     priorityIdx: index('keyword_priority_idx').on(t.priority),
+    articleIdx: index('keyword_article_idx').on(t.articleId),
+    domainKeywordUnq: unique('keyword_domain_keyword_unq').on(t.domainId, t.keyword),
 }));
 
 // ===========================================
@@ -160,8 +168,8 @@ export const articles = pgTable('articles', {
     aiModel: text('ai_model'),
     aiPromptVersion: text('ai_prompt_version'),
     generationPasses: integer('generation_passes').default(0),
-    generationCost: real('generation_cost'),
-    humanizationScore: real('humanization_score'),
+    generationCost: numeric('generation_cost', { precision: 12, scale: 2 }),
+    humanizationScore: numeric('humanization_score', { precision: 5, scale: 2 }),
 
     // Content fingerprint for duplicate detection
     contentFingerprint: text('content_fingerprint'),
@@ -180,12 +188,12 @@ export const articles = pgTable('articles', {
     pageviews30d: integer('pageviews_30d').default(0),
     uniqueVisitors30d: integer('unique_visitors_30d').default(0),
     avgTimeOnPage: integer('avg_time_on_page'),
-    bounceRate: real('bounce_rate'),
-    revenue30d: real('revenue_30d').default(0),
+    bounceRate: numeric('bounce_rate', { precision: 5, scale: 2 }),
+    revenue30d: numeric('revenue_30d', { precision: 12, scale: 2 }).default('0'),
 
     // Content freshness
     lastRefreshedAt: timestamp('last_refreshed_at'),
-    stalenessScore: real('staleness_score'),
+    stalenessScore: numeric('staleness_score', { precision: 5, scale: 2 }),
 
     // YMYL & Review
     ymylLevel: text('ymyl_level', {
@@ -197,7 +205,7 @@ export const articles = pgTable('articles', {
 
     // Content Type & Structured Config
     contentType: text('content_type', {
-        enum: ['article', 'comparison', 'calculator', 'cost_guide', 'lead_capture', 'health_decision', 'checklist', 'faq', 'review']
+        enum: ['article', 'comparison', 'calculator', 'cost_guide', 'lead_capture', 'health_decision', 'checklist', 'faq', 'review', 'wizard']
     }).default('article'),
     calculatorConfig: jsonb('calculator_config').$type<{
         inputs: Array<{ id: string; label: string; type: 'number' | 'select' | 'range'; default?: number; min?: number; max?: number; step?: number; options?: Array<{ label: string; value: number }> }>;
@@ -225,14 +233,61 @@ export const articles = pgTable('articles', {
         factors?: Array<{ name: string; impact: 'low' | 'medium' | 'high'; description: string }>;
     }>(),
 
+    // Wizard config
+    wizardConfig: jsonb('wizard_config').$type<{
+        steps: Array<{
+            id: string;
+            title: string;
+            description?: string;
+            fields: Array<{
+                id: string;
+                type: 'radio' | 'checkbox' | 'select' | 'number' | 'text';
+                label: string;
+                options?: Array<{ value: string; label: string }>;
+                required?: boolean;
+            }>;
+            nextStep?: string;
+            branches?: Array<{ condition: string; goTo: string }>;
+        }>;
+        resultRules: Array<{
+            condition: string;
+            title: string;
+            body: string;
+            cta?: { text: string; url: string };
+        }>;
+        resultTemplate: 'summary' | 'recommendation' | 'score' | 'eligibility';
+        collectLead?: {
+            fields: string[];
+            consentText: string;
+            endpoint: string;
+        };
+    }>(),
+
+    // Geo-adaptive content data
+    geoData: jsonb('geo_data').$type<{
+        regions: Record<string, { content: string; label?: string }>;
+        fallback: string;
+    }>(),
+
+    // Scroll-triggered CTA config
+    ctaConfig: jsonb('cta_config').$type<{
+        text: string;
+        buttonLabel: string;
+        buttonUrl: string;
+        style: 'bar' | 'card' | 'banner';
+    }>(),
+
     // Timestamps
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow(),
+    deletedAt: timestamp('deleted_at'),
 }, (t) => ({
     domainIdx: index('article_domain_idx').on(t.domainId),
     statusIdx: index('article_status_idx').on(t.status),
     createdIdx: index('article_created_idx').on(t.createdAt),
+    publishedIdx: index('article_published_idx').on(t.publishedAt),
     contentTypeIdx: index('article_content_type_idx').on(t.contentType),
+    unq: uniqueIndex('article_domain_slug_uidx').on(t.domainId, t.slug),
 }));
 
 // ===========================================
@@ -302,7 +357,7 @@ export const contentQueue = pgTable('content_queue', {
     // References
     domainId: uuid('domain_id').references(() => domains.id, { onDelete: 'cascade' }),
     articleId: uuid('article_id').references(() => articles.id, { onDelete: 'cascade' }),
-    keywordId: uuid('keyword_id').references(() => keywords.id),
+    keywordId: uuid('keyword_id').references(() => keywords.id, { onDelete: 'set null' }),
 
     // Job data
     payload: jsonb('payload').default({}),
@@ -319,7 +374,7 @@ export const contentQueue = pgTable('content_queue', {
 
     // Cost tracking
     apiTokensUsed: integer('api_tokens_used').default(0),
-    apiCost: real('api_cost').default(0),
+    apiCost: numeric('api_cost', { precision: 12, scale: 2 }).default('0'),
 
     // Timing
     createdAt: timestamp('created_at').defaultNow(),
@@ -329,7 +384,13 @@ export const contentQueue = pgTable('content_queue', {
     // Scheduling
     scheduledFor: timestamp('scheduled_for'), // For future scheduling
     lockedUntil: timestamp('locked_until'), // For worker locking
-});
+}, (t) => ({
+    scheduledForIdx: index('content_queue_scheduled_for_idx').on(t.scheduledFor),
+    statusIdx: index('content_queue_status_idx').on(t.status),
+    priorityIdx: index('content_queue_priority_idx').on(t.priority),
+    lockedUntilIdx: index('content_queue_locked_until_idx').on(t.lockedUntil),
+    jobTypeIdx: index('content_queue_job_type_idx').on(t.jobType),
+}));
 
 // ===========================================
 // DOMAIN RESEARCH LOG: Track domains investigated
@@ -346,9 +407,9 @@ export const domainResearch = pgTable('domain_research', {
 
     // Scoring
     keywordVolume: integer('keyword_volume'),
-    keywordCpc: real('keyword_cpc'),
-    estimatedRevenuePotential: real('estimated_revenue_potential'),
-    domainScore: real('domain_score'),
+    keywordCpc: numeric('keyword_cpc', { precision: 12, scale: 2 }),
+    estimatedRevenuePotential: numeric('estimated_revenue_potential', { precision: 12, scale: 2 }),
+    domainScore: numeric('domain_score', { precision: 5, scale: 2 }),
 
     // Full evaluation data
     evaluationResult: jsonb('evaluation_result'),
@@ -381,10 +442,10 @@ export const revenueSnapshots = pgTable('revenue_snapshots', {
     snapshotDate: timestamp('snapshot_date', { mode: 'date' }).notNull(),
 
     // Revenue breakdown
-    adRevenue: real('ad_revenue').default(0),
-    affiliateRevenue: real('affiliate_revenue').default(0),
-    leadGenRevenue: real('lead_gen_revenue').default(0),
-    totalRevenue: real('total_revenue').default(0),
+    adRevenue: numeric('ad_revenue', { precision: 12, scale: 2 }).default('0'),
+    affiliateRevenue: numeric('affiliate_revenue', { precision: 12, scale: 2 }).default('0'),
+    leadGenRevenue: numeric('lead_gen_revenue', { precision: 12, scale: 2 }).default('0'),
+    totalRevenue: numeric('total_revenue', { precision: 12, scale: 2 }).default('0'),
 
     // Traffic
     pageviews: integer('pageviews').default(0),
@@ -392,10 +453,10 @@ export const revenueSnapshots = pgTable('revenue_snapshots', {
     organicVisitors: integer('organic_visitors').default(0),
 
     // SEO
-    avgPosition: real('avg_position'),
+    avgPosition: numeric('avg_position', { precision: 8, scale: 2 }),
     impressions: integer('impressions').default(0),
     clicks: integer('clicks').default(0),
-    ctr: real('ctr'),
+    ctr: numeric('ctr', { precision: 8, scale: 4 }),
 
     createdAt: timestamp('created_at').defaultNow(),
 }, (t) => ({
@@ -432,8 +493,8 @@ export const siteTemplates = pgTable('site_templates', {
 // ===========================================
 export const apiCallLogs = pgTable('api_call_logs', {
     id: uuid('id').primaryKey().defaultRandom(),
-    articleId: uuid('article_id').references(() => articles.id),
-    domainId: uuid('domain_id').references(() => domains.id),
+    articleId: uuid('article_id').references(() => articles.id, { onDelete: 'set null' }),
+    domainId: uuid('domain_id').references(() => domains.id, { onDelete: 'set null' }),
 
     stage: text('stage', {
         enum: ['keyword_research', 'outline', 'draft', 'humanize', 'seo', 'meta', 'classify', 'research', 'evaluate']
@@ -441,11 +502,16 @@ export const apiCallLogs = pgTable('api_call_logs', {
     model: text('model').notNull(),
     inputTokens: integer('input_tokens').notNull(),
     outputTokens: integer('output_tokens').notNull(),
-    cost: real('cost').notNull(),
+    cost: numeric('cost', { precision: 12, scale: 4 }).notNull(),
     durationMs: integer('duration_ms'),
 
     createdAt: timestamp('created_at').defaultNow(),
-});
+}, (t) => ({
+    articleIdx: index('api_call_article_idx').on(t.articleId),
+    domainIdx: index('api_call_domain_idx').on(t.domainId),
+    stageIdx: index('api_call_stage_idx').on(t.stage),
+    createdIdx: index('api_call_created_idx').on(t.createdAt),
+}));
 
 // ===========================================
 // EXPENSES: Track all portfolio costs for ROI calculations
@@ -493,12 +559,15 @@ export const notifications = pgTable('notifications', {
     actionUrl: text('action_url'),
     isRead: boolean('is_read').default(false),
     emailSent: boolean('email_sent').default(false),
+    metadata: jsonb('metadata').$type<{ datasetId?: string;[key: string]: any }>().default({}),
+    fingerprint: text('fingerprint'),
 
     createdAt: timestamp('created_at').defaultNow(),
 }, (t) => ({
     isReadIdx: index('notification_is_read_idx').on(t.isRead),
     domainIdx: index('notification_domain_idx').on(t.domainId),
     typeIdx: index('notification_type_idx').on(t.type),
+    fingerprintIdx: uniqueIndex('notification_fingerprint_idx').on(t.fingerprint),
 }));
 
 // ===========================================
@@ -529,7 +598,8 @@ export const competitors = pgTable('competitors', {
     lastCheckedAt: timestamp('last_checked_at'),
     createdAt: timestamp('created_at').defaultNow(),
 }, (t) => ({
-    unq: unique().on(t.domainId, t.competitorDomain)
+    unq: unique().on(t.domainId, t.competitorDomain),
+    domainIdx: index('competitor_domain_idx').on(t.domainId),
 }));
 
 // ===========================================
@@ -559,7 +629,10 @@ export const backlinkSnapshots = pgTable('backlink_snapshots', {
 
     snapshotDate: timestamp('snapshot_date', { mode: 'date' }).notNull(),
     createdAt: timestamp('created_at').defaultNow(),
-});
+}, (t) => ({
+    domainIdx: index('backlink_snapshot_domain_idx').on(t.domainId),
+    dateIdx: index('backlink_snapshot_date_idx').on(t.snapshotDate),
+}));
 
 // ===========================================
 // USERS: Multi-user auth with roles
@@ -590,11 +663,11 @@ export const users = pgTable('users', {
 export const sessions = pgTable('sessions', {
     id: uuid('id').primaryKey().defaultRandom(),
     userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-    token: text('token').notNull().unique(),
+    tokenHash: text('token_hash').notNull().unique(),
     expiresAt: timestamp('expires_at').notNull(),
     createdAt: timestamp('created_at').defaultNow(),
 }, (t) => ({
-    tokenIdx: index('session_token_idx').on(t.token),
+    tokenHashIdx: index('session_token_hash_idx').on(t.tokenHash),
     expiresIdx: index('session_expires_idx').on(t.expiresAt),
     userIdx: index('session_user_idx').on(t.userId),
 }));
@@ -647,7 +720,6 @@ export const reviewEvents = pgTable('review_events', {
     actorIdx: index('review_event_actor_idx').on(t.actorId),
     typeIdx: index('review_event_type_idx').on(t.eventType),
     createdIdx: index('review_event_created_idx').on(t.createdAt),
-    unq: uniqueIndex('review_event_article_type_actor_uidx').on(t.articleId, t.eventType, t.actorId),
 }));
 
 // ===========================================
@@ -831,6 +903,22 @@ export const articleDatasets = pgTable('article_datasets', {
     unq: unique('article_dataset_unq').on(t.articleId, t.datasetId),
     articleIdx: index('article_dataset_article_idx').on(t.articleId),
     datasetIdx: index('article_dataset_dataset_idx').on(t.datasetId),
+}));
+
+// ===========================================
+// IDEMPOTENCY KEYS: Prevent duplicate mutations from retries
+// ===========================================
+export const idempotencyKeys = pgTable('idempotency_keys', {
+    key: text('key').primaryKey(),
+    method: text('method').notNull(),
+    path: text('path').notNull(),
+    statusCode: integer('status_code').notNull(),
+    responseBody: text('response_body').notNull(),
+    status: text('status', { enum: ['started', 'completed'] }).notNull().default('completed'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    expiresAt: timestamp('expires_at').notNull(),
+}, (t) => ({
+    expiresIdx: index('idempotency_expires_idx').on(t.expiresAt),
 }));
 
 // ===========================================

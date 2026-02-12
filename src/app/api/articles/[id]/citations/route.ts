@@ -8,8 +8,14 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
     const authError = await requireAuth(request);
     if (authError) return authError;
 
+    const { searchParams } = request.nextUrl;
+    const limit = Math.min(Number(searchParams.get('limit')) || 100, 500);
+    const offset = Math.max(Number(searchParams.get('offset')) || 0, 0);
+
     const citationList = await getCitations(params.id);
-    return NextResponse.json(citationList);
+    const total = citationList.length;
+    const paginated = citationList.slice(offset, offset + limit);
+    return NextResponse.json({ data: paginated, total, limit, offset });
 }
 
 // POST /api/articles/[id]/citations — add a citation

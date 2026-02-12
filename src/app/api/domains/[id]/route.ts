@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, domains } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { z } from 'zod';
+import { notDeleted, softDeleteDomain } from '@/lib/db/soft-delete';
 
 // Validation schema for updating a domain
 const updateDomainSchema = z.object({
@@ -39,7 +40,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         const result = await db
             .select()
             .from(domains)
-            .where(eq(domains.id, id))
+            .where(and(eq(domains.id, id), notDeleted(domains)))
             .limit(1);
 
         if (result.length === 0) {
@@ -96,7 +97,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
                 ...data,
                 updatedAt: new Date(),
             })
-            .where(eq(domains.id, id))
+            .where(and(eq(domains.id, id), notDeleted(domains)))
             .returning();
 
         if (updated.length === 0) {
@@ -116,7 +117,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     }
 }
 
-// DELETE /api/domains/[id] - Delete a domain
+// DELETE /api/domains/[id] - Soft-delete a domain (and cascade to articles)
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
     const authError = await requireAuth(request);
     if (authError) return authError;
@@ -124,26 +125,19 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     try {
         const { id } = await params;
 
-        // Check if domain exists
-        const existing = await db
-            .select({ id: domains.id, domain: domains.domain })
-            .from(domains)
-            .where(eq(domains.id, id))
-            .limit(1);
+        const { domain } = await softDeleteDomain(id);
 
-        if (existing.length === 0) {
+        if (!domain) {
             return NextResponse.json(
                 { error: 'Domain not found' },
                 { status: 404 }
             );
         }
 
-        // Delete the domain (cascades to keywords, articles, etc.)
-        await db.delete(domains).where(eq(domains.id, id));
-
         return NextResponse.json({
             success: true,
-            message: `Domain ${existing[0].domain} deleted`
+            message: `Domain ${domain} deleted`,
+            restorable: true,
         });
     } catch (error) {
         console.error('Failed to delete domain:', error);

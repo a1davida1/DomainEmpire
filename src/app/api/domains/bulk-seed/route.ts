@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, domains, contentQueue } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, inArray, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 
@@ -22,8 +22,8 @@ export async function POST(request: NextRequest) {
         const body = await request.json();
         const { domainIds, tier, status, articleCount, priority } = bulkSeedSchema.parse(body);
 
-        // Build query conditions
-        const conditions = [];
+        // Build query conditions (always exclude soft-deleted)
+        const conditions = [isNull(domains.deletedAt)];
 
         if (domainIds && domainIds.length > 0) {
             conditions.push(inArray(domains.id, domainIds));

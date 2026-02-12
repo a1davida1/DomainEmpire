@@ -7,16 +7,31 @@ export async function GET(request: NextRequest) {
     const authError = await requireAuth(request);
     if (authError) return authError;
 
-    const { searchParams } = request.nextUrl;
-    const days = parseInt(searchParams.get('days') || '30', 10);
-    const domainId = searchParams.get('domainId') || undefined;
+    try {
+        const { searchParams } = request.nextUrl;
+        const daysStr = searchParams.get('days') || '30';
+        const days = parseInt(daysStr, 10);
 
-    const snapshots = await getComplianceTrend(domainId, days);
+        if (isNaN(days) || days <= 0 || days > 365) {
+            return NextResponse.json({ error: 'Invalid days parameter (1-365)' }, { status: 400 });
+        }
 
-    const trend = snapshots.map(s => ({
-        date: s.snapshotDate,
-        ...(s.metrics as Record<string, unknown>),
-    }));
+        const domainId = searchParams.get('domainId') || undefined;
+        if (domainId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(domainId)) {
+            return NextResponse.json({ error: 'Invalid domainId format' }, { status: 400 });
+        }
 
-    return NextResponse.json(trend);
+        const snapshots = await getComplianceTrend(domainId, days);
+
+        const trend = snapshots.map(s => ({
+            id: s.id,
+            date: s.snapshotDate,
+            ...(s.metrics as Record<string, unknown>),
+        }));
+
+        return NextResponse.json(trend);
+    } catch (error) {
+        console.error('Compliance trend error:', error);
+        return NextResponse.json({ error: 'Internal Server Error', message: 'Failed to retrieve compliance trend' }, { status: 500 });
+    }
 }

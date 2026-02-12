@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, domains, contentQueue } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
-import { eq } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
+import { checkIdempotencyKey, storeIdempotencyResult } from '@/lib/api/idempotency';
 
 const deploySchema = z.object({
     createRepo: z.boolean().default(true),
@@ -17,10 +18,16 @@ interface PageProps {
 
 // POST /api/domains/[id]/deploy - Deploy domain site
 export async function POST(request: NextRequest, { params }: PageProps) {
+    const cached = await checkIdempotencyKey(request);
+    if (cached) return cached;
+
     const authError = await requireAuth(request);
     if (authError) return authError;
 
     const { id } = await params;
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+        return NextResponse.json({ error: 'Invalid domain ID format' }, { status: 400 });
+    }
 
     try {
         // Parse JSON with error handling for malformed JSON
@@ -35,7 +42,7 @@ export async function POST(request: NextRequest, { params }: PageProps) {
         const domainResult = await db
             .select()
             .from(domains)
-            .where(eq(domains.id, id))
+            .where(and(eq(domains.id, id), isNull(domains.deletedAt)))
             .limit(1);
 
         if (domainResult.length === 0) {
@@ -64,12 +71,14 @@ export async function POST(request: NextRequest, { params }: PageProps) {
             maxAttempts: 3,
         });
 
-        return NextResponse.json({
+        const response = NextResponse.json({
             success: true,
             jobId,
             domain: domain.domain,
             message: 'Deployment queued',
         });
+        await storeIdempotencyResult(request, response);
+        return response;
     } catch (error) {
         if (error instanceof z.ZodError) {
             return NextResponse.json(
@@ -93,7 +102,7 @@ export async function GET(request: NextRequest, { params }: PageProps) {
         const domainResult = await db
             .select()
             .from(domains)
-            .where(eq(domains.id, id))
+            .where(and(eq(domains.id, id), isNull(domains.deletedAt)))
             .limit(1);
 
         if (domainResult.length === 0) {

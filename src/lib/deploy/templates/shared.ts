@@ -32,21 +32,25 @@ export interface ArticleDatasetInfo {
 // ==============================
 
 export function escapeHtml(unsafe: string): string {
-    return unsafe
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
+    const map: Record<string, string> = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;',
+    };
+    return unsafe.replace(/[&<>"']/g, (m) => map[m]);
 }
 
 export function escapeAttr(unsafe: string): string {
-    return unsafe
-        .replace(/&/g, '&amp;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
+    const map: Record<string, string> = {
+        '&': '&amp;',
+        '"': '&quot;',
+        "'": '&#39;',
+        '<': '&lt;',
+        '>': '&gt;',
+    };
+    return unsafe.replace(/[&"'<>]/g, (m) => map[m]);
 }
 
 // ==============================
@@ -141,9 +145,15 @@ export async function buildTrustElements(
         .orderBy(citations.position);
 
     if (articleCitations.length > 0) {
-        const sourceItems = articleCitations.map((c, i) =>
-            `<li>[${i + 1}] <a href="${escapeAttr(c.sourceUrl)}" rel="nofollow noopener" target="_blank">${escapeHtml(c.sourceTitle || c.sourceUrl)}</a>${c.retrievedAt ? ` <small>(Retrieved ${new Date(c.retrievedAt).toLocaleDateString()})</small>` : ''}</li>`
-        ).join('\n');
+        const sourceItems = articleCitations.map((c, i) => {
+            const index = i + 1;
+            const title = escapeHtml(c.sourceTitle || c.sourceUrl);
+            const url = escapeAttr(c.sourceUrl);
+            const retrieved = c.retrievedAt
+                ? ` <small>(Retrieved ${new Date(c.retrievedAt).toLocaleDateString()})</small>`
+                : '';
+            return `<li>[${index}] <a href="${url}" rel="nofollow noopener" target="_blank">${title}</a>${retrieved}</li>`;
+        }).join('\n');
         sections.push(`<section class="sources"><h2>Sources</h2><ol>${sourceItems}</ol></section>`);
     }
 
@@ -260,6 +270,62 @@ import Base from '../layouts/Base.astro';
 <Base title="${escapeAttr(titleAttr)}" description="${escapeAttr(descAttr)}">
   ${bodyHtml}${headSlot}
 </Base>`;
+}
+
+// ==============================
+// Freshness Badge
+// ==============================
+
+export function buildFreshnessBadge(
+    article: Article,
+    datasets: ArticleDatasetInfo[],
+): string {
+    if (datasets.length === 0 && !article.updatedAt) return '';
+
+    const now = Date.now();
+    const thirtyDays = 30 * 24 * 60 * 60 * 1000;
+    const ninetyDays = 90 * 24 * 60 * 60 * 1000;
+
+    // Check dataset freshness
+    let allFresh = true;
+    let anyExpired = false;
+    for (const { dataset } of datasets) {
+        if (dataset.expiresAt && new Date(dataset.expiresAt).getTime() < now) {
+            anyExpired = true;
+            allFresh = false;
+        }
+    }
+
+    // Check article freshness
+    const articleAge = article.updatedAt ? now - new Date(article.updatedAt).getTime() : Infinity;
+    if (articleAge > ninetyDays) allFresh = false;
+
+    let badgeClass: string;
+    let badgeText: string;
+
+    if (anyExpired) {
+        badgeClass = 'freshness-red';
+        badgeText = 'Needs update';
+    } else if (allFresh && articleAge < thirtyDays) {
+        badgeClass = 'freshness-green';
+        const date = article.updatedAt ? new Date(article.updatedAt).toLocaleDateString() : 'recently';
+        badgeText = `Verified ${date}`;
+    } else {
+        badgeClass = 'freshness-yellow';
+        badgeText = 'Review pending';
+    }
+
+    return `<div class="freshness-badge ${badgeClass}"><span class="freshness-dot"></span>${escapeHtml(badgeText)}</div>`;
+}
+
+// ==============================
+// Print Button
+// ==============================
+
+export function buildPrintButton(contentType: string): string {
+    const printableTypes = ['cost_guide', 'comparison', 'checklist', 'faq', 'review'];
+    if (!printableTypes.includes(contentType)) return '';
+    return `<button class="print-btn" onclick="window.print()" type="button">Save as PDF</button>`;
 }
 
 // ==============================

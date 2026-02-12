@@ -7,9 +7,6 @@ import { eq } from 'drizzle-orm';
 function stripHtml(html: string): string {
     return html
         .replaceAll(/<[^>]*>/g, ' ')  // Remove HTML tags
-        .replaceAll('&nbsp;', ' ')   // Replace &nbsp;
-        .replaceAll(/&[a-z]+;/gi, ' ') // Remove other HTML entities
-        .replaceAll(/\s+/g, ' ')       // Collapse multiple spaces
         .trim();
 }
 
@@ -63,6 +60,9 @@ export async function GET(request: NextRequest, { params }: PageProps) {
     if (authError) return authError;
 
     const { id } = await params;
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+        return NextResponse.json({ error: 'Invalid article ID format' }, { status: 400 });
+    }
 
     try {
         const articleResult = await db.select().from(articles).where(eq(articles.id, id)).limit(1);
@@ -154,6 +154,6 @@ export async function GET(request: NextRequest, { params }: PageProps) {
         });
     } catch (error) {
         console.error('Article quality check failed:', error);
-        return NextResponse.json({ error: 'Failed to analyze quality' }, { status: 500 });
+        return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }

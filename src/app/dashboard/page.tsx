@@ -8,23 +8,23 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { db, domains, articles, monetizationProfiles, contentQueue } from '@/lib/db';
-import { eq, count, sum, and, gte, lt, desc, sql } from 'drizzle-orm';
+import { eq, count, sum, and, gte, lt, desc, sql, isNull } from 'drizzle-orm';
 
-const TARGET_WEEKLY_ARTICLES = 85;
+const TARGET_WEEKLY_ARTICLES = Number(process.env.TARGET_WEEKLY_ARTICLES) || 85;
 
 // Force dynamic rendering for real-time data
 export const dynamic = 'force-dynamic';
 
 async function getDashboardMetrics() {
     try {
-        // Get domain count
-        const domainCount = await db.select({ count: count() }).from(domains);
+        // Get domain count (exclude soft-deleted)
+        const domainCount = await db.select({ count: count() }).from(domains).where(isNull(domains.deletedAt));
 
-        // Get published article count
+        // Get published article count (exclude soft-deleted)
         const articleCount = await db
             .select({ count: count() })
             .from(articles)
-            .where(eq(articles.status, 'published'));
+            .where(and(eq(articles.status, 'published'), isNull(articles.deletedAt)));
 
         // Get total revenue from monetization profiles
         const revenue = await db
@@ -62,15 +62,16 @@ async function getDashboardMetrics() {
             .where(
                 and(
                     eq(articles.status, 'published'),
-                    gte(articles.publishedAt, startOfWeek)
+                    gte(articles.publishedAt, startOfWeek),
+                    isNull(articles.deletedAt)
                 )
             );
 
-        // Get deployed domain count
+        // Get deployed domain count (exclude soft-deleted)
         const deployedCount = await db
             .select({ count: count() })
             .from(domains)
-            .where(eq(domains.isDeployed, true));
+            .where(and(eq(domains.isDeployed, true), isNull(domains.deletedAt)));
 
         return {
             domains: domainCount[0]?.count ?? 0,
@@ -107,6 +108,7 @@ async function getTopPerformers() {
             })
             .from(domains)
             .leftJoin(monetizationProfiles, eq(domains.id, monetizationProfiles.domainId))
+            .where(isNull(domains.deletedAt))
             .orderBy(desc(monetizationProfiles.revenueLast30d))
             .limit(5);
 
@@ -131,7 +133,8 @@ async function getNeedsAttention() {
             .where(
                 and(
                     gte(domains.renewalDate, new Date()),
-                    lt(domains.renewalDate, thirtyDaysFromNow)
+                    lt(domains.renewalDate, thirtyDaysFromNow),
+                    isNull(domains.deletedAt)
                 )
             );
 
@@ -147,7 +150,7 @@ async function getNeedsAttention() {
         const stuckArticles = await db
             .select({ count: count() })
             .from(articles)
-            .where(eq(articles.status, 'review'));
+            .where(and(eq(articles.status, 'review'), isNull(articles.deletedAt)));
 
         if ((stuckArticles[0]?.count ?? 0) > 0) {
             issues.push({
@@ -178,7 +181,8 @@ async function getNeedsAttention() {
             .where(
                 and(
                     eq(domains.status, 'active'),
-                    eq(domains.isDeployed, false)
+                    eq(domains.isDeployed, false),
+                    isNull(domains.deletedAt)
                 )
             );
 

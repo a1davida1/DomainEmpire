@@ -42,6 +42,11 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
     const authError = await requireAuth(request);
     if (authError) return authError;
 
+    const user = getRequestUser(request);
+    if (!user) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { id } = params;
 
     try {
@@ -57,20 +62,17 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
             return NextResponse.json({ error: `Invalid contentType. Must be one of: ${VALID_CONTENT_TYPES.join(', ')}` }, { status: 400 });
         }
 
-        const existingDefault = await db.query.articles.findFirst({
+        const existing = await db.query.articles.findFirst({
             where: eq(articles.id, id),
         });
 
-        if (!existingDefault) {
+        if (!existing) {
             return NextResponse.json({ error: 'Article not found' }, { status: 404 });
         }
 
-        // Check for duplicate slug (another article with same slug)
+        // Check for duplicate slug
         const duplicateSlug = await db.query.articles.findFirst({
-            where: and(
-                eq(articles.slug, slug),
-                ne(articles.id, id)
-            ),
+            where: and(ne(articles.id, id), eq(articles.slug, slug)),
         });
 
         if (duplicateSlug) {
@@ -94,41 +96,42 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
         const jsonbError = validateJsonbFields(body, updateData);
         if (jsonbError) return jsonbError;
 
-        await db.update(articles)
-            .set(updateData)
-            .where(eq(articles.id, id));
+        await db.transaction(async (tx) => {
+            await tx.update(articles)
+                .set(updateData)
+                .where(eq(articles.id, id));
 
-        // Create revision snapshot + audit event
-        const user = getRequestUser(request);
-        if (!user) {
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-        }
+            // Create revision snapshot
+            const revisionId = await createRevision({
+                tx,
+                articleId: id,
+                title,
+                contentMarkdown: content,
+                metaDescription: metaDescription || null,
+                changeType: 'manual_edit',
+                changeSummary: body.changeSummary || 'Manual edit via dashboard',
+                createdById: user.id || null,
+            });
 
-        const revisionId = await createRevision({
-            articleId: id,
-            title,
-            contentMarkdown: content,
-            metaDescription: metaDescription || null,
-            changeType: 'manual_edit',
-            changeSummary: body.changeSummary || 'Manual edit via dashboard',
-            createdById: user.id || null,
-        });
-
-        if (user.id) {
+            // Log audit event
             await logReviewEvent({
+                tx,
                 articleId: id,
                 revisionId,
-                actorId: user.id,
-                actorRole: user.role,
+                actorId: user.id ?? null,
+                actorRole: user.role || 'editor',
                 eventType: 'edited',
-                metadata: { fields: Object.keys(body) },
+                metadata: {
+                    fields: Object.keys(body).filter(k => body[k] !== undefined),
+                    timestamp: new Date().toISOString()
+                },
             });
-        }
+        });
 
         return NextResponse.json({ success: true });
 
     } catch (error) {
         console.error('Failed to update article:', error);
-        return NextResponse.json({ error: 'Failed to update article' }, { status: 500 });
+        return NextResponse.json({ error: 'Internal Server Error', message: 'Failed to update article' }, { status: 500 });
     }
 }

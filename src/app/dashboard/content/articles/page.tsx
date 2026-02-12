@@ -13,36 +13,42 @@ import {
 import { Card, CardContent } from '@/components/ui/card';
 import { Search, Filter, Edit, ExternalLink, FileText, ChevronLeft, ChevronRight } from 'lucide-react';
 import { db, articles } from '@/lib/db';
-import { desc, like, or, eq, and } from 'drizzle-orm';
+import { desc, like, or, eq, and, isNull, type SQL } from 'drizzle-orm';
+import { formatDate, formatNumber } from '@/lib/format-utils';
 
 interface PageProps {
-    searchParams: Promise<{ q?: string; status?: string; page?: string }>;
+    readonly searchParams: Promise<{ readonly q?: string; readonly status?: string; readonly page?: string }>;
 }
 
 export const dynamic = 'force-dynamic';
 
-export default async function ArticlesPage({ searchParams }: PageProps) {
+export default async function ArticlesPage(props: Readonly<PageProps>) {
+    const { searchParams } = props;
     const params = await searchParams;
     const query = params.q || '';
     const page = Math.max(1, Number.parseInt(params.page || '1') || 1);
     const limit = 20;
     const offset = (page - 1) * limit;
 
-    // Build filter
-    const filters = [];
+    const createPageUrl = (p: number) => {
+        const sp = new URLSearchParams();
+        if (query) sp.set('q', query);
+        if (params.status) sp.set('status', params.status);
+        sp.set('page', p.toString());
+        return `/dashboard/content/articles?${sp.toString()}`;
+    };
+
+    // Build filter (always exclude soft-deleted)
+    const filters: SQL[] = [isNull(articles.deletedAt)];
     if (query) {
-        filters.push(or(like(articles.title, `%${query}%`), like(articles.targetKeyword, `%${query}%`)));
+        const searchFilter = or(like(articles.title, `%${query}%`), like(articles.targetKeyword, `%${query}%`));
+        if (searchFilter) filters.push(searchFilter);
     }
     if (params.status) {
         filters.push(eq(articles.status, params.status as any));
     }
 
-    let whereClause = undefined;
-    if (filters.length > 1) {
-        whereClause = and(...filters);
-    } else if (filters.length === 1) {
-        whereClause = filters[0];
-    }
+    const whereClause = and(...filters);
 
 
     const allArticles = await db.query.articles.findMany({
@@ -133,9 +139,9 @@ export default async function ArticlesPage({ searchParams }: PageProps) {
                                                 {article.status}
                                             </Badge>
                                         </TableCell>
-                                        <TableCell>{article.wordCount || '-'}</TableCell>
+                                        <TableCell>{formatNumber(article.wordCount)}</TableCell>
                                         <TableCell>
-                                            {article.createdAt && new Date(article.createdAt).toLocaleDateString()}
+                                            {formatDate(article.createdAt)}
                                         </TableCell>
                                         <TableCell className="text-right">
                                             <div className="flex justify-end gap-2">
@@ -175,7 +181,7 @@ export default async function ArticlesPage({ searchParams }: PageProps) {
                     asChild={page > 1}
                 >
                     {page > 1 ? (
-                        <Link href={`/dashboard/content/articles?page=${page - 1}&q=${encodeURIComponent(query)}${params.status ? `&status=${params.status}` : ''}`}>
+                        <Link href={createPageUrl(page - 1)}>
                             <ChevronLeft className="mr-2 h-4 w-4" />
                             Previous
                         </Link>
@@ -196,7 +202,7 @@ export default async function ArticlesPage({ searchParams }: PageProps) {
                     asChild={allArticles.length >= limit}
                 >
                     {allArticles.length >= limit ? (
-                        <Link href={`/dashboard/content/articles?page=${page + 1}&q=${encodeURIComponent(query)}${params.status ? `&status=${params.status}` : ''}`}>
+                        <Link href={createPageUrl(page + 1)}>
                             Next
                             <ChevronRight className="ml-2 h-4 w-4" />
                         </Link>

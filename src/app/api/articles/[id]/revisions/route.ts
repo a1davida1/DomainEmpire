@@ -27,7 +27,13 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
         return NextResponse.json(pair);
     }
 
-    // List all revisions (metadata only, no full content)
+    // List revisions with pagination (metadata only, no full content)
+    const { searchParams: sp } = request.nextUrl;
+    const limit = Math.min(Number(sp.get('limit')) || 50, 200);
+    const offset = Math.max(Number(sp.get('offset')) || 0, 0);
+
     const revisions = await getRevisions(params.id);
-    return NextResponse.json(revisions);
+    const total = revisions.length;
+    const paginated = revisions.slice(offset, offset + limit);
+    return NextResponse.json({ data: paginated, total, limit, offset });
 }

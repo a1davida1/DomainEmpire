@@ -135,9 +135,11 @@ export async function generateLeadCapturePage(
         aboveFoldHtml = `<div class="disclosure-above">${escapeHtml(config.disclosureAboveFold)}</div>`;
     }
 
-    // Validate endpoint is HTTPS
+    // Block non-HTTPS endpoints — PII must not transmit unencrypted
     if (config?.endpoint && !config.endpoint.startsWith('https://')) {
-        console.warn(`[lead-capture] Endpoint is not HTTPS: ${config.endpoint}`);
+        console.error(`[lead-capture] BLOCKED: Endpoint is not HTTPS: ${config.endpoint}. Lead forms require HTTPS to protect user data.`);
+        // Null out the endpoint so the form won't submit to an insecure URL
+        config.endpoint = '';
     }
 
     // Lead gen form

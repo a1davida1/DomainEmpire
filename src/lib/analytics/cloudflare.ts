@@ -66,6 +66,11 @@ async function cfGraphQL(query: string, variables: Record<string, unknown>): Pro
 /**
  * Fetch daily analytics for a Cloudflare Pages project.
  */
+export type AnalyticsResult =
+    | { status: 'not_configured' }
+    | { status: 'ok'; data: AnalyticsData[] }
+    | { status: 'error'; message: string };
+
 export async function getDomainAnalytics(domain: string, days = 30): Promise<AnalyticsData[]> {
     const config = getConfig();
     if (!config) return [];
@@ -177,6 +182,24 @@ export async function getTopPages(domain: string, days = 30, limit = 20): Promis
     } catch (error) {
         console.error('Failed to fetch top pages:', error);
         return [];
+    }
+}
+
+/** Check if Cloudflare analytics is configured (env vars present). */
+export function isCloudflareConfigured(): boolean {
+    return getConfig() !== null;
+}
+
+/** Typed version of getDomainAnalytics that distinguishes "not configured" from "no data". */
+export async function getDomainAnalyticsTyped(domain: string, days = 30): Promise<AnalyticsResult> {
+    const config = getConfig();
+    if (!config) return { status: 'not_configured' };
+
+    try {
+        const data = await getDomainAnalytics(domain, days);
+        return { status: 'ok', data };
+    } catch (error) {
+        return { status: 'error', message: error instanceof Error ? error.message : 'Unknown error' };
     }
 }
 

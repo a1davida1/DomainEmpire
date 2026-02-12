@@ -23,11 +23,15 @@ export async function GET(request: NextRequest) {
     const authError = await requireAuth(request);
     if (authError) return authError;
 
-    const { searchParams } = request.nextUrl;
-    const domainId = searchParams.get('domainId') || undefined;
-    const staleOnly = searchParams.get('stale') === 'true';
-
     try {
+        const { searchParams } = request.nextUrl;
+        const domainId = searchParams.get('domainId') || undefined;
+
+        if (domainId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(domainId)) {
+            return NextResponse.json({ error: 'Invalid domainId format' }, { status: 400 });
+        }
+
+        const staleOnly = searchParams.get('stale') === 'true';
         const result = await listDatasets({ domainId, staleOnly });
 
         // Simple offset pagination
@@ -47,7 +51,7 @@ export async function GET(request: NextRequest) {
         });
     } catch (error) {
         console.error('Failed to list datasets:', error);
-        return NextResponse.json({ error: 'Failed to list datasets' }, { status: 500 });
+        return NextResponse.json({ error: 'Internal Server Error', message: 'Failed to list datasets' }, { status: 500 });
     }
 }
 
@@ -56,13 +60,46 @@ export async function POST(request: NextRequest) {
     const authError = await requireAuth(request);
     if (authError) return authError;
 
+    // Enforce MAX_DATA_SIZE while reading the stream
+    const reader = request.body?.getReader();
+    if (!reader) {
+        return NextResponse.json({ error: 'Missing request body' }, { status: 400 });
+    }
+
+    const chunks: Uint8Array[] = [];
+    let receivedLength = 0;
+
     try {
-        let body;
-        try {
-            body = await request.json();
-        } catch (e) {
-            return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            receivedLength += value.length;
+            if (receivedLength > MAX_DATA_SIZE) {
+                return NextResponse.json(
+                    { error: 'Payload too large', message: `Data exceeds ${MAX_DATA_SIZE / 1_000_000}MB limit` },
+                    { status: 413 }
+                );
+            }
+            chunks.push(value);
         }
+    } catch (err) {
+        console.error('Error reading request stream:', err);
+        return NextResponse.json({ error: 'Error reading request body' }, { status: 500 });
+    } finally {
+        reader.releaseLock();
+    }
+
+    const fullBody = new Uint8Array(receivedLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+        fullBody.set(chunk, offset);
+        offset += chunk.length;
+    }
+
+    try {
+        const bodyText = new TextDecoder().decode(fullBody);
+        const body = JSON.parse(bodyText);
 
         const parsed = createDatasetSchema.safeParse(body);
         if (!parsed.success) {
@@ -72,12 +109,15 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Check data payload size
-        if (parsed.data.data && JSON.stringify(parsed.data.data).length > MAX_DATA_SIZE) {
-            return NextResponse.json(
-                { error: 'Data payload exceeds 1MB limit' },
-                { status: 413 },
-            );
+        // Secondary check on actual data field (byte-accurate)
+        if (parsed.data.data) {
+            const serializedData = JSON.stringify(parsed.data.data);
+            if (Buffer.byteLength(serializedData, 'utf8') > MAX_DATA_SIZE) {
+                return NextResponse.json(
+                    { error: 'Payload too large', message: 'Data field exceeds 1MB limit' },
+                    { status: 413 },
+                );
+            }
         }
 
         const dataset = await createDataset({
@@ -89,6 +129,6 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(dataset, { status: 201 });
     } catch (error) {
         console.error('Failed to create dataset:', error);
-        return NextResponse.json({ error: 'Failed to create dataset' }, { status: 500 });
+        return NextResponse.json({ error: 'Internal Server Error', message: 'Failed to create dataset' }, { status: 500 });
     }
 }

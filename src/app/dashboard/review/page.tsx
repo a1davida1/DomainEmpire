@@ -1,6 +1,6 @@
 import { db } from '@/lib/db';
 import { articles, domains } from '@/lib/db/schema';
-import { eq, inArray, asc } from 'drizzle-orm';
+import { eq, inArray, asc, and, isNull } from 'drizzle-orm';
 import Link from 'next/link';
 
 const YMYL_COLORS: Record<string, string> = {
@@ -21,7 +21,7 @@ export default async function ReviewQueuePage() {
         updatedAt: articles.updatedAt,
         lastReviewedAt: articles.lastReviewedAt,
     }).from(articles)
-        .where(inArray(articles.status, ['review', 'approved']))
+        .where(and(inArray(articles.status, ['review', 'approved']), isNull(articles.deletedAt)))
         .orderBy(asc(articles.updatedAt));
 
     // Fetch domain names

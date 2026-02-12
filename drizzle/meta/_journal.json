@@ -36,6 +36,13 @@
       "when": 1770840802267,
       "tag": "0004_mean_anthem",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1770874619720,
+      "tag": "0005_fuzzy_black_tom",
+      "breakpoints": true
     }
   ]
 }

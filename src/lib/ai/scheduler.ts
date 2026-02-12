@@ -1,6 +1,6 @@
 
 import { db, domains, contentQueue, articles } from '@/lib/db';
-import { eq, desc, and, inArray, sql } from 'drizzle-orm';
+import { eq, and, inArray, sql, gte, isNull } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 
 /**
@@ -9,20 +9,22 @@ import { randomUUID } from 'node:crypto';
 export async function checkContentSchedule() {
     console.log('[Scheduler] Checking content schedules...');
 
-    // 1. Get all active domains
-    const activeDomains = await db.select().from(domains).where(eq(domains.status, 'active'));
+    // 1. Get all active domains (exclude soft-deleted)
+    const activeDomains = await db.select().from(domains).where(and(eq(domains.status, 'active'), isNull(domains.deletedAt)));
     if (activeDomains.length === 0) return;
 
     const activeDomainIds = activeDomains.map(d => d.id);
 
-    // 2. Bulk check pending jobs
+    // 2. Bulk check pending/processing jobs AND recently scheduled jobs (last 24h)
+    //    This prevents duplicate scheduling if the scheduler runs multiple times.
+    const recentCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const pendingJobs = await db
         .select({ domainId: contentQueue.domainId })
         .from(contentQueue)
         .where(
             and(
                 inArray(contentQueue.domainId, activeDomainIds),
-                inArray(contentQueue.status, ['pending', 'processing'])
+                sql`(${inArray(contentQueue.status, ['pending', 'processing'])} OR (${contentQueue.status} = 'completed' AND ${contentQueue.createdAt} >= ${recentCutoff}))`
             )
         );
 
@@ -45,8 +47,9 @@ export async function checkContentSchedule() {
 
         const lastDate = lastDateMap.get(domain.id) || new Date(0);
 
-        // Use current time as base if last article is very old (or non-existent) to avoid immediate burst
-        const baseDate = lastDate.getFullYear() < 2020 ? new Date() : lastDate;
+        // Use current time as base if last article is more than 30 days old (or non-existent) to avoid immediate burst
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        const baseDate = lastDate < thirtyDaysAgo ? new Date() : lastDate;
 
         // Determine schedule config (use defaults if missing)
         const config = domain.contentConfig?.schedule || {

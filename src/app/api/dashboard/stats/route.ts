@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, domains, articles, contentQueue, keywords } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
-import { sql, count } from 'drizzle-orm';
+import { sql, count, isNull } from 'drizzle-orm';
 
 // GET /api/dashboard/stats - Dashboard summary statistics
 export async function GET(request: NextRequest) {
@@ -9,31 +9,34 @@ export async function GET(request: NextRequest) {
     if (authError) return authError;
 
     try {
-        // Domain counts by status
+        // Domain counts by status (exclude soft-deleted)
         const domainStats = await db
             .select({
                 status: domains.status,
                 count: count(),
             })
             .from(domains)
+            .where(isNull(domains.deletedAt))
             .groupBy(domains.status);
 
-        // Domain counts by tier
+        // Domain counts by tier (exclude soft-deleted)
         const tierStats = await db
             .select({
                 tier: domains.tier,
                 count: count(),
             })
             .from(domains)
+            .where(isNull(domains.deletedAt))
             .groupBy(domains.tier);
 
-        // Article counts by status
+        // Article counts by status (exclude soft-deleted)
         const articleStats = await db
             .select({
                 status: articles.status,
                 count: count(),
             })
             .from(articles)
+            .where(isNull(articles.deletedAt))
             .groupBy(articles.status);
 
         // Queue stats
@@ -50,21 +53,23 @@ export async function GET(request: NextRequest) {
             .select({ count: count() })
             .from(keywords);
 
-        // Total domains and deployed count
+        // Total domains and deployed count (exclude soft-deleted)
         const totals = await db
             .select({
                 total: count(),
                 deployed: sql<number>`sum(case when ${domains.isDeployed} = true then 1 else 0 end)::int`,
             })
-            .from(domains);
+            .from(domains)
+            .where(isNull(domains.deletedAt));
 
-        // Calculate total estimated value
+        // Calculate total estimated value (exclude soft-deleted)
         const valueStats = await db
             .select({
                 totalLow: sql<number>`sum(${domains.estimatedFlipValueLow})::float`,
                 totalHigh: sql<number>`sum(${domains.estimatedFlipValueHigh})::float`,
             })
-            .from(domains);
+            .from(domains)
+            .where(isNull(domains.deletedAt));
 
         const response = NextResponse.json({
             domains: {

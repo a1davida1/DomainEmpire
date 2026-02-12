@@ -49,8 +49,9 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
 
     try {
         await db.transaction(async (tx) => {
-            // Attempt the insert first
-            await tx.insert(reviewEvents).values({
+            // Log the audit event
+            await logReviewEvent({
+                tx,
                 articleId: params.id,
                 actorId: user.id,
                 actorRole: user.role,

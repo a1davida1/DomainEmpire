@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, domains, NewDomain } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
-import { eq, ilike, and, sql } from 'drizzle-orm';
+import { eq, ilike, and, sql, isNull } from 'drizzle-orm';
 import { z } from 'zod';
+import { checkIdempotencyKey, storeIdempotencyResult } from '@/lib/api/idempotency';
 
 // Validation schema for creating a domain
 const createDomainSchema = z.object({
@@ -40,11 +41,18 @@ export async function GET(request: NextRequest) {
         const tier = searchParams.get('tier');
         const vertical = searchParams.get('vertical');
         const search = searchParams.get('search');
-        const limit = Number.parseInt(searchParams.get('limit') || '50', 10);
-        const offset = Number.parseInt(searchParams.get('offset') || '0', 10);
+        const rawLimit = Number.parseInt(searchParams.get('limit') || '50', 10);
+        const rawOffset = Number.parseInt(searchParams.get('offset') || '0', 10);
 
-        // Build conditions
-        const conditions: ReturnType<typeof eq>[] = [];
+        if (Number.isNaN(rawOffset) || rawOffset < 0) {
+            return NextResponse.json({ error: 'Invalid offset' }, { status: 400 });
+        }
+
+        const limit = (Number.isNaN(rawLimit) || rawLimit < 1) ? 50 : Math.min(rawLimit, 100);
+        const offset = rawOffset;
+
+        // Build conditions (always exclude soft-deleted)
+        const conditions: ReturnType<typeof eq>[] = [isNull(domains.deletedAt)];
 
         if (status) {
             const validStatuses = ['parked', 'active', 'redirect', 'forsale', 'defensive'];
@@ -93,7 +101,7 @@ export async function GET(request: NextRequest) {
     } catch (error) {
         console.error('Failed to fetch domains:', error);
         return NextResponse.json(
-            { error: 'Failed to fetch domains' },
+            { error: 'Internal Server Error', message: 'Failed to fetch domains' },
             { status: 500 }
         );
     }
@@ -101,6 +109,9 @@ export async function GET(request: NextRequest) {
 
 // POST /api/domains - Create a new domain
 export async function POST(request: NextRequest) {
+    const cached = await checkIdempotencyKey(request);
+    if (cached) return cached;
+
     const authError = await requireAuth(request);
     if (authError) return authError;
 
@@ -110,7 +121,7 @@ export async function POST(request: NextRequest) {
 
         if (!validationResult.success) {
             return NextResponse.json(
-                { error: 'Validation failed', details: validationResult.error.flatten() },
+                { error: 'Validation failed', details: validationResult.error.issues },
                 { status: 400 }
             );
         }
@@ -181,11 +192,13 @@ export async function POST(request: NextRequest) {
 
         const inserted = await db.insert(domains).values(newDomain).returning();
 
-        return NextResponse.json({ domain: inserted[0] }, { status: 201 });
+        const response = NextResponse.json({ domain: inserted[0] }, { status: 201 });
+        await storeIdempotencyResult(request, response);
+        return response;
     } catch (error) {
         console.error('Failed to create domain:', error);
         return NextResponse.json(
-            { error: 'Failed to create domain' },
+            { error: 'Internal Server Error', message: 'Failed to create domain' },
             { status: 500 }
         );
     }

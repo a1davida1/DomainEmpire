@@ -16,7 +16,7 @@ import {
     Trash2
 } from 'lucide-react';
 import { db, domains, articles, keywords } from '@/lib/db';
-import { eq, sql } from 'drizzle-orm';
+import { eq, sql, and, isNull } from 'drizzle-orm';
 
 interface PageProps {
     params: Promise<{ id: string }>;
@@ -38,7 +38,7 @@ const tierLabels: Record<number, string> = {
 
 async function getDomain(id: string) {
     try {
-        const result = await db.select().from(domains).where(eq(domains.id, id)).limit(1);
+        const result = await db.select().from(domains).where(and(eq(domains.id, id), isNull(domains.deletedAt))).limit(1);
         return result[0] || null;
     } catch {
         return null;
@@ -48,7 +48,7 @@ async function getDomain(id: string) {
 async function getDomainStats(domainId: string) {
     try {
         const [articleCount, keywordCount] = await Promise.all([
-            db.select({ count: sql<number>`count(*)::int` }).from(articles).where(eq(articles.domainId, domainId)),
+            db.select({ count: sql<number>`count(*)::int` }).from(articles).where(and(eq(articles.domainId, domainId), isNull(articles.deletedAt))),
             db.select({ count: sql<number>`count(*)::int` }).from(keywords).where(eq(keywords.domainId, domainId)),
         ]);
         return {
@@ -71,7 +71,7 @@ async function getRecentArticles(domainId: string) {
                 createdAt: articles.createdAt,
             })
             .from(articles)
-            .where(eq(articles.domainId, domainId))
+            .where(and(eq(articles.domainId, domainId), isNull(articles.deletedAt)))
             .orderBy(articles.createdAt)
             .limit(5);
     } catch {

@@ -8,7 +8,7 @@
 
 import { db } from '@/lib/db';
 import { backlinkSnapshots, domains } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, desc } from 'drizzle-orm';
 
 export interface BacklinkData {
     source: string;
@@ -16,6 +16,7 @@ export interface BacklinkData {
     anchor: string;
     authority: number;
     firstSeen: string;
+    sourceUrl?: string;
 }
 
 /**
@@ -39,24 +40,75 @@ async function queryCommonCrawl(domain: string, limit = 50): Promise<BacklinkDat
         const text = await response.text();
         const lines = text.trim().split('\n').filter(Boolean);
 
-        return lines.slice(0, limit).map(line => {
+        const results: BacklinkData[] = [];
+        for (const line of lines.slice(0, limit)) {
             try {
                 const data = JSON.parse(line) as { url: string; timestamp: string };
-                const sourceDomain = new URL(data.url).hostname;
-                return {
-                    source: sourceDomain,
+                const parsedUrl = new URL(data.url);
+                results.push({
+                    source: parsedUrl.hostname,
                     target: `https://${domain}`,
                     anchor: '',
                     authority: 0,
                     firstSeen: data.timestamp,
-                };
+                    sourceUrl: data.url,
+                });
             } catch {
-                return null;
+                // Skip malformed lines
             }
-        }).filter((b): b is BacklinkData => b !== null);
+        }
+        return results;
     } catch (error) {
         console.error('CommonCrawl query failed:', error);
         return [];
+    }
+}
+
+/**
+ * Extract anchor text from a source page that links to our domain.
+ * Fetches the page and parses HTML for links containing our domain.
+ * Returns empty string if extraction fails (best-effort).
+ */
+async function extractAnchorText(sourceUrl: string, targetDomain: string): Promise<string> {
+    try {
+        const response = await fetch(sourceUrl, {
+            signal: AbortSignal.timeout(5000),
+            headers: { 'User-Agent': 'DomainEmpire-BacklinkChecker/1.0' },
+        });
+        if (!response.ok) return '';
+
+        const html = await response.text();
+        // Find anchor tags linking to our domain and extract text
+        const linkRegex = new RegExp(
+            `<a[^>]*href=["'][^"']*${targetDomain.replaceAll('.', '\\.')}[^"']*["'][^>]*>([^<]+)</a>`,
+            'gi'
+        );
+        const match = linkRegex.exec(html);
+        return match?.[1]?.trim() || '';
+    } catch {
+        return '';
+    }
+}
+
+/**
+ * Batch-enrich backlinks with anchor text (best-effort, limited concurrency).
+ * Only fetches the first N links to avoid being rate-limited.
+ */
+async function enrichAnchorText(
+    links: BacklinkData[],
+    targetDomain: string,
+    maxFetch = 10,
+): Promise<void> {
+    const toFetch = links.filter(l => !l.anchor && l.sourceUrl).slice(0, maxFetch);
+    const results = await Promise.allSettled(
+        toFetch.map(async (link) => {
+            link.anchor = await extractAnchorText(link.sourceUrl!, targetDomain);
+        })
+    );
+    // Log failures without blocking
+    const failures = results.filter(r => r.status === 'rejected').length;
+    if (failures > 0) {
+        console.warn(`[Backlinks] ${failures}/${toFetch.length} anchor text extractions failed`);
     }
 }
 
@@ -121,13 +173,28 @@ export async function checkBacklinks(domainId: string): Promise<void> {
         queryMozMetrics(domain),
     ]);
 
+    // Enrich with anchor text (best-effort, max 10 concurrent fetches)
+    await enrichAnchorText(ccLinks, domain, 10);
+
+    // Enrich CommonCrawl data with Moz authority when available
+    let enrichedLinks: BacklinkData[] = ccLinks;
+    if (mozData) {
+        enrichedLinks = ccLinks.map(link => ({
+            ...link,
+            authority: mozData.domainAuthority,
+        }));
+    }
+
+    // Detect lost backlinks before inserting new snapshot
+    const lostBacklinks = await detectLostBacklinks(domainId);
+
     await db.insert(backlinkSnapshots).values({
         domainId,
         totalBacklinks: mozData?.totalBacklinks ?? ccLinks.length,
         referringDomains: mozData?.referringDomains ?? new Set(ccLinks.map(l => l.source)).size,
         domainAuthority: mozData?.domainAuthority ?? null,
-        topBacklinks: ccLinks.slice(0, 20),
-        lostBacklinks: [],
+        topBacklinks: enrichedLinks.slice(0, 20),
+        lostBacklinks,
         snapshotDate: new Date(),
     });
 }
@@ -144,16 +211,17 @@ export async function detectLostBacklinks(domainId: string): Promise<Array<{
         .select()
         .from(backlinkSnapshots)
         .where(eq(backlinkSnapshots.domainId, domainId))
-        .orderBy(backlinkSnapshots.snapshotDate)
+        .orderBy(desc(backlinkSnapshots.snapshotDate))
         .limit(2);
 
     if (snapshots.length < 2) return [];
 
-    const previous = new Set(
-        (snapshots[0].topBacklinks as BacklinkData[]).map(b => b.source)
-    );
+    // snapshots[0] is newest, snapshots[1] is second-newest
     const current = new Set(
-        (snapshots[1].topBacklinks as BacklinkData[]).map(b => b.source)
+        (Array.isArray(snapshots[0].topBacklinks) ? snapshots[0].topBacklinks as BacklinkData[] : []).map(b => b.source)
+    );
+    const previous = new Set(
+        (Array.isArray(snapshots[1].topBacklinks) ? snapshots[1].topBacklinks as BacklinkData[] : []).map(b => b.source)
     );
 
     const lost: Array<{ source: string; target: string; lostDate: string }> = [];

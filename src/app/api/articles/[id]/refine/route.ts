@@ -3,6 +3,7 @@ import { db, articles } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
 import { eq } from 'drizzle-orm';
 import { getAIClient } from '@/lib/ai/openrouter';
+import { aiLimiter, getClientIp } from '@/lib/rate-limit';
 
 // POST /api/articles/[id]/refine - Improve article content using AI
 export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
@@ -10,7 +11,19 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     const authError = await requireAuth(request);
     if (authError) return authError;
 
+    const ip = getClientIp(request) || 'unknown';
+    const limit = aiLimiter(ip);
+    if (!limit.allowed) {
+        return NextResponse.json(
+            { error: 'Too many AI requests. Please slow down.' },
+            { status: 429, headers: limit.headers }
+        );
+    }
+
     const { id } = params;
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+        return NextResponse.json({ error: 'Invalid article ID format' }, { status: 400 });
+    }
 
     try {
         const body = await request.json();
@@ -57,6 +70,6 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
 
     } catch (error) {
         console.error('Content refinement failed:', error);
-        return NextResponse.json({ error: 'Failed to refine content' }, { status: 500 });
+        return NextResponse.json({ error: 'Internal Server Error', message: 'Failed to refine content' }, { status: 500 });
     }
 }

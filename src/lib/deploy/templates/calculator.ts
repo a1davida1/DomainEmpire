@@ -205,6 +205,11 @@ function buildCalculatorScript(config: CalculatorConfig): string {
     else if (ids.indexOf('savings_goal') >= 0 || ids.indexOf('target') >= 0) computeFn = FORMULAS.savings_goal;
   }
 
+  if (!computeFn) {
+    // Show user-facing message when formula isn't configured
+    var msgEl = document.getElementById('calc-error-msg');
+    if (msgEl) msgEl.style.display = 'block';
+  }
   window.computeResults = computeFn || function() { return {}; };
 
   // Attach listeners
@@ -253,6 +258,9 @@ export async function generateCalculatorPage(
   <form onsubmit="return false;">
     ${inputsHtml}
   </form>
+  <div id="calc-error-msg" style="display:none;padding:1rem;background:#fef2f2;border:1px solid #fecaca;border-radius:0.5rem;color:#991b1b;margin-top:1rem;">
+    This calculator's formula is not yet configured. Results may not display correctly.
+  </div>
   <div class="calc-results">
     ${outputsHtml}
   </div>

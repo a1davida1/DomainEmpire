@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, articles, contentQueue, domains, NewArticle } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, isNull } from 'drizzle-orm';
 import { z } from 'zod';
+import { checkIdempotencyKey, storeIdempotencyResult } from '@/lib/api/idempotency';
 
 // Validation schema for creating an article generation job
 const generateArticleSchema = z.object({
@@ -31,7 +32,7 @@ export async function GET(request: NextRequest) {
         const limit = (Number.isNaN(rawLimit) || rawLimit < 1) ? 50 : Math.min(rawLimit, 100);
         const offset = rawOffset;
 
-        const conditions: ReturnType<typeof eq>[] = [];
+        const conditions: ReturnType<typeof eq>[] = [isNull(articles.deletedAt)];
 
         if (domainId) {
             conditions.push(eq(articles.domainId, domainId));
@@ -87,6 +88,9 @@ export async function GET(request: NextRequest) {
 
 // POST /api/articles - Queue a new article generation job
 export async function POST(request: NextRequest) {
+    const cached = await checkIdempotencyKey(request);
+    if (cached) return cached;
+
     const authError = await requireAuth(request);
     if (authError) return authError;
 
@@ -158,13 +162,15 @@ export async function POST(request: NextRequest) {
             return insertedArticle[0];
         });
 
-        return NextResponse.json(
+        const response = NextResponse.json(
             {
                 article: result,
                 message: 'Article generation queued successfully',
             },
             { status: 201 }
         );
+        await storeIdempotencyResult(request, response);
+        return response;
     } catch (error) {
         console.error('Failed to queue article generation:', error);
         return NextResponse.json(

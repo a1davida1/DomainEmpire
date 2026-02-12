@@ -19,8 +19,12 @@ export async function POST(request: NextRequest) {
     if (authError) return authError;
 
     try {
-        const body = await request.json();
+        const body = await request.json().catch(() => ({}));
         const { domainId, contentType, ymylLevel, requiredRole, requiresQaChecklist, requiresExpertSignoff, autoPublish } = body;
+
+        if (domainId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(domainId)) {
+            return NextResponse.json({ error: 'Invalid domainId format' }, { status: 400 });
+        }
 
         if (!ymylLevel) {
             return NextResponse.json({ error: 'ymylLevel is required' }, { status: 400 });
@@ -39,7 +43,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(policy, { status: 201 });
     } catch (error) {
         console.error('Failed to create policy:', error);
-        return NextResponse.json({ error: 'Failed to create policy' }, { status: 500 });
+        return NextResponse.json({ error: 'Internal Server Error', message: 'Failed to create policy' }, { status: 500 });
     }
 }
 
@@ -50,8 +54,8 @@ export async function DELETE(request: NextRequest) {
 
     const { searchParams } = request.nextUrl;
     const id = searchParams.get('id');
-    if (!id) {
-        return NextResponse.json({ error: 'Policy id is required' }, { status: 400 });
+    if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+        return NextResponse.json({ error: 'Invalid policy ID format' }, { status: 400 });
     }
 
     try {
@@ -65,6 +69,6 @@ export async function DELETE(request: NextRequest) {
         return NextResponse.json({ success: true });
     } catch (error) {
         console.error('Failed to delete policy:', error);
-        return NextResponse.json({ error: 'Failed to delete policy' }, { status: 500 });
+        return NextResponse.json({ error: 'Internal Server Error', message: 'Failed to delete policy' }, { status: 500 });
     }
 }

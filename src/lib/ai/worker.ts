@@ -24,7 +24,7 @@
  * - fetch_analytics: Pull analytics data
  */
 
-import { db, contentQueue, articles, domains } from '@/lib/db';
+import { db, contentQueue, articles, domains, keywords } from '@/lib/db';
 import { eq, and, lte, isNull, or, sql, asc, desc, count, inArray } from 'drizzle-orm';
 import { processOutlineJob, processDraftJob, processHumanizeJob, processSeoOptimizeJob, processMetaJob, processKeywordResearchJob, processResearchJob } from './pipeline';
 import { processDeployJob } from '@/lib/deploy/processor';
@@ -225,8 +225,7 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
             await processResearchJob(job.id);
             break;
         case 'bulk_seed':
-            // Bulk seed is handled by the API route directly
-            await markJobComplete(job.id, 'Bulk seed jobs are processed via API');
+            await processBulkSeedJob(job.id);
             break;
         case 'deploy':
             await processDeployJob(job.id);
@@ -362,6 +361,83 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
         default:
             throw new Error(`Unknown job type: ${job.jobType}`);
     }
+}
+
+/**
+ * Process a bulk_seed job: queue keyword_research jobs for N articles on a domain.
+ * The keyword_research pipeline will chain into outline -> draft -> humanize -> SEO.
+ */
+async function processBulkSeedJob(jobId: string) {
+    const [job] = await db.select().from(contentQueue).where(eq(contentQueue.id, jobId)).limit(1);
+    if (!job?.domainId) {
+        await markJobFailed(jobId, 'No domainId provided');
+        return;
+    }
+
+    const payload = job.payload as { domain?: string; niche?: string; subNiche?: string; articleCount?: number } | undefined;
+    const articleCount = payload?.articleCount || 5;
+
+    const domainRecord = await db.select().from(domains).where(eq(domains.id, job.domainId)).limit(1);
+    if (!domainRecord.length) {
+        await markJobFailed(jobId, 'Domain not found');
+        return;
+    }
+
+    const domain = domainRecord[0];
+
+    // Check for available unassigned keywords
+    const availableKeywords = await db.select()
+        .from(keywords)
+        .where(and(eq(keywords.domainId, domain.id), isNull(keywords.articleId)))
+        .limit(articleCount);
+
+    // Queue keyword_research if we don't have enough keywords
+    const keywordsNeeded = articleCount - availableKeywords.length;
+    if (keywordsNeeded > 0) {
+        await db.insert(contentQueue).values({
+            jobType: 'keyword_research',
+            domainId: domain.id,
+            payload: {
+                domain: domain.domain,
+                niche: domain.niche,
+                subNiche: domain.subNiche,
+                targetCount: keywordsNeeded,
+            },
+            status: 'pending',
+            priority: job.priority ?? 3,
+        });
+    }
+
+    // Queue article generation for each available keyword
+    let queued = 0;
+    for (const kw of availableKeywords) {
+        // Create article stub
+        const slug = kw.keyword.toLowerCase().replaceAll(/\s+/g, '-').replaceAll(/[^a-z0-9-]/g, '').replaceAll(/-+/g, '-').replaceAll(/^-|-$/g, '') || `article-${kw.id.slice(0, 8)}`;
+        const [article] = await db.insert(articles).values({
+            domainId: domain.id,
+            title: kw.keyword,
+            slug,
+            targetKeyword: kw.keyword,
+            status: 'generating',
+            isSeedArticle: true,
+        }).returning();
+
+        // Link keyword to article
+        await db.update(keywords).set({ articleId: article.id, status: 'assigned' }).where(eq(keywords.id, kw.id));
+
+        // Queue the generation pipeline
+        await db.insert(contentQueue).values({
+            jobType: 'research',
+            domainId: domain.id,
+            articleId: article.id,
+            payload: { targetKeyword: kw.keyword, domainName: domain.domain },
+            status: 'pending',
+            priority: job.priority ?? 3,
+        });
+        queued++;
+    }
+
+    await markJobComplete(jobId, `Queued ${queued} article(s), ${keywordsNeeded > 0 ? `${keywordsNeeded} keyword research job(s)` : 'all keywords available'}`);
 }
 
 async function markJobComplete(jobId: string, result?: string) {

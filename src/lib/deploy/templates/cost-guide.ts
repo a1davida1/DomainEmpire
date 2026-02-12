@@ -88,6 +88,7 @@ function extractCostData(article: Article): { ranges: CostRange[]; factors: Cost
     // Fallback: regex extraction from research data
     const research = article.researchData as Record<string, unknown> | null;
     const ranges: CostRange[] = [];
+    const factors: CostFactor[] = [];
 
     if (research?.statistics && Array.isArray(research.statistics)) {
         for (const stat of research.statistics) {
@@ -98,7 +99,20 @@ function extractCostData(article: Article): { ranges: CostRange[]; factors: Cost
         }
     }
 
-    return { ranges, factors: [] };
+    if (research?.factors && Array.isArray(research.factors)) {
+        for (const f of research.factors) {
+            const factor = f as { name?: string; impact?: 'low' | 'medium' | 'high'; description?: string };
+            if (factor.name) {
+                factors.push({
+                    name: factor.name,
+                    impact: factor.impact || 'medium',
+                    description: factor.description || '',
+                });
+            }
+        }
+    }
+
+    return { ranges, factors };
 }
 
 function formatCurrency(amount: number): string {

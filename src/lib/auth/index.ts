@@ -12,6 +12,7 @@ import { db } from '@/lib/db';
 import { users, sessions } from '@/lib/db/schema';
 import { eq, and, gt, lte } from 'drizzle-orm';
 import { hashPassword, verifyPassword } from './password';
+import { createHash } from 'node:crypto';
 
 export { hashPassword, verifyPassword };
 
@@ -90,11 +91,12 @@ export async function login(email: string, password: string): Promise<AuthUser |
 
     // Create session
     const token = randomBytes(32).toString('hex');
+    const tokenHash = createHash('sha256').update(token).digest('hex');
     const expiresAt = new Date(Date.now() + SESSION_MAX_AGE * 1000);
 
     await db.insert(sessions).values({
         userId: user.id,
-        token,
+        tokenHash,
         expiresAt,
     });
 
@@ -126,7 +128,8 @@ export async function logout(): Promise<void> {
     const token = cookieStore.get(SESSION_COOKIE)?.value;
 
     if (token) {
-        await db.delete(sessions).where(eq(sessions.token, token));
+        const tokenHash = createHash('sha256').update(token).digest('hex');
+        await db.delete(sessions).where(eq(sessions.tokenHash, tokenHash));
     }
 
     cookieStore.delete(SESSION_COOKIE);
@@ -143,11 +146,13 @@ export async function getAuthUser(): Promise<AuthUser | null> {
     const token = cookieStore.get(SESSION_COOKIE)?.value;
     if (!token) return null;
 
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+
     const result = await db.select({
         userId: sessions.userId,
         expiresAt: sessions.expiresAt,
     }).from(sessions).where(
-        and(eq(sessions.token, token), gt(sessions.expiresAt, new Date()))
+        and(eq(sessions.tokenHash, tokenHash), gt(sessions.expiresAt, new Date()))
     ).limit(1);
 
     if (!result.length) return null;

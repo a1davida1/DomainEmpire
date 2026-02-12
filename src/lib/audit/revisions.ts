@@ -13,9 +13,11 @@ export async function createRevision(opts: {
     changeType: ChangeType;
     changeSummary?: string;
     createdById?: string | null;
+    tx?: any;
 }): Promise<string> {
+    const dbClient = opts.tx || db;
     // Get next revision number
-    const [latest] = await db.select({
+    const [latest] = await dbClient.select({
         maxRev: sql<number>`coalesce(max(${contentRevisions.revisionNumber}), 0)`,
     }).from(contentRevisions).where(eq(contentRevisions.articleId, opts.articleId));
 
@@ -24,7 +26,7 @@ export async function createRevision(opts: {
     const contentHash = createHash('sha256').update(content).digest('hex');
     const wordCount = content.split(/\s+/).filter(Boolean).length;
 
-    const [revision] = await db.insert(contentRevisions).values({
+    const [revision] = await dbClient.insert(contentRevisions).values({
         articleId: opts.articleId,
         revisionNumber,
         title: opts.title,

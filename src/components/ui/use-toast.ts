@@ -148,17 +148,21 @@ function toast({ ...props }: Toast) {
         })
     const dismiss = () => dispatch({ type: "DISMISS_TOAST", toastId: id })
 
-    dispatch({
-        type: "ADD_TOAST",
-        toast: {
-            ...props,
-            id,
-            open: true,
-            onOpenChange: (open: boolean) => {
-                if (!open) dismiss()
+    try {
+        dispatch({
+            type: "ADD_TOAST",
+            toast: {
+                ...props,
+                id,
+                open: true,
+                onOpenChange: (open: boolean) => {
+                    if (!open) dismiss()
+                },
             },
-        },
-    })
+        })
+    } catch (error) {
+        console.error('[Toast] Failed to dispatch toast:', error);
+    }
 
     return {
         id: id,

@@ -9,10 +9,5 @@ export async function POST() {
     );
 }
 
-export async function GET() {
-    await clearAuthCookie();
-    return NextResponse.redirect(
-        new URL('/login', process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'),
-        { status: 303 }
-    );
-}
+// GET logout removed — GET mutations are vulnerable to CSRF
+// (an attacker can log users out by embedding <img src="/api/auth/logout">)

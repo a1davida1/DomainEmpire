@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -40,6 +40,11 @@ export default function ResearchPage() {
     const [keywords, setKeywords] = useState<KeywordOpportunity[]>([]);
     const [loadingKeywords, setLoadingKeywords] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    // Auto-load keyword opportunities on mount
+    useEffect(() => {
+        loadKeywordOpportunities();
+    }, []);
 
     async function researchDomain() {
         if (!domainInput.trim()) return;

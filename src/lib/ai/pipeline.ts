@@ -22,15 +22,15 @@ import { calculatorConfigSchema, comparisonDataSchema } from '@/lib/validation/a
 // Helper to slugify string
 function slugify(text: string) {
     return text.toString().toLowerCase()
-        .replace(/\s+/g, '-')           // Replace spaces with -
-        .replace(/[^\w-]+/g, '')        // Remove all non-word chars
-        .replace(/-+/g, '-')            // Replace multiple - with single -
-        .replace(/^-+/, '')             // Trim - from start of text
-        .replace(/-+$/, '');            // Trim - from end of text
+        .replaceAll(/\s+/g, '-')           // Replace spaces with -
+        .replaceAll(/[^\w-]+/g, '')        // Remove all non-word chars
+        .replaceAll(/-+/g, '-')            // Replace multiple - with single -
+        .replaceAll(/^-+/, '')             // Trim - from start of text
+        .replaceAll(/-+$/, '');            // Trim - from end of text
 }
 
 // Content type enum values matching schema
-type ContentType = 'article' | 'comparison' | 'calculator' | 'cost_guide' | 'lead_capture' | 'health_decision' | 'checklist' | 'faq' | 'review';
+type ContentType = 'article' | 'comparison' | 'calculator' | 'cost_guide' | 'lead_capture' | 'health_decision' | 'checklist' | 'faq' | 'review' | 'wizard';
 
 // Helper: word-boundary test to avoid false positives like "Elvis" → "vs"
 function wb(keyword: string, pattern: RegExp): boolean {
@@ -51,13 +51,18 @@ export function getContentType(keyword: string): ContentType {
     // Cost guide
     if (wb(lower, /\bcost\b/) || wb(lower, /\bprice\b/) || lower.includes('how much') || wb(lower, /\bfee\b/)) return 'cost_guide';
 
+    // Wizard: eligibility flows, decision trees, "which X is right for me"
+    if (wb(lower, /\beligib/) || wb(lower, /\bqualify\b/) || lower.includes('find out if') || lower.includes('do i qualify')) return 'wizard';
+    if (wb(lower, /\bwhich\b/) && lower.includes('right for')) return 'wizard';
+    if (lower.includes('should i') && (lower.includes(' or ') || lower.includes('choose'))) return 'wizard';
+
     // Lead capture — exclude "case study", "showcase"
     if (wb(lower, /\blawyer\b/) || wb(lower, /\battorney\b/) || lower.includes('get a quote')) return 'lead_capture';
     if (wb(lower, /\bclaim\b/) && !lower.includes('claim to')) return 'lead_capture';
     if (wb(lower, /\bcase\b/) && !lower.includes('case study') && !lower.includes('showcase')) return 'lead_capture';
 
     // Health decision
-    if (wb(lower, /\bsafe\b\b/) || lower.includes('side effects') || wb(lower, /\btreatment\b/) || wb(lower, /\bsymptom\b/) || wb(lower, /\bdiagnosis\b/)) return 'health_decision';
+    if (wb(lower, /\bsafe\b/) || lower.includes('side effects') || wb(lower, /\btreatment\b/) || wb(lower, /\bsymptom\b/) || wb(lower, /\bdiagnosis\b/)) return 'health_decision';
 
     // FAQ
     if (wb(lower, /\bfaq\b/) || wb(lower, /\bquestions\b/) || lower.includes('q&a') || wb(lower, /\banswered\b/)) return 'faq';
@@ -184,14 +189,14 @@ Respond with JSON:
 
     // Log API call
     await db.insert(apiCallLogs).values({
-        articleId: job.articleId!,
+        articleId: job.articleId,
         stage: 'outline',
         model: response.model,
         inputTokens: response.inputTokens,
         outputTokens: response.outputTokens,
-        cost: response.cost,
+        cost: response.cost.toFixed(4),
         durationMs: response.durationMs,
-        domainId: job.domainId, // Added for completeness
+        domainId: job.domainId,
     });
 
     // Update article with outline data + content type + structured config
@@ -207,7 +212,7 @@ Respond with JSON:
         if (parsed.success) {
             outlineUpdate.calculatorConfig = parsed.data;
         } else {
-            console.warn(`[Pipeline] Invalid calculatorConfig from AI for article ${job.articleId}:`, parsed.error.format());
+            console.warn(`[Pipeline] Invalid calculatorConfig from AI for article ${job.articleId}:`, parsed.error.issues);
         }
     }
     if (response.data.comparisonData) {
@@ -215,7 +220,7 @@ Respond with JSON:
         if (parsed.success) {
             outlineUpdate.comparisonData = parsed.data;
         } else {
-            console.warn(`[Pipeline] Invalid comparisonData from AI for article ${job.articleId}:`, parsed.error.format());
+            console.warn(`[Pipeline] Invalid comparisonData from AI for article ${job.articleId}:`, parsed.error.issues);
         }
     }
     await db.update(articles).set(outlineUpdate).where(eq(articles.id, job.articleId!));
@@ -235,7 +240,7 @@ Respond with JSON:
         completedAt: new Date(),
         result: response.data,
         apiTokensUsed: response.inputTokens + response.outputTokens,
-        apiCost: response.cost,
+        apiCost: String(response.cost.toFixed(2)),
     }).where(eq(contentQueue.id, jobId));
 
     // Queue next job (draft generation) - minimal payload
@@ -306,17 +311,20 @@ export async function processDraftJob(jobId: string): Promise<void> {
 
     // Log call
     await db.insert(apiCallLogs).values({
-        articleId: job.articleId!,
+        articleId: job.articleId,
         stage: 'draft',
         model: response.model,
         inputTokens: response.inputTokens,
         outputTokens: response.outputTokens,
-        cost: response.cost,
+        cost: response.cost.toFixed(4),
         durationMs: response.durationMs,
         domainId: job.domainId,
     });
 
     const wordCount = response.content.split(/\s+/).filter(Boolean).length;
+    if (wordCount < 100 && contentType !== 'calculator') {
+        throw new Error(`AI generated suspiciously short content (${wordCount} words). This usually indicates an error or refusal.`);
+    }
 
     // Update article
     await db.update(articles).set({
@@ -339,7 +347,7 @@ export async function processDraftJob(jobId: string): Promise<void> {
         status: 'completed',
         completedAt: new Date(),
         apiTokensUsed: response.inputTokens + response.outputTokens,
-        apiCost: response.cost,
+        apiCost: response.cost.toFixed(2),
     }).where(eq(contentQueue.id, jobId));
 
     // Queue humanization
@@ -381,12 +389,12 @@ export async function processHumanizeJob(jobId: string): Promise<void> {
     );
 
     await db.insert(apiCallLogs).values({
-        articleId: job.articleId!,
+        articleId: job.articleId,
         stage: 'humanize',
         model: response.model,
         inputTokens: response.inputTokens,
         outputTokens: response.outputTokens,
-        cost: response.cost,
+        cost: response.cost.toFixed(4),
         durationMs: response.durationMs,
         domainId: job.domainId,
     });
@@ -412,7 +420,7 @@ export async function processHumanizeJob(jobId: string): Promise<void> {
         status: 'completed',
         completedAt: new Date(),
         apiTokensUsed: response.inputTokens + response.outputTokens,
-        apiCost: response.cost,
+        apiCost: response.cost.toFixed(2),
     }).where(eq(contentQueue.id, jobId));
 
     await db.insert(contentQueue).values({
@@ -453,12 +461,12 @@ export async function processSeoOptimizeJob(jobId: string): Promise<void> {
     );
 
     await db.insert(apiCallLogs).values({
-        articleId: job.articleId!,
+        articleId: job.articleId,
         stage: 'seo',
         model: response.model,
         inputTokens: response.inputTokens,
         outputTokens: response.outputTokens,
-        cost: response.cost,
+        cost: response.cost.toFixed(4),
         durationMs: response.durationMs,
         domainId: job.domainId,
     });
@@ -484,7 +492,7 @@ export async function processSeoOptimizeJob(jobId: string): Promise<void> {
         status: 'completed',
         completedAt: new Date(),
         apiTokensUsed: response.inputTokens + response.outputTokens,
-        apiCost: response.cost,
+        apiCost: response.cost.toFixed(2),
     }).where(eq(contentQueue.id, jobId));
 
     await db.insert(contentQueue).values({
@@ -521,12 +529,12 @@ export async function processMetaJob(jobId: string): Promise<void> {
     );
 
     await db.insert(apiCallLogs).values({
-        articleId: job.articleId!,
+        articleId: job.articleId,
         stage: 'meta',
         model: response.model,
         inputTokens: response.inputTokens,
         outputTokens: response.outputTokens,
-        cost: response.cost,
+        cost: response.cost.toFixed(4),
         durationMs: response.durationMs,
         domainId: job.domainId,
     });
@@ -567,7 +575,7 @@ export async function processMetaJob(jobId: string): Promise<void> {
         completedAt: new Date(),
         result: response.data,
         apiTokensUsed: response.inputTokens + response.outputTokens,
-        apiCost: response.cost,
+        apiCost: response.cost.toFixed(2),
     }).where(eq(contentQueue.id, jobId));
 }
 
@@ -588,12 +596,12 @@ export async function processResearchJob(jobId: string): Promise<void> {
     );
 
     await db.insert(apiCallLogs).values({
-        articleId: job.articleId!,
+        articleId: job.articleId,
         stage: 'research',
         model: response.model,
         inputTokens: response.inputTokens,
         outputTokens: response.outputTokens,
-        cost: response.cost,
+        cost: response.cost.toFixed(4),
         durationMs: response.durationMs,
         domainId: job.domainId,
     });
@@ -607,7 +615,7 @@ export async function processResearchJob(jobId: string): Promise<void> {
         completedAt: new Date(),
         result: response.data,
         apiTokensUsed: response.inputTokens + response.outputTokens,
-        apiCost: response.cost,
+        apiCost: response.cost.toFixed(2),
     }).where(eq(contentQueue.id, jobId));
 
     await db.insert(contentQueue).values({
@@ -682,7 +690,7 @@ export async function processKeywordResearchJob(jobId: string): Promise<void> {
         model: response.model,
         inputTokens: response.inputTokens,
         outputTokens: response.outputTokens,
-        cost: response.cost,
+        cost: response.cost.toFixed(4),
         durationMs: response.durationMs,
         domainId: job.domainId,
     });
@@ -735,7 +743,7 @@ export async function processKeywordResearchJob(jobId: string): Promise<void> {
         completedAt: new Date(),
         result: { keywordsGenerated: response.data.keywords.length },
         apiTokensUsed: response.inputTokens + response.outputTokens,
-        apiCost: response.cost,
+        apiCost: response.cost.toFixed(2),
     }).where(eq(contentQueue.id, jobId));
 }
 

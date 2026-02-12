@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth';
+import { requireRole } from '@/lib/auth';
 import { getBackupData } from '@/lib/backup';
 
-// GET /api/backup — Download a full database backup as JSON
+// GET /api/backup — Download a full database backup as JSON (admin only)
 export async function GET(request: NextRequest) {
-    const authError = await requireAuth(request);
+    const authError = await requireRole(request, 'admin');
     if (authError) return authError;
 
     try {

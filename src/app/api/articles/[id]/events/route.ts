@@ -8,6 +8,12 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
     const authError = await requireAuth(request);
     if (authError) return authError;
 
+    const { searchParams } = request.nextUrl;
+    const limit = Math.min(Number(searchParams.get('limit')) || 50, 200);
+    const offset = Math.max(Number(searchParams.get('offset')) || 0, 0);
+
     const events = await getArticleEvents(params.id);
-    return NextResponse.json(events);
+    const total = events.length;
+    const paginated = events.slice(offset, offset + limit);
+    return NextResponse.json({ data: paginated, total, limit, offset });
 }

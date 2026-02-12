@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 import { db, articles } from '@/lib/db';
 import { eq } from 'drizzle-orm';
+import { cn } from '@/lib/utils';
 import { InterlinkManager } from '@/components/content/InterlinkManager';
 import { ContentEditor } from '@/components/content/ContentEditor';
 import { Button } from '@/components/ui/button';
@@ -9,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 import { ArrowLeft, ExternalLink, History, ScrollText, ClipboardCheck, Quote, AlertTriangle } from 'lucide-react';
 import Link from 'next/link';
+import { formatNumber } from '@/lib/format-utils';
 
 interface PageProps {
     params: Promise<{ id: string }>;
@@ -40,23 +42,25 @@ export default async function ArticlePage({ params }: PageProps) {
                     <div>
                         <div className="flex items-center gap-3">
                             <h1 className="text-2xl font-bold truncate max-w-[500px]">{article.title}</h1>
-                            <Badge variant="outline" className={`${article.status === 'published' ? 'bg-green-500/10 text-green-500 hover:bg-green-500/20' : ''
-                                } capitalize`}>
+                            <Badge variant="outline" className={cn(
+                                article.status === 'published' && 'bg-green-500/10 text-green-500 hover:bg-green-500/20',
+                                'capitalize'
+                            )}>
                                 {article.status}
                             </Badge>
                             {article.ymylLevel && article.ymylLevel !== 'none' && (
-                                <Badge variant="outline" className={
-                                    article.ymylLevel === 'high' ? 'bg-red-100 text-red-800 border-red-200' :
-                                    article.ymylLevel === 'medium' ? 'bg-yellow-100 text-yellow-800 border-yellow-200' :
-                                    'bg-blue-100 text-blue-800 border-blue-200'
-                                }>
+                                <Badge variant="outline" className={cn(
+                                    article.ymylLevel === 'high' && 'bg-red-100 text-red-800 border-red-200',
+                                    article.ymylLevel === 'medium' && 'bg-yellow-100 text-yellow-800 border-yellow-200',
+                                    article.ymylLevel === 'low' && 'bg-blue-100 text-blue-800 border-blue-200'
+                                )}>
                                     <AlertTriangle className="h-3 w-3 mr-1" />
                                     YMYL {article.ymylLevel}
                                 </Badge>
                             )}
                         </div>
                         <p className="text-muted-foreground text-sm">
-                            {article.domain.domain} • {article.wordCount || 0} words
+                            {article.domain.domain} • {formatNumber(article.wordCount)} words
                         </p>
                     </div>
                 </div>
@@ -123,11 +127,11 @@ export default async function ArticlePage({ params }: PageProps) {
                         <CardContent className="space-y-2">
                             <div className="flex justify-between">
                                 <span className="text-muted-foreground">Pageviews (30d)</span>
-                                <span className="font-bold">{article.pageviews30d || 0}</span>
+                                <span className="font-bold">{formatNumber(article.pageviews30d)}</span>
                             </div>
                             <div className="flex justify-between">
                                 <span className="text-muted-foreground">Unique Visitors</span>
-                                <span className="font-bold">{article.uniqueVisitors30d || 0}</span>
+                                <span className="font-bold">{formatNumber(article.uniqueVisitors30d)}</span>
                             </div>
                             <div className="flex justify-between">
                                 <span className="text-muted-foreground">Avg. Time</span>
