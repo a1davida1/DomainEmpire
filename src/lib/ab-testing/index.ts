@@ -66,20 +66,32 @@ export async function recordConversion(testId: string, variantId: string) {
 }
 
 async function updateVariantStat(testId: string, variantId: string, stat: 'impressions' | 'clicks' | 'conversions') {
-    const test = await db.select().from(abTests).where(
-        and(eq(abTests.id, testId), eq(abTests.status, 'active'))
-    ).limit(1);
+    return await db.transaction(async (tx) => {
+        // Lock the row for update
+        const test = await tx.select().from(abTests)
+            .where(and(eq(abTests.id, testId), eq(abTests.status, 'active')))
+            .for('update')
+            .limit(1);
 
-    if (test.length === 0) return null;
+        if (test.length === 0) return null;
 
-    const variants = test[0].variants as Variant[];
-    const variant = variants.find(v => v.id === variantId);
-    if (!variant) return null;
+        const variants = test[0].variants as Variant[];
+        const variantIndex = variants.findIndex(v => v.id === variantId);
+        if (variantIndex === -1) return null;
 
-    variant[stat]++;
+        // Clone to avoid mutation issues if cached (though Drizzle returns fresh objects)
+        const updatedVariants = [...variants];
+        const updatedVariant = { ...updatedVariants[variantIndex] };
 
-    await db.update(abTests).set({ variants }).where(eq(abTests.id, testId));
-    return variant;
+        updatedVariant[stat]++;
+        updatedVariants[variantIndex] = updatedVariant;
+
+        await tx.update(abTests)
+            .set({ variants: updatedVariants })
+            .where(eq(abTests.id, testId));
+
+        return updatedVariant;
+    });
 }
 
 /**

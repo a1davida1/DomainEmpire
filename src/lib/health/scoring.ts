@@ -9,7 +9,7 @@
  */
 
 import { db, domains, articles, revenueSnapshots, expenses, backlinkSnapshots } from '@/lib/db';
-import { eq, and, count, sum, avg, gte, desc, isNull, sql } from 'drizzle-orm';
+import { eq, and, count, gte, desc, isNull, sql } from 'drizzle-orm';
 
 interface HealthBreakdown {
     content: number;

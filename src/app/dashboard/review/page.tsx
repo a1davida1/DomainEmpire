@@ -99,8 +99,9 @@ export default async function ReviewQueuePage() {
             : null;
 
         const entries = results ? Object.values(results) : [];
-        const total = entries.length;
-        const passed = entries.filter(r => r && typeof r.checked === 'boolean' && r.checked).length;
+        const validEntries = entries.filter(r => r && typeof r.checked === 'boolean');
+        const passed = validEntries.filter(r => r.checked).length;
+        const total = validEntries.length;
         return [q.articleId, { allPassed: q.allPassed, passed, total }];
     }));
 

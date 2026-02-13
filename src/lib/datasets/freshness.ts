@@ -39,7 +39,7 @@ export async function checkStaleDatasets(): Promise<number> {
 
     if (newNotifications.length > 0) {
         const result = await db.insert(notifications)
-            .values(newNotifications as any)
+            .values(newNotifications as typeof notifications.$inferInsert[])
             .onConflictDoNothing()
             .returning({ id: notifications.id });
         return result.length;

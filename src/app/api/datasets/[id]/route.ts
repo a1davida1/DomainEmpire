@@ -43,7 +43,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
         let body;
         try {
             body = await request.json();
-        } catch (e) {
+        } catch (_e) {
             return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
         }
 

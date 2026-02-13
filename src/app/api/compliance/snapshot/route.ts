@@ -35,11 +35,11 @@ export async function POST(request: NextRequest) {
     try {
         await snapshotCompliance(domainId);
         return NextResponse.json({ success: true });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error('Compliance snapshot failed:', error);
         return NextResponse.json({
             success: false,
-            error: error.message || 'Failed to trigger compliance snapshot'
+            error: error instanceof Error ? error.message : 'Failed to trigger compliance snapshot'
         }, { status: 500 });
     }
 }

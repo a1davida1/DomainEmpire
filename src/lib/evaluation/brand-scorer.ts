@@ -72,13 +72,11 @@ function splitDomain(domain: string): { name: string; tld: string; fullTld: stri
 
     if (compoundTlds.includes(lastTwo) && parts.length >= 3) {
         const sld = lastTwo.split('.')[0];
-        const tld = lastTwo.split('.')[1];
+        // We use the SLD (e.g. 'co' from 'co.uk') for scoring if available
 
-        // Re-importing TLD_SCORES if needed, but assuming accessible or checking keys
-        // If the SLD (e.g., 'co') exists in TLD_SCORES, use it; else fallback to original logic
         return {
             name: parts.slice(0, -2).join('.'),
-            tld: sld, // Default to second-level label like 'co'
+            tld: sld,
             fullTld: lastTwo,
         };
     }

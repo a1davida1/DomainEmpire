@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import { History, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
-import { lcsDiff } from '@/lib/audit/revisions';
+import { lcsDiff } from '@/lib/diff';
 
 type Revision = {
     id: string;

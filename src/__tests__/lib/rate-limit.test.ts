@@ -129,7 +129,7 @@ describe('getClientIp', () => {
                     return null;
                 },
             },
-        } as any;
+        } as unknown as Request;
 
         expect(getClientIp(request)).toBe('1.2.3.4');
     });
@@ -142,7 +142,7 @@ describe('getClientIp', () => {
                     return null;
                 },
             },
-        } as any;
+        } as unknown as Request;
 
         expect(getClientIp(request)).toBe('10.0.0.1');
     });
@@ -150,7 +150,7 @@ describe('getClientIp', () => {
     it('returns "unknown" when no IP headers present', () => {
         const request = {
             headers: { get: () => null },
-        } as any;
+        } as unknown as Request;
 
         expect(getClientIp(request)).toBe('unknown');
     });
@@ -163,7 +163,7 @@ describe('getClientIp', () => {
                     return null;
                 },
             },
-        } as any;
+        } as unknown as Request;
 
         expect(getClientIp(request)).toBe('1.2.3.4');
     });

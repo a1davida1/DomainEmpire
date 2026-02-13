@@ -4,7 +4,7 @@
  */
 
 import { db, subscribers, monetizationProfiles, domains } from '@/lib/db';
-import { eq, and, count, sql, desc, gte, isNull } from 'drizzle-orm';
+import { eq, and, count, sql, desc, gte } from 'drizzle-orm';
 import type { NewSubscriber } from '@/lib/db/schema';
 
 interface CaptureInput {

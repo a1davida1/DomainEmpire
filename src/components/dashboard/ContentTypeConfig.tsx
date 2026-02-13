@@ -66,7 +66,9 @@ export default function ContentTypeConfig({ domainId, currentMix }: ContentTypeC
             }
             setSaved(true);
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Save failed');
+            const message = err instanceof Error ? err.message : 'Save failed';
+            setError(message);
+            throw err; // Propagate error so seedContent knows it failed
         } finally {
             setSaving(false);
         }
@@ -78,7 +80,11 @@ export default function ContentTypeConfig({ domainId, currentMix }: ContentTypeC
         setError(null);
         try {
             // Save config first
-            await saveMix();
+            try {
+                await saveMix();
+            } catch {
+                throw new Error('Failed to save configuration before seeding');
+            }
 
             const res = await fetch('/api/domains/bulk-seed', {
                 method: 'POST',
@@ -135,7 +141,7 @@ export default function ContentTypeConfig({ domainId, currentMix }: ContentTypeC
                                 )}
                                 {isActive && (
                                     <span className="text-sm font-mono w-12 text-right">
-                                        {Math.round((value / total) * 100)}%
+                                        {total === 0 ? '0%' : `${Math.round((value / total) * 100)}%`}
                                     </span>
                                 )}
                                 <span className="text-xs text-muted-foreground hidden md:block w-48">

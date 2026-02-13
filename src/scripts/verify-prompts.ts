@@ -11,7 +11,7 @@ const expectedSignatures = {
 
 let errors = 0;
 for (const [key, count] of Object.entries(expectedSignatures)) {
-    const fn = (PROMPTS as any)[key];
+    const fn = (PROMPTS as Record<string, (...args: unknown[]) => string>)[key];
     // fn.length returns number of arguments expected
     if (fn.length < count) {
         console.error(`ERROR: PROMPTS.${key} requires ${count} args, but accepts ${fn.length}`);

@@ -1,6 +1,6 @@
 import { db } from '@/lib/db';
 import { qaChecklistTemplates, qaChecklistResults } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import type { YmylLevel } from './ymyl';
 
 export type ChecklistItem = {

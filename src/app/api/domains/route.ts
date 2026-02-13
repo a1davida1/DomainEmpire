@@ -57,7 +57,7 @@ export async function GET(request: NextRequest) {
         if (status) {
             const validStatuses = ['parked', 'active', 'redirect', 'forsale', 'defensive'];
             if (validStatuses.includes(status)) {
-                conditions.push(eq(domains.status, status as any));
+                conditions.push(eq(domains.status, status as typeof domains.status.enumValues[number]));
             }
         }
         if (niche) {
@@ -126,7 +126,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const data: any = validationResult.data; // Cast to any to handle extended schema
+        const data: z.infer<typeof createDomainSchema> = validationResult.data;
 
         // Extract TLD from domain
         const domainParts = data.domain.split('.');
@@ -168,10 +168,10 @@ export async function POST(request: NextRequest) {
             domain: data.domain.toLowerCase(),
             tld,
             registrar: data.registrar,
-            purchasePrice: data.purchasePrice,
+            purchasePrice: data.purchasePrice?.toString(),
             purchaseDate: data.purchaseDate,
             renewalDate: data.renewalDate,
-            renewalPrice: data.renewalPrice,
+            renewalPrice: data.renewalPrice?.toString(),
             status: data.status,
             bucket: data.bucket,
             tier: data.tier,

@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Mail, Download, Users, TrendingUp } from 'lucide-react';
 import Link from 'next/link';
 import { db, subscribers, domains } from '@/lib/db';
-import { eq, count, desc, gte, sql } from 'drizzle-orm';
+import { eq, count, desc } from 'drizzle-orm';
 import { getSubscriberStats } from '@/lib/subscribers';
 
 export const dynamic = 'force-dynamic';

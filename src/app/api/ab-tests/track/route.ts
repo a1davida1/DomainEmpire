@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
         if (!testId || !variantId || !event) {
             return NextResponse.json(
                 { error: 'testId, variantId, and event required' },
-                { status: 400 },
+                { status: 400, headers: corsHeaders },
             );
         }
 
@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
         if (!validEvents.includes(event)) {
             return NextResponse.json(
                 { error: `event must be one of: ${validEvents.join(', ')}` },
-                { status: 400 },
+                { status: 400, headers: corsHeaders },
             );
         }
 
@@ -62,10 +62,10 @@ export async function POST(request: NextRequest) {
                 break;
         }
 
-        return NextResponse.json({ tracked: result !== null });
+        return NextResponse.json({ tracked: result !== null }, { headers: corsHeaders });
     } catch (error) {
         console.error('A/B track error:', error);
-        return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+        return NextResponse.json({ error: 'Internal server error' }, { status: 500, headers: corsHeaders });
     }
 }
 

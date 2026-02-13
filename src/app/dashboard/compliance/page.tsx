@@ -83,9 +83,9 @@ export default function CompliancePage() {
 
                 setMetrics(metricsData);
                 setTrend(trendData);
-            } catch (err: any) {
+            } catch (err: unknown) {
                 console.error('Failed to load compliance data:', err);
-                setError(err.message || 'Failed to load compliance metrics');
+                setError(err instanceof Error ? err.message : 'Failed to load compliance metrics');
             } finally {
                 setLoading(false);
             }
@@ -108,9 +108,9 @@ export default function CompliancePage() {
             if (trendRes.ok) {
                 setTrend(await trendRes.json());
             }
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('Snapshot failed:', err);
-            setError(err.message || 'Snapshot operation failed');
+            setError(err instanceof Error ? err.message : 'Snapshot operation failed');
         } finally {
             setSnapping(false);
         }

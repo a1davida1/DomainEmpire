@@ -25,7 +25,7 @@
  */
 
 import { db, contentQueue, articles, domains, keywords } from '@/lib/db';
-import { eq, and, lte, gt, isNull, or, sql, asc, desc, count, inArray } from 'drizzle-orm';
+import { eq, and, lte, gt, isNull, or, sql, asc, count, inArray } from 'drizzle-orm';
 import { processOutlineJob, processDraftJob, processHumanizeJob, processSeoOptimizeJob, processMetaJob, processKeywordResearchJob, processResearchJob } from './pipeline';
 import { processDeployJob } from '@/lib/deploy/processor';
 import { checkContentSchedule } from './scheduler';

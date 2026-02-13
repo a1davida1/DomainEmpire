@@ -24,7 +24,7 @@ export default async function MonetizationPage({ params }: PageProps) {
         where: eq(monetizationProfiles.domainId, id),
     });
 
-    const affiliates = (profile?.affiliates as any[]) || [];
+    const affiliates = (profile?.affiliates as { provider: string; programId: string; linkTemplate: string; commissionType: string; commissionValue: number }[]) || [];
 
     return (
         <div className="space-y-6">

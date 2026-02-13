@@ -25,7 +25,7 @@ async function tryAutoPublish(
     domainId: string,
     ymylLevel: string,
     user: { id: string; role: string },
-    tx?: any
+    tx?: typeof db
 ): Promise<boolean> {
     const policy = await getApprovalPolicy({
         domainId,
@@ -146,7 +146,8 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
             draft: currentStatus === 'archived' ? 'reverted' : 'rejected',
         };
 
-        const eventType = (eventTypeMap[newStatus] || 'edited') as any;
+        type ReviewEventType = typeof reviewEvents.$inferInsert.eventType;
+        const eventType = (eventTypeMap[newStatus] || 'edited') as NonNullable<ReviewEventType>;
 
         let autoPublished = false;
 

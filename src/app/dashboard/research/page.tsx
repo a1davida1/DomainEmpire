@@ -128,7 +128,8 @@ export default function ResearchPage() {
         const domain = result
             ? `${result.domain}.${result.tld}`
             : `${domainInput.trim()}.${tld}`;
-        if (!domain || domain === '.') return;
+        // Stronger validation: ensure it has content and doesn't start with a dot
+        if (!domain || !domain.trim() || domain.trim().startsWith('.')) return;
 
         setEvaluating(true);
         setError(null);
@@ -369,7 +370,7 @@ export default function ResearchPage() {
                                         </div>
                                         <div>
                                             <p className="text-xs text-muted-foreground">Break Even</p>
-                                            <p className="font-medium">{evalResult.flipValuation.breakEvenMonths} months</p>
+                                            <p className="font-medium">{evalResult.flipValuation.breakEvenMonths ?? '?'} months</p>
                                         </div>
                                     </div>
                                 ) : <p className="text-muted-foreground text-sm">No valuation data</p>}
@@ -497,10 +498,9 @@ export default function ResearchPage() {
                                     <div className="space-y-2">
                                         <div className="flex justify-between">
                                             <span className="text-sm">Diversification</span>
-                                            <span className={`font-medium ${
-                                                evalResult.portfolioFit.diversification === 'improves' ? 'text-green-600' :
-                                                evalResult.portfolioFit.diversification === 'concentrates' ? 'text-red-600' : ''
-                                            }`}>
+                                            <span className={`font-medium ${evalResult.portfolioFit.diversification === 'improves' ? 'text-green-600' :
+                                                    evalResult.portfolioFit.diversification === 'concentrates' ? 'text-red-600' : ''
+                                                }`}>
                                                 {evalResult.portfolioFit.diversification}
                                             </span>
                                         </div>
@@ -572,7 +572,7 @@ export default function ResearchPage() {
                     {/* Eval metadata */}
                     <div className="text-xs text-muted-foreground text-center">
                         Evaluated {new Date(evalResult.evaluatedAt).toLocaleString()}
-                        {' '} | API cost: ${evalResult.apiCost.toFixed(4)}
+                        API cost: ${(evalResult.apiCost || 0).toFixed(4)}
                     </div>
                 </>
             )}
@@ -606,10 +606,9 @@ export default function ResearchPage() {
                                     </div>
                                     <div className="flex items-center gap-4 text-sm">
                                         <span title="Monthly Volume">{kw.monthlyVolume?.toLocaleString() || 0}</span>
-                                        <span title="Difficulty" className={`${
-                                            kw.difficulty <= 30 ? 'text-green-600' :
-                                            kw.difficulty <= 60 ? 'text-yellow-600' : 'text-red-600'
-                                        }`}>D:{kw.difficulty || 0}</span>
+                                        <span title="Difficulty" className={`${kw.difficulty <= 30 ? 'text-green-600' :
+                                                kw.difficulty <= 60 ? 'text-yellow-600' : 'text-red-600'
+                                            }`}>D:{kw.difficulty || 0}</span>
                                         <span title="CPC" className="text-green-600">${kw.cpc || 0}</span>
                                         <span
                                             className="px-2 py-1 rounded bg-primary/10 text-primary font-mono text-xs font-bold"

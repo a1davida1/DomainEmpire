@@ -24,7 +24,7 @@ export function ThemeProvider({
     defaultTheme: _defaultTheme,
     enableSystem: _enableSystem,
     disableTransitionOnChange: _disableTransitionOnChange,
-    ...props
+    ..._props
 }: ThemeProviderProps) {
     return <>{children}</>
 }

@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Activity, AlertTriangle, Globe, TrendingDown } from 'lucide-react';
+import { Activity, AlertTriangle } from 'lucide-react';
 import Link from 'next/link';
 import { db, notifications } from '@/lib/db';
 import { inArray, desc } from 'drizzle-orm';
@@ -8,13 +8,6 @@ import { inArray, desc } from 'drizzle-orm';
 export const dynamic = 'force-dynamic';
 
 const MONITORING_TYPES = ['traffic_drop', 'deploy_failed', 'backlink_lost', 'revenue_milestone'] as const;
-
-const TYPE_ICONS: Record<string, typeof Activity> = {
-    traffic_drop: TrendingDown,
-    deploy_failed: Globe,
-    backlink_lost: AlertTriangle,
-    revenue_milestone: TrendingDown,
-};
 
 const SEVERITY_COLORS: Record<string, string> = {
     critical: 'destructive',

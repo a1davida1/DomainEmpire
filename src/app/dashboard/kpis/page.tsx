@@ -93,9 +93,9 @@ export default function KpiDashboardPage() {
                 setCompliance(await complianceRes.json());
                 setRevenue(await revenueRes.json());
                 setCosts(await costsRes.json());
-            } catch (err: any) {
+            } catch (err: unknown) {
                 console.error('Failed to load KPI data:', err);
-                setError(err.message || 'Failed to load dashboard data');
+                setError(err instanceof Error ? err.message : 'Failed to load dashboard data');
             } finally {
                 setLoading(false);
             }

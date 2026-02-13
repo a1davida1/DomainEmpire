@@ -53,7 +53,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
 
 // PATCH /api/articles/[id]/citations — update a citation (citationId in body)
 export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
-    const params = await props.params;
+    const _params = await props.params;
     const authError = await requireAuth(request);
     if (authError) return authError;
 
@@ -75,7 +75,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
 
 // DELETE /api/articles/[id]/citations — remove a citation (citationId in body)
 export async function DELETE(request: NextRequest, props: { params: Promise<{ id: string }> }) {
-    const params = await props.params;
+    const _params = await props.params;
     const authError = await requireAuth(request);
     if (authError) return authError;
 

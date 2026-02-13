@@ -71,9 +71,10 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
                 updatedAt: new Date(),
             }).where(eq(articles.id, params.id));
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         // Handle unique constraint violation (code 23505 in Postgres)
-        if (error.code === '23505' || error.message?.includes('unique constraint')) {
+        const dbError = error as { code?: string; message?: string };
+        if (dbError.code === '23505' || dbError.message?.includes('unique constraint')) {
             return NextResponse.json({ success: true, eventType: 'expert_signed', idempotent: true });
         }
         throw error;

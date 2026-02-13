@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { Column } from 'drizzle-orm';
 
 // Mock drizzle-orm
 const mockIsNull = vi.fn().mockReturnValue({ type: 'is_null' });
@@ -78,7 +79,7 @@ const { notDeleted, softDeleteDomain, softDeleteArticle, restoreDomain, restoreA
 describe('notDeleted', () => {
     it('calls isNull on the deletedAt column', () => {
         const table = { deletedAt: { name: 'deleted_at' } };
-        notDeleted(table as any);
+        notDeleted(table as unknown as { deletedAt: Column });
         expect(mockIsNull).toHaveBeenCalledWith(table.deletedAt);
     });
 });

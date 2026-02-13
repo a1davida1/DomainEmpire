@@ -16,6 +16,10 @@ export async function GET(
 
     try {
         const { id } = await params;
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+            return NextResponse.json({ error: 'Invalid article ID' }, { status: 400 });
+        }
+
         const type = (request.nextUrl.searchParams.get('type') || 'article') as 'article' | 'worksheet';
 
         if (type !== 'article' && type !== 'worksheet') {

@@ -95,7 +95,7 @@ Return as JSON:
   /**
    * Standard Article Generator with Anti-AI Rules
    */
-  article: (outline: object, keyword: string, domainName: string, researchData: any, voiceSeed?: VoiceSeed) => `
+  article: (outline: object, keyword: string, domainName: string, researchData: Record<string, unknown> | null | undefined, voiceSeed?: VoiceSeed) => `
 You are a veteran freelance writer who has written for major publications. You write the way real humans write — imperfectly, with personality, with occasional tangents that add color.
 
 CRITICAL WRITING RULES — VIOLATION OF ANY OF THESE MARKS THE CONTENT AS AI:
@@ -150,7 +150,7 @@ Write the complete article in Markdown.
   /**
    * Comparison Page Generator (X vs Y)
    */
-  comparison: (outline: object, keyword: string, domainName: string, researchData: any, voiceSeed?: VoiceSeed) => `
+  comparison: (outline: object, keyword: string, domainName: string, researchData: Record<string, unknown> | null | undefined, voiceSeed?: VoiceSeed) => `
 You are a research analyst who writes detailed product, service, and concept comparisons. You are thorough but opinionated — you always pick a winner for specific use cases.
 ${voiceSeed ? `You are acting in the persona of "${voiceSeed.name}" (see instructions below), but maintaining the analytical structure.` : ''}
 
@@ -195,7 +195,7 @@ Write the complete article in Markdown.
   /**
    * Calculator/Tool Page Generator
    */
-  calculator: (keyword: string, researchData: any, voiceSeed?: VoiceSeed) => `
+  calculator: (keyword: string, researchData: Record<string, unknown> | null | undefined, voiceSeed?: VoiceSeed) => `
 You are a senior frontend developer who builds financial and decision-making calculators. You build clean, fast, mobile-first tools that feel professional and trustworthy.
 
 CORE TEMPLATE STRUCTURE:
@@ -252,7 +252,7 @@ Output the complete HTML/JS/CSS code for this calculator tool.
   /**
    * Cost Guide Generator
    */
-  costGuide: (outline: object, keyword: string, domainName: string, researchData: any, voiceSeed?: VoiceSeed) => `
+  costGuide: (outline: object, keyword: string, domainName: string, researchData: Record<string, unknown> | null | undefined, voiceSeed?: VoiceSeed) => `
 You are a consumer research writer who specializes in helping people understand what things actually cost. Your superpower is finding the real numbers that other articles hide behind "it varies" or "contact for a quote."
 
 All anti-AI writing rules from the Article Generator apply.
@@ -288,7 +288,7 @@ Write the complete article in Markdown.
   /**
    * Lead Capture Generator
    */
-  leadCapture: (outline: object, keyword: string, domainName: string, researchData: any, voiceSeed?: VoiceSeed) => `
+  leadCapture: (outline: object, keyword: string, domainName: string, researchData: Record<string, unknown> | null | undefined, voiceSeed?: VoiceSeed) => `
 You are a legal information writer. You are NOT providing legal advice. You are helping people understand their situations well enough to have an informed conversation with an attorney.
 
 CRITICAL COMPLIANCE:
@@ -324,7 +324,7 @@ Write the complete article in Markdown.
   /**
    * Health Decision Generator
    */
-  healthDecision: (outline: object, keyword: string, domainName: string, researchData: any, voiceSeed?: VoiceSeed) => `
+  healthDecision: (outline: object, keyword: string, domainName: string, researchData: Record<string, unknown> | null | undefined, voiceSeed?: VoiceSeed) => `
 You are a health information writer with a research background. You make clinical information accessible without dumbing it down or making medical claims.
 
 CRITICAL COMPLIANCE:

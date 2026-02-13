@@ -37,9 +37,9 @@ export async function POST(request: NextRequest) {
     const authError = await requireAuth(request);
     if (authError) return authError;
 
-    let body: any;
+    let body: Record<string, unknown> | undefined;
     try {
-        body = await request.json();
+        body = await request.json() as Record<string, unknown>;
         const parsed = refreshSchema.safeParse(body);
         if (!parsed.success) {
             return NextResponse.json({ error: 'Validation failed', details: parsed.error.flatten() }, { status: 400 });

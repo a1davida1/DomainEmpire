@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { NextRequest, NextResponse } from 'next/server';
 
 // Mock drizzle-orm
 vi.mock('drizzle-orm', () => ({
@@ -65,7 +66,7 @@ function makeRequest(headers: Record<string, string> = {}, method = 'POST', path
         headers: { get: (name: string) => headers[name] || null },
         method,
         nextUrl: { pathname },
-    } as any;
+    } as unknown as NextRequest;
 }
 
 describe('checkIdempotencyKey', () => {
@@ -109,19 +110,18 @@ describe('storeIdempotencyResult', () => {
     it('does nothing when no Idempotency-Key header', async () => {
         const request = makeRequest();
         const response = new Response(JSON.stringify({ ok: true }), { status: 200 });
-        await storeIdempotencyResult(request, response as any);
+        await storeIdempotencyResult(request, response as unknown as NextResponse);
         expect(mockInsert).not.toHaveBeenCalled();
     });
 
     it('stores the response when key is present', async () => {
         const request = makeRequest({ 'Idempotency-Key': 'test-key-1' });
-        const response = new Response(JSON.stringify({ ok: true }), { status: 201 });
         // Need to create a NextResponse-like object with clone() and status
         const mockResponse = {
             clone: () => ({ text: () => Promise.resolve(JSON.stringify({ ok: true })) }),
             status: 201,
         };
-        await storeIdempotencyResult(request, mockResponse as any);
+        await storeIdempotencyResult(request, mockResponse as unknown as NextResponse);
         expect(mockInsert).toHaveBeenCalled();
         expect(mockValues).toHaveBeenCalledWith(expect.objectContaining({
             key: 'test-key-1',

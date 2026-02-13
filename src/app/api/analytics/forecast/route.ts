@@ -19,6 +19,9 @@ export async function GET(request: NextRequest) {
         const months = isNaN(monthsParam) ? 6 : Math.min(24, Math.max(1, monthsParam));
 
         if (domainId) {
+            if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(domainId)) {
+                return NextResponse.json({ error: 'Invalid domain ID' }, { status: 400 });
+            }
             const [forecast, breakeven] = await Promise.all([
                 projectRevenue(domainId, months),
                 estimateBreakevenDate(domainId),

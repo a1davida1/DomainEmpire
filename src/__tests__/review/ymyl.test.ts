@@ -89,7 +89,7 @@ describe('classifyYmylLevel', () => {
     describe('edge cases', () => {
         it('handles null/undefined niche', () => {
             expect(classifyYmylLevel({ niche: null })).toBe('none');
-            expect(classifyYmylLevel({ niche: undefined as any })).toBe('none');
+            expect(classifyYmylLevel({ niche: undefined as unknown as string })).toBe('none');
         });
 
         it('handles empty inputs', () => {

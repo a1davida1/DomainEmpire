@@ -108,9 +108,9 @@ export default function ArticleReviewPage() {
                     }
                     setCheckedItems(pre);
                 }
-            } catch (err: any) {
+            } catch (err: unknown) {
                 console.error('Failed to load review data:', err);
-                setActionError(err.message || 'Failed to load page data');
+                setActionError(err instanceof Error ? err.message : 'Failed to load page data');
             } finally {
                 setLoading(false);
             }
@@ -169,7 +169,7 @@ export default function ArticleReviewPage() {
             const eventsRes = await fetch(`/api/articles/${articleId}/events`);
             if (eventsRes.ok) {
                 const events = await eventsRes.json();
-                const alreadySigned = events.some((e: any) => e.eventType === 'expert_signed');
+                const alreadySigned = events.some((e: { eventType: string }) => e.eventType === 'expert_signed');
 
                 if (!alreadySigned) {
                     // Only POST if not already signed
@@ -186,7 +186,7 @@ export default function ArticleReviewPage() {
                         try {
                             const data = await signoffRes.json();
                             errorMessage = data.error || errorMessage;
-                        } catch (e) {
+                        } catch (_e) {
                             // Fallback if not JSON
                             const text = await signoffRes.text().catch(() => '');
                             errorMessage = text || signoffRes.statusText || errorMessage;

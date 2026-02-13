@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Trash2, Save, ExternalLink } from 'lucide-react';
+import { Plus, Trash2, Save } from 'lucide-react';
 
 interface AffiliateProgram {
     provider: string;

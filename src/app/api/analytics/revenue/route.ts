@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, revenueSnapshots, domains } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
-import { eq, desc, gte, and, sql } from 'drizzle-orm';
+import { eq, gte, and, sql } from 'drizzle-orm';
 
 // GET /api/analytics/revenue - Get revenue summary
 export async function GET(request: NextRequest) {

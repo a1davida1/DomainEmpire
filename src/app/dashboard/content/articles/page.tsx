@@ -45,7 +45,7 @@ export default async function ArticlesPage(props: Readonly<PageProps>) {
         if (searchFilter) filters.push(searchFilter);
     }
     if (params.status) {
-        filters.push(eq(articles.status, params.status as any));
+        filters.push(eq(articles.status, params.status as 'generating' | 'draft' | 'review' | 'approved' | 'published' | 'archived'));
     }
 
     const whereClause = and(...filters);

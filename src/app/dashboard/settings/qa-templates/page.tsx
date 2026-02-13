@@ -72,80 +72,74 @@ export default function QaTemplatesPage() {
     }
 
     function resetForm() {
+        setEditingId(null);
         setName('');
         setContentType('');
         setYmylLevel('none');
         setItems([]);
-        setEditingId(null);
+        setError(null);
         setShowForm(false);
+        setNewItemLabel('');
+        setNewItemCategory(CATEGORIES[0]);
+        setNewItemRequired(true);
     }
 
     function startEdit(template: Template) {
+        setEditingId(template.id);
         setName(template.name);
         setContentType(template.contentType || '');
         setYmylLevel(template.ymylLevel || 'none');
-        setItems(template.items || []);
-        setEditingId(template.id);
+        setItems([...template.items]);
         setShowForm(true);
+        setError(null);
     }
 
     function addItem() {
         if (!newItemLabel.trim()) return;
-        const id = newItemLabel.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-        setItems(prev => [...prev, {
-            id: `${id}_${Date.now()}`,
-            category: newItemCategory,
+        const newItem: ChecklistItem = {
+            id: crypto.randomUUID(),
             label: newItemLabel.trim(),
+            category: newItemCategory,
             required: newItemRequired,
-        }]);
+        };
+        setItems([...items, newItem]);
         setNewItemLabel('');
         setNewItemRequired(true);
     }
 
-    function removeItem(itemId: string) {
-        setItems(prev => prev.filter(i => i.id !== itemId));
+    function removeItem(id: string) {
+        setItems(items.filter(i => i.id !== id));
     }
 
     async function saveTemplate() {
-        if (!name.trim() || items.length === 0) return;
         setSaving(true);
         setError(null);
-
-        const payload = {
-            name: name.trim(),
-            contentType: contentType.trim() || null,
-            ymylLevel,
-            items,
-        };
-
         try {
-            if (editingId) {
-                const res = await fetch(`/api/qa-templates/${editingId}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload),
-                });
-                if (!res.ok) {
-                    const data = await res.json();
-                    throw new Error(data.error || 'Failed to update template');
-                }
-            } else {
-                const res = await fetch('/api/qa-templates', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload),
-                });
-                if (!res.ok) {
-                    const data = await res.json();
-                    throw new Error(data.error || 'Failed to create template');
-                }
-            }
+            const payload = {
+                name,
+                contentType: contentType.trim() || null,
+                ymylLevel,
+                items,
+            };
 
-            await loadTemplates();
-            resetForm();
-        } catch (err: any) {
-            console.error('Error saving template:', err);
-            setError(err.message || 'Network error saving template');
+            const url = editingId ? `/api/qa-templates/${editingId}` : '/api/qa-templates';
+            const method = editingId ? 'PATCH' : 'POST';
+
+            const res = await fetch(url, {
+                method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+
+            if (res.ok) {
+                await loadTemplates();
+                resetForm();
+            } else {
+                const data = await res.json();
+                setError(data.error || 'Failed to save template');
+            }
+        } catch (_err) {
+            setError('Network error saving template');
         } finally {
             setSaving(false);
         }
@@ -154,14 +148,13 @@ export default function QaTemplatesPage() {
     async function deleteTemplate(id: string) {
         if (!confirm('Are you sure you want to delete this template?')) return;
         try {
-            const res = await fetch(`/api/qa-templates?id=${id}`, { method: 'DELETE' });
+            const res = await fetch(`/api/qa-templates/${id}`, { method: 'DELETE' });
             if (res.ok) {
-                await loadTemplates();
+                setTemplates(templates.filter(t => t.id !== id));
             } else {
                 setError('Failed to delete template');
             }
-        } catch (err) {
-            console.error('Error deleting template:', err);
+        } catch (_err) {
             setError('Network error deleting template');
         }
     }
@@ -183,6 +176,12 @@ export default function QaTemplatesPage() {
                     </Button>
                 )}
             </div>
+
+            {error && (
+                <div className="bg-destructive/15 text-destructive px-4 py-3 rounded-md text-sm border border-destructive/20">
+                    {error}
+                </div>
+            )}
 
             <p className="text-sm text-muted-foreground">
                 Define QA checklists that reviewers must complete before approving articles.

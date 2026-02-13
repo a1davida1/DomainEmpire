@@ -20,6 +20,12 @@ export async function GET(
 
     const { id } = await params;
 
+    // Validate UUID
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(id)) {
+        return NextResponse.json({ error: 'Invalid competitor ID' }, { status: 400 });
+    }
+
     try {
         const limit = Math.min(100, Math.max(1, parseInt(request.nextUrl.searchParams.get('limit') || '30', 10)));
 

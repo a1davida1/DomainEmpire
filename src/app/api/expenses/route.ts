@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { expenses } from '@/lib/db/schema';
-import { eq, desc, sql, and, gte, lte } from 'drizzle-orm';
+import { eq, desc, and, gte, lte } from 'drizzle-orm';
 import { z } from 'zod';
 
 const expenseSchema = z.object({
@@ -52,10 +52,16 @@ export async function GET(request: NextRequest) {
 
         const data = await query;
 
-        const totalAmount = data.reduce((sum, e) => sum + Number.parseFloat(e.amount), 0);
+        const totalAmount = data.reduce((sum, e) => {
+            const amt = Number.parseFloat(e.amount);
+            return sum + (Number.isFinite(amt) ? amt : 0);
+        }, 0);
+
         const byCategory: Record<string, number> = {};
         for (const e of data) {
-            byCategory[e.category] = (byCategory[e.category] || 0) + Number.parseFloat(e.amount);
+            const amt = Number.parseFloat(e.amount);
+            const safeAmt = Number.isFinite(amt) ? amt : 0;
+            byCategory[e.category] = (byCategory[e.category] || 0) + safeAmt;
         }
 
         return NextResponse.json({ expenses: data, totalAmount, byCategory });

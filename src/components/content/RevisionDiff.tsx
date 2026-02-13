@@ -20,7 +20,7 @@ interface DiffLine {
 function computeDiff(oldText: string, newText: string): DiffLine[] {
     const oldLines = oldText.split('\n');
     const newLines = newText.split('\n');
-    const result: DiffLine[] = [];
+    const _result: DiffLine[] = [];
 
     // Simple LCS-based diff
     const m = oldLines.length;

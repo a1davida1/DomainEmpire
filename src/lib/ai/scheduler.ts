@@ -1,6 +1,6 @@
 
 import { db, domains, contentQueue, articles } from '@/lib/db';
-import { eq, and, inArray, sql, gte, isNull } from 'drizzle-orm';
+import { eq, and, inArray, sql, isNull } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 
 /**

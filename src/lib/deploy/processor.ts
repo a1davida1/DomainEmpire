@@ -184,9 +184,10 @@ async function stepDeployCloudflare(ctx: DeployContext): Promise<void> {
     try {
         await triggerDeployment(ctx.repoName, 'main');
         doneStep(ctx, 3, `Project: ${projectResult.projectName}`);
-    } catch (err: any) {
-        await failStep(ctx, 3, err instanceof Error ? err.message : String(err));
-        throw new Error(`Failed to trigger deployment: ${err}`);
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        await failStep(ctx, 3, message);
+        throw new Error(`Failed to trigger deployment: ${message}`);
     }
 }
 
@@ -203,7 +204,7 @@ async function stepAddCustomDomain(ctx: DeployContext): Promise<void> {
     try {
         await addCustomDomain(ctx.cfProject, ctx.payload.domain);
         doneStep(ctx, 4, `Linked ${ctx.payload.domain}`);
-    } catch (err: any) {
+    } catch (err: unknown) {
         await failStep(ctx, 4, `Failed to link ${ctx.payload.domain}: ${err instanceof Error ? err.message : String(err)}`);
         // We usually don't throw here if we want to continue, but step 4 failure might be critical.
         // However, the user prompt said "call failStep... so the step is marked failed instead of remaining running".

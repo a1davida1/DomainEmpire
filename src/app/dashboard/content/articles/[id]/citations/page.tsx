@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -31,14 +31,14 @@ export default function CitationsPage() {
     const [sourceTitle, setSourceTitle] = useState('');
     const [quotedSnippet, setQuotedSnippet] = useState('');
 
-    async function loadCitations() {
+    const loadCitations = useCallback(async () => {
         const res = await fetch(`/api/articles/${articleId}/citations`);
         if (res.ok) setCitations(await res.json());
         setLoading(false);
-    }
+    }, [articleId]);
 
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    useEffect(() => { loadCitations(); }, [articleId]);
+    useEffect(() => { loadCitations(); }, [loadCitations]);
 
     async function handleAdd(e: React.FormEvent) {
         e.preventDefault();

@@ -129,9 +129,9 @@ export function withIdempotency(
                     status: 'started',
                     expiresAt: new Date(Date.now() + 5 * 60 * 1000), // Short TTL for locked keys
                 });
-            } catch (e: any) {
+            } catch (e: unknown) {
                 // Detect duplicate key error (Postgres: 23505)
-                if (e.code === '23505') {
+                if (e instanceof Error && 'code' in e && (e as { code: string }).code === '23505') {
                     return NextResponse.json(
                         { error: 'Request already in progress' },
                         { status: 409 }

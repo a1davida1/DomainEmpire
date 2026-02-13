@@ -1,4 +1,4 @@
-import { pgTable, text, integer, real, boolean, timestamp, jsonb, uuid, index, uniqueIndex, unique, check, numeric } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, real, boolean, timestamp, jsonb, uuid, index, uniqueIndex, unique, check, numeric, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 export { sql };
 
@@ -27,7 +27,7 @@ export const domains = pgTable('domains', {
     subNiche: text('sub_niche'),
 
     // Redirect config
-    redirectTargetId: uuid('redirect_target_id').references((): any => domains.id, { onDelete: 'set null' }),
+    redirectTargetId: uuid('redirect_target_id').references((): AnyPgColumn => domains.id, { onDelete: 'set null' }),
 
     // Deployment
     githubRepo: text('github_repo'),
@@ -564,7 +564,7 @@ export const notifications = pgTable('notifications', {
     actionUrl: text('action_url'),
     isRead: boolean('is_read').default(false),
     emailSent: boolean('email_sent').default(false),
-    metadata: jsonb('metadata').$type<{ datasetId?: string;[key: string]: any }>().default({}),
+    metadata: jsonb('metadata').$type<{ datasetId?: string;[key: string]: unknown }>().default({}),
     fingerprint: text('fingerprint'),
 
     createdAt: timestamp('created_at').defaultNow(),

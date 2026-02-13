@@ -5,7 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth';
+import { requireRole } from '@/lib/auth';
 import { getSubscribers, getSubscriberStats } from '@/lib/subscribers';
 import { db, subscribers } from '@/lib/db';
 import { inArray } from 'drizzle-orm';
@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
         const domainId = searchParams.get('domainId') || undefined;
         const source = searchParams.get('source') || undefined;
         const status = searchParams.get('status') || undefined;
-        const page = parseInt(searchParams.get('page') || '1', 10);
+        const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
         const limit = Math.min(parseInt(searchParams.get('limit') || '50', 10), 100);
 
         const [result, stats] = await Promise.all([
@@ -42,8 +42,9 @@ const deleteSchema = z.object({
 });
 
 export async function DELETE(request: NextRequest) {
-    const authError = await requireAuth(request);
-    if (authError) return authError;
+    // Deleting subscribers requires admin privileges
+    const roleError = await requireRole(request, 'admin');
+    if (roleError) return roleError;
 
     try {
         const body = await request.json();

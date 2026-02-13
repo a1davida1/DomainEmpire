@@ -16,8 +16,7 @@ import {
     Trash2
 } from 'lucide-react';
 import ContentTypeConfig from '@/components/dashboard/ContentTypeConfig';
-import { db, domains, articles, keywords } from '@/lib/db';
-import { eq, sql, and, isNull } from 'drizzle-orm';
+
 
 interface PageProps {
     params: Promise<{ id: string }>;
@@ -37,48 +36,7 @@ const tierLabels: Record<number, string> = {
     3: 'Hold',
 };
 
-async function getDomain(id: string) {
-    try {
-        const result = await db.select().from(domains).where(and(eq(domains.id, id), isNull(domains.deletedAt))).limit(1);
-        return result[0] || null;
-    } catch {
-        return null;
-    }
-}
-
-async function getDomainStats(domainId: string) {
-    try {
-        const [articleCount, keywordCount] = await Promise.all([
-            db.select({ count: sql<number>`count(*)::int` }).from(articles).where(and(eq(articles.domainId, domainId), isNull(articles.deletedAt))),
-            db.select({ count: sql<number>`count(*)::int` }).from(keywords).where(eq(keywords.domainId, domainId)),
-        ]);
-        return {
-            articles: articleCount[0]?.count ?? 0,
-            keywords: keywordCount[0]?.count ?? 0,
-        };
-    } catch {
-        return { articles: 0, keywords: 0 };
-    }
-}
-
-async function getRecentArticles(domainId: string) {
-    try {
-        return await db
-            .select({
-                id: articles.id,
-                title: articles.title,
-                status: articles.status,
-                wordCount: articles.wordCount,
-                createdAt: articles.createdAt,
-            })
-            .from(articles)
-            .where(and(eq(articles.domainId, domainId), isNull(articles.deletedAt)))
-            .orderBy(articles.createdAt)
-            .limit(5);
-    } catch {
-        return [];
-    }
-}
+import { getDomain, getDomainStats, getRecentArticles } from '@/lib/domains';
 
 export default async function DomainDetailPage({ params }: PageProps) {
     const { id } = await params;
@@ -177,7 +135,7 @@ export default async function DomainDetailPage({ params }: PageProps) {
                             </div>
                             <div>
                                 <p className="text-2xl font-bold">
-                                    ${Number(domain.purchasePrice || 0).toFixed(2)}
+                                    {domain.purchasePrice ? `$${Number(domain.purchasePrice).toFixed(2)}` : 'Not set'}
                                 </p>
                                 <p className="text-sm text-muted-foreground">Purchase Price</p>
                             </div>

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
-import { addCompetitor, getCompetitors, removeCompetitor, refreshCompetitor, findKeywordGaps } from '@/lib/competitors/monitor';
+import { addCompetitor, getCompetitors, removeCompetitor, findKeywordGaps } from '@/lib/competitors/monitor';
 import { z } from 'zod';
 
 const addSchema = z.object({

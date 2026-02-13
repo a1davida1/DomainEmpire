@@ -61,7 +61,7 @@ export default function QueuePage() {
             } else {
                 setLastResult({ type: 'info', message: 'No pending jobs to process' });
             }
-        } catch (error) {
+        } catch (_error) {
             setLastResult({ type: 'error', message: 'Failed to process queue' });
         } finally {
             setProcessing(false);
@@ -79,7 +79,7 @@ export default function QueuePage() {
                 message: `Queued ${data.retried} failed jobs for retry`,
             });
             await fetchStats();
-        } catch (error) {
+        } catch (_error) {
             setLastResult({ type: 'error', message: 'Failed to retry jobs' });
         } finally {
             setRetrying(false);

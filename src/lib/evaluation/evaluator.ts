@@ -919,10 +919,10 @@ async function getCachedEvaluation(domain: string): Promise<EvaluationResult | n
             .limit(1);
 
         if (cached.length > 0 && cached[0].evaluationResult) {
-            const raw = cached[0].evaluationResult as any;
+            const raw = cached[0].evaluationResult as Record<string, unknown>;
             // Validate essential fields
             if (raw.compositeScore != null && raw.signals && raw.recommendation) {
-                return raw as EvaluationResult;
+                return raw as unknown as EvaluationResult;
             }
             // Invalidate if shape is wrong
             console.warn(`[Evaluator] Cache hit for ${domain} but invalid shape. Re-evaluating.`);

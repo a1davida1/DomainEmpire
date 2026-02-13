@@ -24,7 +24,7 @@ export async function logReviewEvent(opts: {
     reasonCode?: string | null;
     rationale?: string | null;
     metadata?: Record<string, unknown> | null;
-    tx?: any;
+    tx?: typeof db;
 }): Promise<string> {
     const dbClient = opts.tx || db;
     const [event] = await dbClient.insert(reviewEvents).values({

@@ -142,7 +142,7 @@ export default function RevenuePage() {
                         <p className="text-zinc-500 text-center py-8">No data</p>
                     ) : (
                         <div className="flex items-end gap-1 h-32">
-                            {data.dailyTrend.map((day, i) => (
+                            {data.dailyTrend.map((day, _i) => (
                                 <div key={day.date} className="flex-1 flex flex-col gap-0.5">
                                     <div
                                         className="bg-blue-500/60 rounded-t"

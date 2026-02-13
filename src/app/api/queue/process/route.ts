@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
-import { runWorkerOnce, getQueueStats, getQueueHealth, purgeOldJobs } from '@/lib/ai/worker';
+import { runWorkerOnce, getQueueStats, getQueueHealth } from '@/lib/ai/worker';
 
 // POST /api/queue/process - Process pending jobs
 export async function POST(request: NextRequest) {

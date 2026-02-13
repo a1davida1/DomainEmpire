@@ -201,7 +201,12 @@ export default function DeployPage() {
                         <CardDescription>Real-time deployment status with step progress</CardDescription>
                     </CardHeader>
                     <CardContent>
-                        {jobs.length === 0 ? (
+                        {loading ? (
+                            <div className="text-center py-8 text-muted-foreground">
+                                <RefreshCw className="h-6 w-6 animate-spin mx-auto mb-2" />
+                                <p>Loading activity...</p>
+                            </div>
+                        ) : jobs.length === 0 ? (
                             <div className="text-center py-8 text-muted-foreground">
                                 No recent deployment activity.
                             </div>

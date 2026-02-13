@@ -122,8 +122,8 @@ export default async function FinancesPage() {
                                         </td>
                                         <td className="p-2 text-right">
                                             <span className={`px-1.5 py-0.5 rounded text-xs ${p.confidence >= 60 ? 'bg-green-100 text-green-800' :
-                                                    p.confidence >= 30 ? 'bg-yellow-100 text-yellow-800' :
-                                                        'bg-red-100 text-red-800'
+                                                p.confidence >= 30 ? 'bg-yellow-100 text-yellow-800' :
+                                                    'bg-red-100 text-red-800'
                                                 }`}>
                                                 {p.confidence}%
                                             </span>
@@ -141,7 +141,7 @@ export default async function FinancesPage() {
                 <h2 className="text-lg font-semibold mb-3">Expenses by Category (30d)</h2>
                 <div className="space-y-2">
                     {expensesByCategory.map(cat => (
-                        <div key={cat.category} className="flex items-center justify-between">
+                        <div key={cat.category ?? 'uncategorized'} className="flex items-center justify-between">
                             <span className="text-sm capitalize">{(cat.category ?? 'uncategorized').replaceAll('_', ' ')}</span>
                             <div className="flex items-center gap-2">
                                 <span className="text-sm text-muted-foreground">{cat.count} items</span>

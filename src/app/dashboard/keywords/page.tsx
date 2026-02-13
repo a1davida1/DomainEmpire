@@ -34,7 +34,7 @@ export default function KeywordsPage() {
 
     // Filters
     const [search, setSearch] = useState('');
-    const [maxDifficulty, setMaxDifficulty] = useState(100);
+    const [maxDifficulty, setMaxDifficulty] = useState<number | null>(100);
     const [minVolume, setMinVolume] = useState(0);
     const [unassignedOnly, setUnassignedOnly] = useState(false);
 
@@ -44,9 +44,9 @@ export default function KeywordsPage() {
         try {
             const params = new URLSearchParams({
                 limit: '200',
-                maxDifficulty: String(maxDifficulty),
                 minVolume: String(minVolume),
             });
+            if (maxDifficulty !== null) params.set('maxDifficulty', String(maxDifficulty));
             if (unassignedOnly) params.set('unassigned', 'true');
 
             const res = await fetch(`/api/research/keywords?${params}`);
@@ -67,7 +67,7 @@ export default function KeywordsPage() {
 
     const filtered = keywords.filter(kw =>
         !search || kw.keyword.toLowerCase().includes(search.toLowerCase())
-            || kw.domain?.toLowerCase().includes(search.toLowerCase())
+        || kw.domain?.toLowerCase().includes(search.toLowerCase())
     );
 
     const intentColors: Record<string, string> = {
@@ -100,7 +100,7 @@ export default function KeywordsPage() {
                     </Card>
                     <Card>
                         <CardContent className="p-4 text-center">
-                            <p className="text-2xl font-bold">{summary.avgVolume.toLocaleString()}</p>
+                            <p className="text-2xl font-bold">{summary?.avgVolume?.toLocaleString() ?? '—'}</p>
                             <p className="text-sm text-muted-foreground">Avg Volume</p>
                         </CardContent>
                     </Card>
@@ -137,8 +137,15 @@ export default function KeywordsPage() {
                                 type="number"
                                 min={0}
                                 max={100}
-                                value={maxDifficulty}
-                                onChange={e => setMaxDifficulty(Number(e.target.value))}
+                                value={maxDifficulty ?? ''}
+                                onChange={e => {
+                                    const val = parseInt(e.target.value);
+                                    if (isNaN(val)) {
+                                        setMaxDifficulty(null);
+                                    } else {
+                                        setMaxDifficulty(Math.max(0, Math.min(100, val)));
+                                    }
+                                }}
                             />
                         </div>
                         <div className="w-32">
@@ -203,11 +210,10 @@ export default function KeywordsPage() {
                                         <td className="p-3 text-right">{kw.monthlyVolume?.toLocaleString() || '—'}</td>
                                         <td className="p-3 text-right">
                                             {kw.difficulty != null ? (
-                                                <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
-                                                    kw.difficulty <= 30 ? 'bg-green-100 text-green-800' :
+                                                <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${kw.difficulty <= 30 ? 'bg-green-100 text-green-800' :
                                                     kw.difficulty <= 60 ? 'bg-yellow-100 text-yellow-800' :
-                                                    'bg-red-100 text-red-800'
-                                                }`}>
+                                                        'bg-red-100 text-red-800'
+                                                    }`}>
                                                     {kw.difficulty}
                                                 </span>
                                             ) : '—'}

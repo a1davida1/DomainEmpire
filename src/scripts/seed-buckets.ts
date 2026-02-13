@@ -301,7 +301,7 @@ const FULL_BUCKETS = [
 ];
 
 // Helper to map user 'Type' to schema 'site_template' enum
-function mapTemplate(type: string): any {
+function mapTemplate(type: string): string {
     const t = type.toLowerCase();
     if (t.includes('hub')) return 'hub';
     if (t.includes('tool')) return 'tool';

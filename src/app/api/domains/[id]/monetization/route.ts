@@ -44,25 +44,22 @@ interface PageProps {
  *   import sanitizeHtmlLib from 'sanitize-html';
  *   const sanitizedHtml = sanitizeHtmlLib(html, { allowedTags: [...], allowedAttributes: {...} });
  */
-function sanitizeHtml(html: string): string {
-    // Decode HTML entities first to catch encoded attacks
-    const decoded = html
-        .replaceAll(/&#x?[0-9a-f]+;/gi, ' ')
-        .replaceAll(/&[a-z]+;/gi, ' ');
+import sanitizeHtmlLib from 'sanitize-html';
 
-    // Remove dangerous patterns
-    return decoded
-        .replaceAll(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-        .replaceAll(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
-        .replaceAll(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, '')
-        .replaceAll(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '')
-        .replaceAll(/<embed[^>]*>/gi, '')
-        .replaceAll(/on\w+\s*=\s*["'][^"']*["']/gi, '')
-        .replaceAll(/on\w+\s*=\s*[^\s>]*/gi, '')
-        .replaceAll(/javascript:/gi, '')
-        .replaceAll(/vbscript:/gi, '')
-        .replaceAll(/data:/gi, 'data-blocked:')
-        .replaceAll(/expression\s*\(/gi, 'expression-blocked(');
+function sanitizeHtml(html: string): string {
+    return sanitizeHtmlLib(html, {
+        allowedTags: sanitizeHtmlLib.defaults.allowedTags.concat(['img', 'h1', 'h2']),
+        allowedAttributes: {
+            ...sanitizeHtmlLib.defaults.allowedAttributes,
+            '*': ['style', 'class'],
+        },
+        disallowedTagsMode: 'discard',
+        allowedSchemes: ['http', 'https', 'mailto', 'tel'],
+        allowedSchemesByTag: {},
+        allowedSchemesAppliedToAttributes: ['href', 'src', 'cite'],
+        allowProtocolRelative: false,
+        enforceHtmlBoundary: false,
+    });
 }
 
 export async function GET(request: NextRequest, { params }: PageProps) {
@@ -112,7 +109,7 @@ export async function POST(request: NextRequest, { params }: PageProps) {
         let body: unknown;
         try {
             body = await request.json();
-        } catch (jsonError) {
+        } catch (_jsonError) {
             return NextResponse.json(
                 { error: 'Bad Request', message: 'Invalid JSON in request body' },
                 { status: 400 }

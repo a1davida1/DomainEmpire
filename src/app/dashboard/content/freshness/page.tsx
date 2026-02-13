@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { RefreshCw, AlertTriangle } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 import { db, articles, domains } from '@/lib/db';
 import { eq, and, desc, isNull, gte, count, sql } from 'drizzle-orm';

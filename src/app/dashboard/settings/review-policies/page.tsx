@@ -64,9 +64,9 @@ export default function ReviewPoliciesPage() {
             setPolicies(await policiesRes.json());
             const data = await domainsRes.json();
             setDomains(Array.isArray(data) ? data : data.domains || []);
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('Load failed:', err);
-            setError(err.message || 'Failed to load page data');
+            setError(err instanceof Error ? err.message : 'Failed to load page data');
         } finally {
             setLoading(false);
         }
@@ -103,9 +103,9 @@ export default function ReviewPoliciesPage() {
 
             if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
             successTimeoutRef.current = setTimeout(() => setSuccessMessage(null), 5000);
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('Create failed:', err);
-            setError(err.message || 'Failed to create policy');
+            setError(err instanceof Error ? err.message : 'Failed to create policy');
         } finally {
             setCreating(false);
         }
@@ -127,9 +127,9 @@ export default function ReviewPoliciesPage() {
 
             if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
             successTimeoutRef.current = setTimeout(() => setSuccessMessage(null), 5000);
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('Delete failed:', err);
-            setError(err.message || 'Failed to delete policy');
+            setError(err instanceof Error ? err.message : 'Failed to delete policy');
         } finally {
             setDeletingId(null);
         }
@@ -212,7 +212,7 @@ export default function ReviewPoliciesPage() {
                             <select
                                 id="ymyl-level"
                                 value={formYmylLevel}
-                                onChange={(e) => setFormYmylLevel(e.target.value as any)}
+                                onChange={(e) => setFormYmylLevel(e.target.value)}
                                 className="w-full p-2 rounded border bg-background"
                             >
                                 {YMYL_LEVELS.map(l => (
@@ -226,7 +226,7 @@ export default function ReviewPoliciesPage() {
                             <select
                                 id="required-role"
                                 value={formRequiredRole}
-                                onChange={(e) => setFormRequiredRole(e.target.value as any)}
+                                onChange={(e) => setFormRequiredRole(e.target.value)}
                                 className="w-full p-2 rounded border bg-background"
                             >
                                 {ROLES.map(r => (

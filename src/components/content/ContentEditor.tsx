@@ -70,7 +70,7 @@ export function ContentEditor({
                 });
             }
         } catch (error) {
-            console.error('Failed to suggest titles');
+            console.error('Failed to suggest titles', error);
             toast({
                 title: "Error",
                 description: "Could not generate titles.",
@@ -152,7 +152,7 @@ export function ContentEditor({
                 });
             }
         } catch (error) {
-            console.error('Failed to refine');
+            console.error('Failed to suggest titles', error);
             toast({
                 title: "Refinement failed",
                 description: "Could not refine content.",

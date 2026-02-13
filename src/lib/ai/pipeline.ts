@@ -271,7 +271,7 @@ export async function processDraftJob(jobId: string): Promise<void> {
         throw new Error(`Article not found: ${job.articleId}`);
     }
 
-    const outline = article.headerStructure as any; // Cast for prompt construction
+    const outline = article.headerStructure as Record<string, unknown>; // Cast for prompt construction
 
     if (!outline) throw new Error('Outline not found for article');
 

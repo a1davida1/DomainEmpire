@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth';
+import { requireAuth, requireRole } from '@/lib/auth';
 import { db, articles, contentRevisions } from '@/lib/db';
 import { eq, and, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
@@ -16,6 +16,9 @@ const batchSchema = z.object({
 export async function POST(request: NextRequest) {
     const authError = await requireAuth(request);
     if (authError) return authError;
+
+    const roleError = await requireRole(request, 'editor');
+    if (roleError) return roleError;
 
     try {
         const body = await request.json();
