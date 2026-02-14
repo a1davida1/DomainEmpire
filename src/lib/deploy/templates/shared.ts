@@ -196,8 +196,13 @@ export function buildSchemaJsonLd(
                 headline: article.title,
                 description: article.metaDescription || '',
                 url: `https://${domain}/${article.slug}`,
-                dateModified: article.updatedAt ? new Date(article.updatedAt).toISOString() : undefined,
+                mainEntityOfPage: { '@type': 'WebPage', '@id': `https://${domain}/${article.slug}` },
+                dateModified: article.updatedAt ? new Date(article.updatedAt).toISOString() : new Date().toISOString(),
                 datePublished: article.publishedAt ? new Date(article.publishedAt).toISOString() : undefined,
+                inLanguage: 'en',
+                wordCount: article.contentMarkdown ? article.contentMarkdown.split(/\s+/).length : undefined,
+                author: { '@type': 'Organization', name: domain },
+                publisher: { '@type': 'Organization', name: domain },
             });
             break;
         case 'WebApplication':
@@ -234,42 +239,112 @@ export function buildSchemaJsonLd(
 }
 
 // ==============================
-// OpenGraph / Twitter Cards
+// WebSite Schema (for index page)
+// ==============================
+
+export function buildWebSiteSchema(domain: string, siteTitle: string, description: string): string {
+    const schema = {
+        '@context': 'https://schema.org',
+        '@type': 'WebSite',
+        name: siteTitle,
+        url: `https://${domain}/`,
+        description,
+        publisher: { '@type': 'Organization', name: siteTitle },
+    };
+    return `<script type="application/ld+json">${JSON.stringify(schema)}</script>`;
+}
+
+// ==============================
+// OpenGraph / Twitter Cards + Canonical + Breadcrumbs
 // ==============================
 
 export function buildOpenGraphTags(article: Article, domain: string): string {
     const url = `https://${domain}/${article.slug}`;
     const title = escapeAttr(article.title);
     const description = escapeAttr(article.metaDescription || '');
-    return [
+    const tags = [
+        `<link rel="canonical" href="${url}">`,
         `<meta property="og:title" content="${title}">`,
         `<meta property="og:description" content="${description}">`,
         `<meta property="og:url" content="${url}">`,
         `<meta property="og:type" content="article">`,
         `<meta property="og:site_name" content="${escapeAttr(domain)}">`,
-        `<meta name="twitter:card" content="summary">`,
+        `<meta property="og:locale" content="en_US">`,
+        `<meta name="twitter:card" content="summary_large_image">`,
         `<meta name="twitter:title" content="${title}">`,
         `<meta name="twitter:description" content="${description}">`,
-    ].join('\n  ');
+    ];
+    if (article.publishedAt) {
+        tags.push(`<meta property="article:published_time" content="${new Date(article.publishedAt).toISOString()}">`);
+    }
+    if (article.updatedAt) {
+        tags.push(`<meta property="article:modified_time" content="${new Date(article.updatedAt).toISOString()}">`);
+    }
+    // Breadcrumb structured data
+    const breadcrumb = {
+        '@context': 'https://schema.org',
+        '@type': 'BreadcrumbList',
+        itemListElement: [
+            { '@type': 'ListItem', position: 1, name: 'Home', item: `https://${domain}/` },
+            { '@type': 'ListItem', position: 2, name: article.title, item: url },
+        ],
+    };
+    tags.push(`<script type="application/ld+json">${JSON.stringify(breadcrumb)}</script>`);
+    return tags.join('\n  ');
 }
 
 // ==============================
-// Astro Layout Wrapper
+// HTML Page Shell (replaces Astro layout)
 // ==============================
 
-export function wrapInAstroLayout(
-    titleAttr: string,
-    descAttr: string,
+export interface PageShell {
+    siteTitle: string;
+    headScripts: string;
+    bodyScripts: string;
+    headerHtml: string;
+    footerHtml: string;
+    sidebarHtml: string;
+    hasSidebar: boolean;
+}
+
+/**
+ * Wrap page body content in a full HTML document using the site shell.
+ * Replaces the old Astro layout wrapper — generates complete, self-contained HTML.
+ */
+export function wrapInHtmlPage(
+    pageTitle: string,
+    pageDescription: string,
     bodyHtml: string,
+    pageShell: PageShell,
     extraHead?: string,
 ): string {
-    const headSlot = extraHead ? `\n  ${extraHead}` : '';
-    return `---
-import Base from '../layouts/Base.astro';
----
-<Base title="${escapeAttr(titleAttr)}" description="${escapeAttr(descAttr)}">
-  ${bodyHtml}${headSlot}
-</Base>`;
+    const shell = pageShell;
+    if (!shell) throw new Error('Page shell missing');
+
+    const mainContent = shell.hasSidebar
+        ? `<div class="site-container"><div class="layout-wrap"><main>${bodyHtml}</main>${shell.sidebarHtml}</div></div>`
+        : `<div class="site-container"><main>${bodyHtml}</main></div>`;
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="${escapeAttr(pageDescription)}">
+  <meta name="robots" content="index, follow">
+  <title>${escapeHtml(pageTitle)} | ${escapeHtml(shell.siteTitle)}</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  ${shell.headScripts}
+  ${extraHead || ''}
+</head>
+<body>
+${shell.headerHtml}
+${mainContent}
+${shell.footerHtml}
+${shell.bodyScripts}
+</body>
+</html>`;
 }
 
 // ==============================

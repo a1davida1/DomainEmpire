@@ -11,7 +11,7 @@ import {
     renderMarkdownToHtml,
     buildTrustElements,
     buildSchemaJsonLd,
-    wrapInAstroLayout,
+    wrapInHtmlPage,
     generateDataSourcesSection,
     buildOpenGraphTags,
     buildFreshnessBadge,
@@ -83,6 +83,7 @@ export async function generateFaqPage(
     domain: string,
     disclosure: DisclosureInfo | null | undefined,
     datasets: ArticleDatasetInfo[],
+    pageShell: import('./shared').PageShell,
 ): Promise<string> {
     const markdown = article.contentMarkdown || '';
     const faqItems = extractFaqItems(markdown);
@@ -119,7 +120,7 @@ export async function generateFaqPage(
         contentBlock = `<div class="faq-list">${faqHtmlParts.join('\n')}</div>`;
     } else {
         const fullHtml = await renderMarkdownToHtml(markdown);
-        contentBlock = `<Fragment set:html={${JSON.stringify(fullHtml)}} />`;
+        contentBlock = `${fullHtml}`;
     }
 
     const titleHtml = escapeHtml(article.title);
@@ -137,5 +138,5 @@ export async function generateFaqPage(
   ${dataSourcesHtml}
   ${trustHtml}`;
 
-    return wrapInAstroLayout(article.title, article.metaDescription || '', body, ogTags);
+    return wrapInHtmlPage(article.title, article.metaDescription || '', body, pageShell, ogTags);
 }

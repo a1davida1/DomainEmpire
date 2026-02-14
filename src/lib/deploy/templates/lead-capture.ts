@@ -11,7 +11,7 @@ import {
   renderMarkdownToHtml,
   buildTrustElements,
   buildSchemaJsonLd,
-  wrapInAstroLayout,
+  wrapInHtmlPage,
   generateDataSourcesSection,
   buildOpenGraphTags,
   buildFreshnessBadge,
@@ -126,6 +126,7 @@ export async function generateLeadCapturePage(
   domain: string,
   disclosure: DisclosureInfo | null | undefined,
   datasets: ArticleDatasetInfo[],
+  pageShell: import('./shared').PageShell,
   domainId?: string,
 ): Promise<string> {
   const config = article.leadGenConfig as LeadGenConfig | null;
@@ -192,11 +193,11 @@ export async function generateLeadCapturePage(
   <article>
     <h1>${titleHtml}</h1>
     ${formHtml}
-    <Fragment set:html={${JSON.stringify(contentHtml)}} />
+    ${contentHtml}
   </article>
   ${dataSourcesHtml}
   ${trustHtml}
   ${config ? buildLeadFormScript(config, domainId || '') : ''}`;
 
-  return wrapInAstroLayout(article.title, article.metaDescription || '', body, ogTags);
+  return wrapInHtmlPage(article.title, article.metaDescription || '', body, pageShell, ogTags);
 }

@@ -53,74 +53,6 @@ async function cfFetch(
 }
 
 /**
- * Create a Cloudflare Pages project connected to GitHub
- */
-export async function createPagesProject(
-    projectName: string,
-    githubRepo: string,
-    productionBranch: string = 'main'
-): Promise<ProjectCreateResult> {
-    const config = getConfig();
-
-    try {
-        // Note: This requires GitHub integration to be set up in Cloudflare dashboard first
-        const response = await cfFetch(
-            `/accounts/${config.accountId}/pages/projects`,
-            {
-                method: 'POST',
-                body: JSON.stringify({
-                    name: projectName,
-                    production_branch: productionBranch,
-                    build_config: {
-                        build_command: 'npm run build',
-                        destination_dir: 'dist',
-                        root_dir: '',
-                    },
-                    source: {
-                        type: 'github',
-                        config: {
-                            owner: process.env.GITHUB_OWNER,
-                            repo_name: githubRepo,
-                            production_branch: productionBranch,
-                            pr_comments_enabled: false,
-                            deployments_enabled: true,
-                        },
-                    },
-                }),
-            }
-        );
-
-        const data = await response.json();
-
-        if (!data.success) {
-            // Check if project already exists
-            if (data.errors?.[0]?.code === 8000007) {
-                const existing = await getPagesProject(projectName);
-                if (existing) {
-                    return {
-                        success: true,
-                        projectName: existing.name,
-                        deploymentUrl: existing.subdomain,
-                    };
-                }
-            }
-            return { success: false, error: data.errors?.[0]?.message || 'Failed to create project' };
-        }
-
-        return {
-            success: true,
-            projectName: data.result.name,
-            deploymentUrl: data.result.subdomain,
-        };
-    } catch (error) {
-        return {
-            success: false,
-            error: error instanceof Error ? error.message : 'Unknown error',
-        };
-    }
-}
-
-/**
  * Get Pages project info
  */
 export async function getPagesProject(projectName: string): Promise<{
@@ -158,46 +90,6 @@ export async function getPagesProject(projectName: string): Promise<{
         };
     } catch {
         return null;
-    }
-}
-
-/**
- * Trigger a deployment
- */
-export async function triggerDeployment(
-    projectName: string,
-    branch: string = 'main'
-): Promise<DeploymentResult> {
-    const config = getConfig();
-
-    try {
-        const response = await cfFetch(
-            `/accounts/${config.accountId}/pages/projects/${projectName}/deployments`,
-            {
-                method: 'POST',
-                body: JSON.stringify({
-                    branch,
-                }),
-            }
-        );
-
-        const data = await response.json();
-
-        if (!data.success) {
-            return { success: false, error: data.errors?.[0]?.message || 'Failed to trigger deployment' };
-        }
-
-        return {
-            success: true,
-            deploymentId: data.result.id,
-            url: data.result.url,
-            status: data.result.latest_stage?.status || 'queued',
-        };
-    } catch (error) {
-        return {
-            success: false,
-            error: error instanceof Error ? error.message : 'Unknown error',
-        };
     }
 }
 
@@ -260,6 +152,130 @@ export async function addCustomDomain(
         }
 
         return { success: true };
+    } catch (error) {
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown error',
+        };
+    }
+}
+
+/**
+ * Create a Pages project for Direct Upload (no GitHub source).
+ * Returns the existing project if it already exists.
+ */
+export async function createDirectUploadProject(
+    projectName: string,
+): Promise<ProjectCreateResult> {
+    const config = getConfig();
+
+    try {
+        const response = await cfFetch(
+            `/accounts/${config.accountId}/pages/projects`,
+            {
+                method: 'POST',
+                body: JSON.stringify({
+                    name: projectName,
+                    production_branch: 'main',
+                }),
+            }
+        );
+
+        const data = await response.json();
+
+        if (!data.success) {
+            // Project already exists — reuse it
+            if (data.errors?.[0]?.code === 8000007) {
+                const existing = await getPagesProject(projectName);
+                if (existing) {
+                    return {
+                        success: true,
+                        projectName: existing.name,
+                        deploymentUrl: existing.subdomain,
+                    };
+                }
+            }
+            return { success: false, error: data.errors?.[0]?.message || 'Failed to create project' };
+        }
+
+        return {
+            success: true,
+            projectName: data.result.name,
+            deploymentUrl: data.result.subdomain,
+        };
+    } catch (error) {
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown error',
+        };
+    }
+}
+
+/**
+ * Deploy files directly to Cloudflare Pages via Direct Upload.
+ * Uploads all files as multipart form data — no GitHub needed.
+ * Supports binary data for images/assets.
+ */
+export async function directUploadDeploy(
+    projectName: string,
+    files: Array<{ path: string; content: string | Buffer | Uint8Array }>,
+): Promise<DeploymentResult> {
+    const config = getConfig();
+
+    try {
+        // Build multipart form data with manifest
+        const { createHash } = await import('node:crypto');
+        const manifest: Record<string, string> = {};
+        const filesByHash = new Map<string, { path: string; content: string | Buffer | Uint8Array }>();
+
+        for (const file of files) {
+            // Handle string vs binary content for hashing
+            const contentBuffer = typeof file.content === 'string'
+                ? Buffer.from(file.content, 'utf-8')
+                : Buffer.from(file.content);
+
+            const hash = createHash('sha256').update(contentBuffer).digest('hex');
+            const filePath = file.path.startsWith('/') ? file.path : `/${file.path}`;
+            manifest[filePath] = hash;
+            filesByHash.set(hash, file);
+        }
+
+        // Create FormData with manifest + file blobs
+        const formData = new FormData();
+        formData.append('manifest', JSON.stringify(manifest));
+
+        for (const [hash, file] of filesByHash) {
+            // Create Blob from content (auto-handles Buffer/string)
+            const content = typeof file.content === 'string' ? file.content : new Uint8Array(file.content);
+            const blob = new Blob([content]);
+            formData.append('files', blob, hash);
+        }
+
+        // POST to Direct Upload endpoint
+        const response = await fetch(
+            `${CF_API}/accounts/${config.accountId}/pages/projects/${projectName}/deployments`,
+            {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${config.apiToken}`,
+                    // Don't set Content-Type — fetch sets it with the boundary for FormData
+                },
+                body: formData,
+            }
+        );
+
+        const data = await response.json();
+
+        if (!data.success) {
+            return { success: false, error: data.errors?.[0]?.message || 'Direct upload failed' };
+        }
+
+        return {
+            success: true,
+            deploymentId: data.result.id,
+            url: data.result.url,
+            status: data.result.latest_stage?.status || 'queued',
+        };
     } catch (error) {
         return {
             success: false,

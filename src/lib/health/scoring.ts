@@ -126,8 +126,8 @@ export async function calculateCompositeHealth(domainId: string): Promise<Health
     if (d) {
         if (d.isDeployed) infraScore += 25;
         else recommendations.push('Deploy the site');
-        if (d.githubRepo) infraScore += 25;
-        else recommendations.push('Set up a GitHub repository');
+        if (d.cloudflareProject) infraScore += 25;
+        else recommendations.push('Set up Cloudflare Pages project');
         if (d.renewalDate) infraScore += 25;
         else recommendations.push('Set renewal date');
         if (d.niche) infraScore += 25;

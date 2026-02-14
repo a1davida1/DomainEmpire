@@ -1,25 +1,24 @@
 /**
  * Deployment Processor - Handles the actual deployment workflow
- * 
- * Pipeline: Validate → Create Repo → Generate Files → Commit → Deploy → Custom Domain → DNS
- * 
+ *
+ * Pipeline: Validate → Generate Files → Direct Upload to Cloudflare → Custom Domain → DNS
+ *
+ * Uses Cloudflare Pages Direct Upload — no GitHub dependency.
+ *
  * Features:
  * - Pre-flight validation (env vars, domain data)
  * - Step-by-step progress tracking in job result
  * - Rollback on failure (mark domain as not deployed)
- * - Timeout-safe: each step is idempotent where possible
  */
 
 import { db, domains, contentQueue, articles } from '@/lib/db';
 import { eq, count } from 'drizzle-orm';
-import { createDomainRepo, commitMultipleFiles } from './github';
-import { createPagesProject, triggerDeployment, addCustomDomain } from './cloudflare';
+import { createDirectUploadProject, directUploadDeploy, addCustomDomain } from './cloudflare';
 import { updateNameservers } from './godaddy';
 import { generateSiteFiles } from './generator';
 
 interface DeployPayload {
     domain: string;
-    createRepo: boolean;
     triggerBuild: boolean;
     addCustomDomain: boolean;
 }
@@ -35,8 +34,7 @@ interface DeployContext {
     domainId: string;
     payload: DeployPayload;
     steps: DeployStep[];
-    repoName: string;
-    githubRepo?: string;
+    projectName: string;
     cfProject?: string;
 }
 
@@ -46,12 +44,24 @@ interface DeployContext {
 function validateDeployEnv(): string[] {
     const errors: string[] = [];
 
-    if (!process.env.GITHUB_TOKEN) errors.push('GITHUB_TOKEN is not set');
-    if (!process.env.GITHUB_OWNER) errors.push('GITHUB_OWNER is not set');
     if (!process.env.CLOUDFLARE_API_TOKEN) errors.push('CLOUDFLARE_API_TOKEN is not set');
     if (!process.env.CLOUDFLARE_ACCOUNT_ID) errors.push('CLOUDFLARE_ACCOUNT_ID is not set');
 
     return errors;
+}
+
+/**
+ * Sanitize project name for Cloudflare Pages
+ * Rules: lowercase, max 58 chars, alphanumeric & hyphens only, no start/end hyphens
+ */
+function sanitizeProjectName(domain: string): string {
+    const sanitized = domain.toLowerCase()
+        .replace(/[^a-z0-9-]/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+
+    // Truncate to 50 chars to leave room for sufixes if needed
+    return sanitized.slice(0, 50);
 }
 
 /**
@@ -63,114 +73,56 @@ async function updateJobProgress(jobId: string, steps: DeployStep[]) {
     }).where(eq(contentQueue.id, jobId));
 }
 
-/**
- * Mark a step as running and persist progress
- */
 async function startStep(ctx: DeployContext, stepIndex: number) {
     ctx.steps[stepIndex].status = 'running';
     await updateJobProgress(ctx.jobId, ctx.steps);
 }
 
-/**
- * Mark a step as failed and persist progress
- */
 async function failStep(ctx: DeployContext, stepIndex: number, detail: string) {
     ctx.steps[stepIndex].status = 'failed';
     ctx.steps[stepIndex].detail = detail;
     await updateJobProgress(ctx.jobId, ctx.steps);
 }
 
-/**
- * Mark a step as done
- */
-function doneStep(ctx: DeployContext, stepIndex: number, detail: string) {
+async function doneStep(ctx: DeployContext, stepIndex: number, detail: string) {
     ctx.steps[stepIndex].status = 'done';
     ctx.steps[stepIndex].detail = detail;
+    await updateJobProgress(ctx.jobId, ctx.steps);
 }
 
 /**
- * Step 1: Create GitHub repository
- */
-async function stepCreateRepo(ctx: DeployContext): Promise<void> {
-    if (!ctx.payload.createRepo) {
-        doneStep(ctx, 0, 'Skipped — repo already exists');
-        return;
-    }
-
-    await startStep(ctx, 0);
-
-    const repoResult = await createDomainRepo(
-        ctx.payload.domain,
-        `Static site for ${ctx.payload.domain}`
-    );
-
-    if (!repoResult.success) {
-        await failStep(ctx, 0, repoResult.error || 'Unknown error');
-        throw new Error(`Failed to create repo: ${repoResult.error}`);
-    }
-
-    ctx.githubRepo = repoResult.repoUrl;
-    doneStep(ctx, 0, repoResult.repoUrl || 'Created');
-
-    await db.update(domains).set({
-        githubRepo: repoResult.repoUrl,
-        updatedAt: new Date(),
-    }).where(eq(domains.id, ctx.domainId));
-}
-
-/**
- * Step 2: Generate site files
+ * Step 1: Generate site files (plain HTML)
  */
 async function stepGenerateFiles(ctx: DeployContext): Promise<{ path: string; content: string }[]> {
-    await startStep(ctx, 1);
+    await startStep(ctx, 0);
 
     const files = await generateSiteFiles(ctx.domainId);
 
     if (files.length === 0) {
-        await failStep(ctx, 1, 'No files generated');
+        await failStep(ctx, 0, 'No files generated');
         throw new Error('Site generator produced zero files');
     }
 
-    doneStep(ctx, 1, `${files.length} files generated`);
+    await doneStep(ctx, 0, `${files.length} files generated`);
     return files;
 }
 
 /**
- * Step 3: Commit files to repository
+ * Step 2: Upload to Cloudflare Pages via Direct Upload
  */
-async function stepCommitFiles(ctx: DeployContext, files: { path: string; content: string }[]): Promise<void> {
-    await startStep(ctx, 2);
-
-    const commitResult = await commitMultipleFiles(
-        ctx.repoName,
-        files,
-        `Deploy site content — ${new Date().toISOString()}`,
-        'main'
-    );
-
-    if (!commitResult.success) {
-        await failStep(ctx, 2, commitResult.error || 'Unknown error');
-        throw new Error(`Failed to commit files: ${commitResult.error}`);
-    }
-
-    doneStep(ctx, 2, commitResult.sha || 'Committed');
-}
-
-/**
- * Step 4: Deploy to Cloudflare Pages
- */
-async function stepDeployCloudflare(ctx: DeployContext): Promise<void> {
+async function stepDirectUpload(ctx: DeployContext, files: { path: string; content: string }[]): Promise<void> {
     if (!ctx.payload.triggerBuild) {
-        doneStep(ctx, 3, 'Skipped — build not requested');
+        await doneStep(ctx, 1, 'Skipped — deploy not requested');
         return;
     }
 
-    await startStep(ctx, 3);
+    await startStep(ctx, 1);
 
-    const projectResult = await createPagesProject(ctx.repoName, ctx.repoName, 'main');
+    // Create or reuse project
+    const projectResult = await createDirectUploadProject(ctx.projectName);
 
     if (!projectResult.success) {
-        await failStep(ctx, 3, projectResult.error || 'Unknown error');
+        await failStep(ctx, 1, projectResult.error || 'Unknown error');
         throw new Error(`Failed to create CF project: ${projectResult.error}`);
     }
 
@@ -181,56 +133,53 @@ async function stepDeployCloudflare(ctx: DeployContext): Promise<void> {
         updatedAt: new Date(),
     }).where(eq(domains.id, ctx.domainId));
 
-    try {
-        await triggerDeployment(ctx.repoName, 'main');
-        doneStep(ctx, 3, `Project: ${projectResult.projectName}`);
-    } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        await failStep(ctx, 3, message);
-        throw new Error(`Failed to trigger deployment: ${message}`);
+    // Direct upload files - USE THE RETURNED PROJECT NAME (which might have a unique suffix)
+    const uploadResult = await directUploadDeploy(ctx.cfProject || ctx.projectName, files);
+
+    if (!uploadResult.success) {
+        await failStep(ctx, 1, uploadResult.error || 'Upload failed');
+        throw new Error(`Direct upload failed: ${uploadResult.error}`);
     }
+
+    await doneStep(ctx, 1, `Deployed: ${uploadResult.url || ctx.projectName}`);
 }
 
 /**
- * Step 5: Add custom domain to Cloudflare Pages
+ * Step 3: Add custom domain to Cloudflare Pages
  */
 async function stepAddCustomDomain(ctx: DeployContext): Promise<void> {
     if (!ctx.payload.addCustomDomain || !ctx.cfProject) {
-        doneStep(ctx, 4, 'Skipped');
+        await doneStep(ctx, 2, 'Skipped');
         return;
     }
 
-    await startStep(ctx, 4);
+    await startStep(ctx, 2);
     try {
         await addCustomDomain(ctx.cfProject, ctx.payload.domain);
-        doneStep(ctx, 4, `Linked ${ctx.payload.domain}`);
+        await doneStep(ctx, 2, `Linked ${ctx.payload.domain}`);
     } catch (err: unknown) {
-        await failStep(ctx, 4, `Failed to link ${ctx.payload.domain}: ${err instanceof Error ? err.message : String(err)}`);
-        // We usually don't throw here if we want to continue, but step 4 failure might be critical.
-        // However, the user prompt said "call failStep... so the step is marked failed instead of remaining running".
-        // It didn't explicitly say to throw or return. But if I don't return, it proceeds.
+        await failStep(ctx, 2, `Failed to link ${ctx.payload.domain}: ${err instanceof Error ? err.message : String(err)}`);
         return;
     }
 }
 
 /**
- * Step 6: Update DNS via GoDaddy API
+ * Step 4: Update DNS via GoDaddy API
  */
 async function stepUpdateDns(ctx: DeployContext): Promise<void> {
     if (!ctx.payload.addCustomDomain || !process.env.GODADDY_API_KEY || !process.env.CLOUDFLARE_NAMESERVERS) {
-        doneStep(ctx, 5, 'Skipped (Missing config)');
+        await doneStep(ctx, 3, 'Skipped (Missing config)');
         return;
     }
 
-    await startStep(ctx, 5);
+    await startStep(ctx, 3);
 
     try {
         const nameservers = process.env.CLOUDFLARE_NAMESERVERS.split(',').map(ns => ns.trim());
         await updateNameservers(ctx.payload.domain, nameservers);
-        doneStep(ctx, 5, 'Nameservers updated');
+        await doneStep(ctx, 3, 'Nameservers updated');
     } catch (err) {
-        // Don't fail the whole job if DNS update fails, but mark the step as failed
-        await failStep(ctx, 5, err instanceof Error ? err.message : 'DNS update failed');
+        await failStep(ctx, 3, err instanceof Error ? err.message : 'DNS update failed');
         console.error(`DNS update failed for ${ctx.payload.domain}:`, err);
     }
 }
@@ -291,22 +240,18 @@ export async function processDeployJob(jobId: string): Promise<void> {
         jobId,
         domainId: job.domainId!,
         payload,
-        repoName: payload.domain.replaceAll('.', '-'),
+        projectName: sanitizeProjectName(payload.domain),
         steps: [
-            { step: 'Create Repository', status: 'pending' },
             { step: 'Generate Files', status: 'pending' },
-            { step: 'Commit to Repo', status: 'pending' },
-            { step: 'Deploy to Cloudflare', status: 'pending' },
+            { step: 'Upload to Cloudflare', status: 'pending' },
             { step: 'Add Custom Domain', status: 'pending' },
             { step: 'Update DNS', status: 'pending' },
         ],
     };
 
     try {
-        await stepCreateRepo(ctx);
         const files = await stepGenerateFiles(ctx);
-        await stepCommitFiles(ctx, files);
-        await stepDeployCloudflare(ctx);
+        await stepDirectUpload(ctx, files);
         await stepAddCustomDomain(ctx);
         await stepUpdateDns(ctx);
 
@@ -316,7 +261,6 @@ export async function processDeployJob(jobId: string): Promise<void> {
             completedAt: new Date(),
             result: {
                 steps: ctx.steps,
-                githubRepo: ctx.githubRepo,
                 cfProject: ctx.cfProject,
                 filesDeployed: files.length,
                 completedAt: new Date().toISOString(),

@@ -38,11 +38,7 @@ interface PageProps {
 
 /**
  * HTML sanitization to prevent XSS.
- * TODO: For production, install and use `sanitize-html` npm package:
- *   npm install sanitize-html @types/sanitize-html
- * Then replace this function with:
- *   import sanitizeHtmlLib from 'sanitize-html';
- *   const sanitizedHtml = sanitizeHtmlLib(html, { allowedTags: [...], allowedAttributes: {...} });
+ * Uses `sanitize-html` library with strict configuration.
  */
 import sanitizeHtmlLib from 'sanitize-html';
 
@@ -51,7 +47,18 @@ function sanitizeHtml(html: string): string {
         allowedTags: sanitizeHtmlLib.defaults.allowedTags.concat(['img', 'h1', 'h2']),
         allowedAttributes: {
             ...sanitizeHtmlLib.defaults.allowedAttributes,
-            '*': ['style', 'class'],
+            '*': ['class'], // Removed 'style' from wildcard
+        },
+        allowedStyles: {
+            '*': {
+                // Whitelist safe style properties
+                'color': [/^#(0x)?[0-9a-f]+$/i, /^rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$/],
+                'background-color': [/^#(0x)?[0-9a-f]+$/i, /^rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$/],
+                'text-align': [/^left$/, /^right$/, /^center$/, /^justify$/],
+                'font-size': [/^\d+(?:px|em|%)$/],
+                'font-weight': [/^\d+$/, /^bold$/, /^normal$/],
+                'text-decoration': [/^none$/, /^underline$/, /^line-through$/],
+            },
         },
         disallowedTagsMode: 'discard',
         allowedSchemes: ['http', 'https', 'mailto', 'tel'],

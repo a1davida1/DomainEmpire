@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
     Globe, Rocket, RefreshCw, CheckCircle2, AlertCircle, Clock,
-    ChevronDown, ChevronRight, Github, Cloud
+    ChevronDown, ChevronRight, Cloud
 } from 'lucide-react';
 import { useToast } from "@/components/ui/use-toast";
 
@@ -28,7 +28,6 @@ interface DeployJob {
     maxAttempts?: number;
     steps?: DeployStep[] | null;
     filesDeployed?: number | null;
-    githubRepo?: string | null;
     cfProject?: string | null;
 }
 
@@ -99,8 +98,7 @@ export default function DeployPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     domainIds,
-                    createRepo: true,
-                    triggerBuild: true
+                    triggerBuild: true,
                 }),
             });
 
@@ -278,11 +276,6 @@ export default function DeployPage() {
                                                 <div className="flex gap-3 text-xs text-muted-foreground">
                                                     {job.filesDeployed && (
                                                         <span>{job.filesDeployed} files</span>
-                                                    )}
-                                                    {job.githubRepo && (
-                                                        <span className="flex items-center gap-1">
-                                                            <Github className="h-3 w-3" /> Repo created
-                                                        </span>
                                                     )}
                                                     {job.cfProject && (
                                                         <span className="flex items-center gap-1">

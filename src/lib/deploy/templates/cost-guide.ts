@@ -10,7 +10,7 @@ import {
     renderMarkdownToHtml,
     buildTrustElements,
     buildSchemaJsonLd,
-    wrapInAstroLayout,
+    wrapInHtmlPage,
     generateDataSourcesSection,
     buildOpenGraphTags,
     buildFreshnessBadge,
@@ -165,6 +165,7 @@ export async function generateCostGuidePage(
     domain: string,
     disclosure: DisclosureInfo | null | undefined,
     datasets: ArticleDatasetInfo[],
+    pageShell: import('./shared').PageShell,
 ): Promise<string> {
     const contentHtml = await renderMarkdownToHtml(article.contentMarkdown || '');
     const { disclaimerHtml, trustHtml } = await buildTrustElements(article, disclosure);
@@ -187,10 +188,10 @@ export async function generateCostGuidePage(
     <h1>${titleHtml}</h1>
     ${costRangeHtml}
     ${factorsHtml}
-    <Fragment set:html={${JSON.stringify(contentHtml)}} />
+    ${contentHtml}
   </article>
   ${dataSourcesHtml}
   ${trustHtml}`;
 
-    return wrapInAstroLayout(article.title, article.metaDescription || '', body, ogTags);
+    return wrapInHtmlPage(article.title, article.metaDescription || '', body, pageShell, ogTags);
 }

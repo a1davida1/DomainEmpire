@@ -5,71 +5,71 @@
  */
 
 import {
-    escapeHtml,
-    escapeAttr,
-    buildTrustElements,
-    buildSchemaJsonLd,
-    wrapInAstroLayout,
-    generateDataSourcesSection,
-    buildOpenGraphTags,
-    type DisclosureInfo,
-    type ArticleDatasetInfo,
-    type Article,
+  escapeHtml,
+  escapeAttr,
+  buildTrustElements,
+  buildSchemaJsonLd,
+  wrapInHtmlPage,
+  generateDataSourcesSection,
+  buildOpenGraphTags,
+  type DisclosureInfo,
+  type ArticleDatasetInfo,
+  type Article,
 } from './shared';
 
 interface WizardStep {
+  id: string;
+  title: string;
+  description?: string;
+  fields: Array<{
     id: string;
-    title: string;
-    description?: string;
-    fields: Array<{
-        id: string;
-        type: 'radio' | 'checkbox' | 'select' | 'number' | 'text';
-        label: string;
-        options?: Array<{ value: string; label: string }>;
-        required?: boolean;
-    }>;
-    nextStep?: string;
-    branches?: Array<{ condition: string; goTo: string }>;
+    type: 'radio' | 'checkbox' | 'select' | 'number' | 'text';
+    label: string;
+    options?: Array<{ value: string; label: string }>;
+    required?: boolean;
+  }>;
+  nextStep?: string;
+  branches?: Array<{ condition: string; goTo: string }>;
 }
 
 interface WizardConfig {
-    steps: WizardStep[];
-    resultRules: Array<{
-        condition: string;
-        title: string;
-        body: string;
-        cta?: { text: string; url: string };
-    }>;
-    resultTemplate: 'summary' | 'recommendation' | 'score' | 'eligibility';
-    collectLead?: {
-        fields: string[];
-        consentText: string;
-        endpoint: string;
-    };
+  steps: WizardStep[];
+  resultRules: Array<{
+    condition: string;
+    title: string;
+    body: string;
+    cta?: { text: string; url: string };
+  }>;
+  resultTemplate: 'summary' | 'recommendation' | 'score' | 'eligibility';
+  collectLead?: {
+    fields: string[];
+    consentText: string;
+    endpoint: string;
+  };
 }
 
 function renderField(field: WizardStep['fields'][0]): string {
-    const req = field.required ? ' required' : '';
-    const id = escapeAttr(field.id);
-    const label = escapeHtml(field.label);
+  const req = field.required ? ' required' : '';
+  const id = escapeAttr(field.id);
+  const label = escapeHtml(field.label);
 
-    switch (field.type) {
-        case 'radio':
-            if (!field.options?.length) return '';
-            return `<fieldset class="wizard-field" data-field-id="${id}">
+  switch (field.type) {
+    case 'radio':
+      if (!field.options?.length) return '';
+      return `<fieldset class="wizard-field" data-field-id="${id}">
   <legend>${label}</legend>
   ${field.options.map(opt => `<label class="wizard-radio"><input type="radio" name="${id}" value="${escapeAttr(opt.value)}"${req}><span>${escapeHtml(opt.label)}</span></label>`).join('\n  ')}
 </fieldset>`;
 
-        case 'checkbox':
-            if (!field.options?.length) return '';
-            return `<fieldset class="wizard-field" data-field-id="${id}">
+    case 'checkbox':
+      if (!field.options?.length) return '';
+      return `<fieldset class="wizard-field" data-field-id="${id}">
   <legend>${label}</legend>
   ${field.options.map(opt => `<label class="wizard-checkbox"><input type="checkbox" name="${id}" value="${escapeAttr(opt.value)}"><span>${escapeHtml(opt.label)}</span></label>`).join('\n  ')}
 </fieldset>`;
 
-        case 'select':
-            return `<div class="wizard-field" data-field-id="${id}">
+    case 'select':
+      return `<div class="wizard-field" data-field-id="${id}">
   <label for="wf-${id}">${label}</label>
   <select id="wf-${id}" name="${id}"${req}>
     <option value="">Select...</option>
@@ -77,26 +77,26 @@ function renderField(field: WizardStep['fields'][0]): string {
   </select>
 </div>`;
 
-        case 'number':
-            return `<div class="wizard-field" data-field-id="${id}">
+    case 'number':
+      return `<div class="wizard-field" data-field-id="${id}">
   <label for="wf-${id}">${label}</label>
   <input type="number" id="wf-${id}" name="${id}" inputmode="numeric"${req}>
 </div>`;
 
-        case 'text':
-        default:
-            return `<div class="wizard-field" data-field-id="${id}">
+    case 'text':
+    default:
+      return `<div class="wizard-field" data-field-id="${id}">
   <label for="wf-${id}">${label}</label>
   <input type="text" id="wf-${id}" name="${id}"${req}>
 </div>`;
-    }
+  }
 }
 
 function renderStep(step: WizardStep, index: number, total: number): string {
-    const fieldsHtml = step.fields.map(renderField).join('\n');
-    const desc = step.description ? `<p class="wizard-step-desc">${escapeHtml(step.description)}</p>` : '';
+  const fieldsHtml = step.fields.map(renderField).join('\n');
+  const desc = step.description ? `<p class="wizard-step-desc">${escapeHtml(step.description)}</p>` : '';
 
-    return `<div class="wizard-step" data-step-id="${escapeAttr(step.id)}" data-step-index="${index}" style="${index === 0 ? '' : 'display:none'}">
+  return `<div class="wizard-step" data-step-id="${escapeAttr(step.id)}" data-step-index="${index}" style="${index === 0 ? '' : 'display:none'}">
   <h3 class="wizard-step-title">${escapeHtml(step.title)}</h3>
   ${desc}
   ${fieldsHtml}
@@ -108,25 +108,25 @@ function renderStep(step: WizardStep, index: number, total: number): string {
 }
 
 function buildProgressBar(steps: WizardStep[]): string {
-    const segments = steps.map((s, i) =>
-        `<div class="wizard-progress-segment${i === 0 ? ' active' : ''}" data-index="${i}">
+  const segments = steps.map((s, i) =>
+    `<div class="wizard-progress-segment${i === 0 ? ' active' : ''}" data-index="${i}">
       <span class="wizard-progress-dot">${i + 1}</span>
       <span class="wizard-progress-label">${escapeHtml(s.title)}</span>
     </div>`
-    ).join('\n  ');
+  ).join('\n  ');
 
-    return `<div class="wizard-progress">${segments}</div>`;
+  return `<div class="wizard-progress">${segments}</div>`;
 }
 
 function buildResultsTemplate(config: WizardConfig): string {
-    // Lead capture form (optional)
-    let leadHtml = '';
-    if (config.collectLead) {
-        const fields = config.collectLead.fields.map(f => {
-            const type = f === 'email' ? 'email' : f === 'phone' ? 'tel' : 'text';
-            return `<div class="wizard-field"><label for="lead-${escapeAttr(f)}">${escapeHtml(f.charAt(0).toUpperCase() + f.slice(1))}</label><input type="${type}" id="lead-${escapeAttr(f)}" name="${escapeAttr(f)}" required></div>`;
-        }).join('\n    ');
-        leadHtml = `
+  // Lead capture form (optional)
+  let leadHtml = '';
+  if (config.collectLead) {
+    const fields = config.collectLead.fields.map(f => {
+      const type = f === 'email' ? 'email' : f === 'phone' ? 'tel' : 'text';
+      return `<div class="wizard-field"><label for="lead-${escapeAttr(f)}">${escapeHtml(f.charAt(0).toUpperCase() + f.slice(1))}</label><input type="${type}" id="lead-${escapeAttr(f)}" name="${escapeAttr(f)}" required></div>`;
+    }).join('\n    ');
+    leadHtml = `
   <div class="wizard-lead-form" style="display:none">
     <h4>Get Your Personalized Report</h4>
     <form id="wizard-lead-form" action="${escapeAttr(config.collectLead.endpoint)}" method="POST">
@@ -135,9 +135,9 @@ function buildResultsTemplate(config: WizardConfig): string {
       <button type="submit">Get My Results</button>
     </form>
   </div>`;
-    }
+  }
 
-    return `<div class="wizard-results" style="display:none">
+  return `<div class="wizard-results" style="display:none">
   <h3 class="wizard-results-title">Your Results</h3>
   <div class="wizard-results-cards"></div>
   ${leadHtml}
@@ -146,17 +146,17 @@ function buildResultsTemplate(config: WizardConfig): string {
 }
 
 function buildWizardScript(config: WizardConfig): string {
-    // Serialize config to JSON for client-side use
-    const stepsJson = JSON.stringify(config.steps.map(s => ({
-        id: s.id,
-        nextStep: s.nextStep,
-        branches: s.branches,
-        fieldIds: s.fields.map(f => ({ id: f.id, required: !!f.required })),
-    })));
-    const rulesJson = JSON.stringify(config.resultRules);
-    const resultTemplate = config.resultTemplate;
+  // Serialize config to JSON for client-side use
+  const stepsJson = JSON.stringify(config.steps.map(s => ({
+    id: s.id,
+    nextStep: s.nextStep,
+    branches: s.branches,
+    fieldIds: s.fields.map(f => ({ id: f.id, required: !!f.required })),
+  })));
+  const rulesJson = JSON.stringify(config.resultRules);
+  const resultTemplate = config.resultTemplate;
 
-    return `<script>
+  return `<script>
 (function(){
   var container = document.querySelector('.wizard-container');
   if(!container) return;
@@ -387,29 +387,30 @@ function buildWizardScript(config: WizardConfig): string {
 }
 
 export async function generateWizardPage(
-    article: Article,
-    domain: string,
-    disclosure: DisclosureInfo | null | undefined,
-    articleDatasetInfo: ArticleDatasetInfo[],
+  article: Article,
+  domain: string,
+  disclosure: DisclosureInfo | null | undefined,
+  articleDatasetInfo: ArticleDatasetInfo[],
+  pageShell: import('./shared').PageShell,
 ): Promise<string> {
-    const config = article.wizardConfig as WizardConfig | null;
-    if (!config?.steps?.length) {
-        // Fallback: render as standard article if no wizard config
-        const { disclaimerHtml, trustHtml } = await buildTrustElements(article, disclosure);
-        const body = `${disclaimerHtml}<article><h1>${escapeHtml(article.title)}</h1><p>Wizard configuration is not yet available.</p></article>${trustHtml}`;
-        return wrapInAstroLayout(article.title, article.metaDescription || '', body);
-    }
-
+  const config = article.wizardConfig as WizardConfig | null;
+  if (!config?.steps?.length) {
+    // Fallback: render as standard article if no wizard config
     const { disclaimerHtml, trustHtml } = await buildTrustElements(article, disclosure);
-    const dataSourcesHtml = generateDataSourcesSection(articleDatasetInfo);
-    const schemaLd = buildSchemaJsonLd(article, domain, 'WebApplication');
-    const ogTags = buildOpenGraphTags(article, domain);
+    const body = `${disclaimerHtml}<article><h1>${escapeHtml(article.title)}</h1><p>Wizard configuration is not yet available.</p></article>${trustHtml}`;
+    return wrapInHtmlPage(article.title, article.metaDescription || '', body, pageShell);
+  }
 
-    const progressBar = buildProgressBar(config.steps);
-    const stepsHtml = config.steps.map((step, i) => renderStep(step, i, config.steps.length)).join('\n');
-    const resultsHtml = buildResultsTemplate(config);
+  const { disclaimerHtml, trustHtml } = await buildTrustElements(article, disclosure);
+  const dataSourcesHtml = generateDataSourcesSection(articleDatasetInfo);
+  const schemaLd = buildSchemaJsonLd(article, domain, 'WebApplication');
+  const ogTags = buildOpenGraphTags(article, domain);
 
-    const body = `${disclaimerHtml}
+  const progressBar = buildProgressBar(config.steps);
+  const stepsHtml = config.steps.map((step, i) => renderStep(step, i, config.steps.length)).join('\n');
+  const resultsHtml = buildResultsTemplate(config);
+
+  const body = `${disclaimerHtml}
   ${schemaLd}
   <article>
     <h1>${escapeHtml(article.title)}</h1>
@@ -423,5 +424,5 @@ export async function generateWizardPage(
   ${trustHtml}
   ${buildWizardScript(config)}`;
 
-    return wrapInAstroLayout(article.title, article.metaDescription || '', body, ogTags);
+  return wrapInHtmlPage(article.title, article.metaDescription || '', body, pageShell, ogTags);
 }

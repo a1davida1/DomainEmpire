@@ -11,7 +11,7 @@ import {
     renderMarkdownToHtml,
     buildTrustElements,
     buildSchemaJsonLd,
-    wrapInAstroLayout,
+    wrapInHtmlPage,
     generateDataSourcesSection,
     buildOpenGraphTags,
     buildFreshnessBadge,
@@ -97,6 +97,7 @@ export async function generateChecklistPage(
     domain: string,
     disclosure: DisclosureInfo | null | undefined,
     datasets: ArticleDatasetInfo[],
+    pageShell: import('./shared').PageShell,
 ): Promise<string> {
     const markdown = article.contentMarkdown || '';
     const steps = extractChecklistSteps(markdown);
@@ -134,7 +135,7 @@ export async function generateChecklistPage(
     } else {
         // No H2 headings found — fall back to full rendered markdown
         const fullHtml = await renderMarkdownToHtml(markdown);
-        contentBlock = `<Fragment set:html={${JSON.stringify(fullHtml)}} />`;
+        contentBlock = `${fullHtml}`;
     }
 
     const freshnessBadge = buildFreshnessBadge(article, datasets);
@@ -152,5 +153,5 @@ export async function generateChecklistPage(
   ${trustHtml}
   ${steps.length > 0 ? buildChecklistScript() : ''}`;
 
-    return wrapInAstroLayout(article.title, article.metaDescription || '', body, ogTags);
+    return wrapInHtmlPage(article.title, article.metaDescription || '', body, pageShell, ogTags);
 }

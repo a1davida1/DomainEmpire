@@ -45,7 +45,6 @@ export async function GET(request: NextRequest) {
                     // Include step progress from result
                     steps: result?.steps || null,
                     filesDeployed: result?.filesDeployed || null,
-                    githubRepo: result?.githubRepo || null,
                     cfProject: result?.cfProject || null,
                 };
             }),

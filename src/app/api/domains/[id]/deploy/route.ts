@@ -7,7 +7,6 @@ import { randomUUID } from 'node:crypto';
 import { checkIdempotencyKey, storeIdempotencyResult } from '@/lib/api/idempotency';
 
 const deploySchema = z.object({
-    createRepo: z.boolean().default(true),
     triggerBuild: z.boolean().default(true),
     addCustomDomain: z.boolean().default(false),
 });
@@ -62,7 +61,6 @@ export async function POST(request: NextRequest, { params }: PageProps) {
             priority: 2,
             payload: {
                 domain: domain.domain,
-                createRepo: options.createRepo,
                 triggerBuild: options.triggerBuild,
                 addCustomDomain: options.addCustomDomain,
             },
@@ -117,7 +115,6 @@ export async function GET(request: NextRequest, { params }: PageProps) {
         return NextResponse.json({
             domain: domain.domain,
             isDeployed: domain.isDeployed,
-            githubRepo: domain.githubRepo,
             cloudflareProject: domain.cloudflareProject,
             lastDeployedAt: domain.lastDeployedAt,
         });

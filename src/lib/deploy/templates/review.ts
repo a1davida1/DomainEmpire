@@ -13,7 +13,7 @@ import {
     renderMarkdownToHtml,
     buildTrustElements,
     buildSchemaJsonLd,
-    wrapInAstroLayout,
+    wrapInHtmlPage,
     generateDataSourcesSection,
     buildOpenGraphTags,
     buildFreshnessBadge,
@@ -80,7 +80,7 @@ function buildReviewCardHtml(option: ReviewOption): string {
     const prosItems = parseListValue(option.scores.pros);
     if (prosItems && prosItems.length > 0) {
         const items = prosItems.map(p => `<li>${escapeHtml(p)}</li>`).join('\n');
-        prosHtml = `<div class="review-pros"><h4>Pros</h4><ul>${items}</ul></div>`;
+        prosHtml = `<div class="review-pros"><h3>Pros</h3><ul>${items}</ul></div>`;
     }
 
     // Cons list
@@ -88,7 +88,7 @@ function buildReviewCardHtml(option: ReviewOption): string {
     const consItems = parseListValue(option.scores.cons);
     if (consItems && consItems.length > 0) {
         const items = consItems.map(c => `<li>${escapeHtml(c)}</li>`).join('\n');
-        consHtml = `<div class="review-cons"><h4>Cons</h4><ul>${items}</ul></div>`;
+        consHtml = `<div class="review-cons"><h3>Cons</h3><ul>${items}</ul></div>`;
     }
 
     // Affiliate CTA
@@ -98,7 +98,7 @@ function buildReviewCardHtml(option: ReviewOption): string {
 
     return `<div class="review-card">
   <div class="review-card-header">
-    <h3>${badgeHtml}${nameHtml}</h3>
+    <h2>${badgeHtml}${nameHtml}</h2>
     ${ratingHtml}
   </div>
   <div class="review-card-body">
@@ -122,6 +122,7 @@ export async function generateReviewPage(
     domain: string,
     disclosure: DisclosureInfo | null | undefined,
     datasets: ArticleDatasetInfo[],
+    pageShell: import('./shared').PageShell,
 ): Promise<string> {
     const data = article.comparisonData as ReviewData | null;
     const contentHtml = await renderMarkdownToHtml(article.contentMarkdown || '');
@@ -155,10 +156,10 @@ export async function generateReviewPage(
     <h1>${titleHtml}</h1>
     ${reviewCardsHtml}
     ${verdictHtml}
-    <Fragment set:html={${JSON.stringify(contentHtml)}} />
+    ${contentHtml}
   </article>
   ${dataSourcesHtml}
   ${trustHtml}`;
 
-    return wrapInAstroLayout(article.title, article.metaDescription || '', body, ogTags);
+    return wrapInHtmlPage(article.title, article.metaDescription || '', body, pageShell, ogTags);
 }

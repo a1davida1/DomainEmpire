@@ -6,100 +6,100 @@
 
 import type { Article } from '@/lib/db/schema';
 import {
-    escapeHtml,
-    escapeAttr,
-    renderMarkdownToHtml,
-    buildTrustElements,
-    buildSchemaJsonLd,
-    wrapInAstroLayout,
-    generateDataSourcesSection,
-    buildOpenGraphTags,
-    buildFreshnessBadge,
-    buildPrintButton,
-    type DisclosureInfo,
-    type ArticleDatasetInfo,
+  escapeHtml,
+  escapeAttr,
+  renderMarkdownToHtml,
+  buildTrustElements,
+  buildSchemaJsonLd,
+  wrapInHtmlPage,
+  generateDataSourcesSection,
+  buildOpenGraphTags,
+  buildFreshnessBadge,
+  buildPrintButton,
+  type DisclosureInfo,
+  type ArticleDatasetInfo,
 } from './shared';
 
 type CalcInput = {
-    id: string;
-    label: string;
-    type: 'number' | 'select' | 'range';
-    default?: number;
-    min?: number;
-    max?: number;
-    step?: number;
-    options?: Array<{ label: string; value: number }>;
+  id: string;
+  label: string;
+  type: 'number' | 'select' | 'range';
+  default?: number;
+  min?: number;
+  max?: number;
+  step?: number;
+  options?: Array<{ label: string; value: number }>;
 };
 
 type CalcOutput = {
-    id: string;
-    label: string;
-    format: 'currency' | 'percent' | 'number';
-    decimals?: number;
+  id: string;
+  label: string;
+  format: 'currency' | 'percent' | 'number';
+  decimals?: number;
 };
 
 type CalculatorConfig = {
-    inputs: CalcInput[];
-    outputs: CalcOutput[];
-    formula?: string;
-    assumptions?: string[];
-    methodology?: string;
+  inputs: CalcInput[];
+  outputs: CalcOutput[];
+  formula?: string;
+  assumptions?: string[];
+  methodology?: string;
 };
 
 function buildInputHtml(input: CalcInput): string {
-    const id = escapeAttr(input.id);
-    const label = escapeHtml(input.label);
+  const id = escapeAttr(input.id);
+  const label = escapeHtml(input.label);
 
-    if (input.type === 'select' && input.options) {
-        const opts = input.options.map(o =>
-            `<option value="${o.value}">${escapeHtml(o.label)}</option>`
-        ).join('');
-        return `<div class="calc-field">
+  if (input.type === 'select' && input.options) {
+    const opts = input.options.map(o =>
+      `<option value="${o.value}">${escapeHtml(o.label)}</option>`
+    ).join('');
+    return `<div class="calc-field">
   <label for="${id}">${label}</label>
   <select id="${id}" name="${id}" class="calc-input">${opts}</select>
 </div>`;
-    }
+  }
 
-    if (input.type === 'range') {
-        const min = input.min ?? 0;
-        const max = input.max ?? 100;
-        const step = input.step ?? 1;
-        const def = input.default ?? min;
-        return `<div class="calc-field">
+  if (input.type === 'range') {
+    const min = input.min ?? 0;
+    const max = input.max ?? 100;
+    const step = input.step ?? 1;
+    const def = input.default ?? min;
+    return `<div class="calc-field">
   <label for="${id}">${label}: <output id="${id}_display">${def}</output></label>
   <input type="range" id="${id}" name="${id}" class="calc-input" min="${min}" max="${max}" step="${step}" value="${def}">
 </div>`;
-    }
+  }
 
-    // Default: number input
-    const min = input.min != null ? ` min="${input.min}"` : '';
-    const max = input.max != null ? ` max="${input.max}"` : '';
-    const step = input.step != null ? ` step="${input.step}"` : '';
-    const def = input.default != null ? ` value="${input.default}"` : '';
-    return `<div class="calc-field">
+  // Default: number input
+  const min = input.min != null ? ` min="${input.min}"` : '';
+  const max = input.max != null ? ` max="${input.max}"` : '';
+  const step = input.step != null ? ` step="${input.step}"` : '';
+  const def = input.default != null ? ` value="${input.default}"` : '';
+  return `<div class="calc-field">
   <label for="${id}">${label}</label>
   <input type="number" id="${id}" name="${id}" class="calc-input"${min}${max}${step}${def}>
 </div>`;
 }
 
 function buildOutputHtml(output: CalcOutput): string {
-    return `<div class="calc-result-item">
+  return `<div class="calc-result-item">
   <span class="calc-result-label">${escapeHtml(output.label)}</span>
   <output id="${escapeAttr(output.id)}" class="calc-result-value">—</output>
 </div>`;
 }
 
 function buildCalculatorScript(config: CalculatorConfig): string {
-    // Build safe formula evaluation using pre-defined financial functions.
-    // No eval() — uses explicit math operations mapped from formula description.
-    const inputIds = config.inputs.map(i => JSON.stringify(i.id));
-    const outputConfigs = JSON.stringify(config.outputs.map(o => ({
-        id: o.id,
-        format: o.format,
-        decimals: o.decimals ?? 2,
-    })));
+  // Build safe formula evaluation using pre-defined financial functions.
+  // No eval() — uses explicit math operations mapped from formula description.
+  const inputIds = config.inputs.map(i => JSON.stringify(i.id));
+  const outputConfigs = JSON.stringify(config.outputs.map(o => ({
+    id: o.id,
+    format: o.format,
+    decimals: o.decimals ?? 2,
+  })));
 
-    return `<script>
+  return `<script>
 (function() {
   // Financial helper functions available in formulas
   function pmt(rate, nper, pv) {
@@ -235,27 +235,28 @@ function buildCalculatorScript(config: CalculatorConfig): string {
 }
 
 export async function generateCalculatorPage(
-    article: Article,
-    domain: string,
-    disclosure: DisclosureInfo | null | undefined,
-    datasets: ArticleDatasetInfo[],
+  article: Article,
+  domain: string,
+  disclosure: DisclosureInfo | null | undefined,
+  datasets: ArticleDatasetInfo[],
+  pageShell: import('./shared').PageShell,
 ): Promise<string> {
-    const config = article.calculatorConfig as CalculatorConfig | null;
-    const contentHtml = await renderMarkdownToHtml(article.contentMarkdown || '');
-    const { disclaimerHtml, trustHtml } = await buildTrustElements(article, disclosure);
-    const dataSourcesHtml = generateDataSourcesSection(datasets);
+  const config = article.calculatorConfig as CalculatorConfig | null;
+  const contentHtml = await renderMarkdownToHtml(article.contentMarkdown || '');
+  const { disclaimerHtml, trustHtml } = await buildTrustElements(article, disclosure);
+  const dataSourcesHtml = generateDataSourcesSection(datasets);
 
-    const schemaLd = buildSchemaJsonLd(article, domain, 'WebApplication', {
-        applicationCategory: 'FinanceApplication',
-    });
+  const schemaLd = buildSchemaJsonLd(article, domain, 'WebApplication', {
+    applicationCategory: 'FinanceApplication',
+  });
 
-    // Build calculator form
-    let calculatorHtml = '';
-    if (config && config.inputs.length > 0) {
-        const inputsHtml = config.inputs.map(buildInputHtml).join('\n');
-        const outputsHtml = config.outputs.map(buildOutputHtml).join('\n');
+  // Build calculator form
+  let calculatorHtml = '';
+  if (config && config.inputs.length > 0) {
+    const inputsHtml = config.inputs.map(buildInputHtml).join('\n');
+    const outputsHtml = config.outputs.map(buildOutputHtml).join('\n');
 
-        calculatorHtml = `
+    calculatorHtml = `
 <section class="calc-form" id="calculator">
   <h2>Calculator</h2>
   <form onsubmit="return false;">
@@ -269,36 +270,36 @@ export async function generateCalculatorPage(
   </div>
 </section>`;
 
-        // Methodology block
-        if (config.methodology || (config.assumptions && config.assumptions.length > 0)) {
-            const assumptionsList = (config.assumptions || [])
-                .map(a => `<li>${escapeHtml(a)}</li>`).join('');
-            const methodText = config.methodology ? `<p>${escapeHtml(config.methodology)}</p>` : '';
-            calculatorHtml += `
+    // Methodology block
+    if (config.methodology || (config.assumptions && config.assumptions.length > 0)) {
+      const assumptionsList = (config.assumptions || [])
+        .map(a => `<li>${escapeHtml(a)}</li>`).join('');
+      const methodText = config.methodology ? `<p>${escapeHtml(config.methodology)}</p>` : '';
+      calculatorHtml += `
 <details class="calc-methodology">
   <summary>Methodology & Assumptions</summary>
   ${methodText}
   ${assumptionsList ? `<ul>${assumptionsList}</ul>` : ''}
 </details>`;
-        }
     }
+  }
 
-    const titleHtml = escapeHtml(article.title);
-    const freshnessBadge = buildFreshnessBadge(article, datasets);
-    const ogTags = buildOpenGraphTags(article, domain);
-    const printBtn = buildPrintButton('calculator');
+  const titleHtml = escapeHtml(article.title);
+  const freshnessBadge = buildFreshnessBadge(article, datasets);
+  const ogTags = buildOpenGraphTags(article, domain);
+  const printBtn = buildPrintButton('calculator');
 
-    const body = `${disclaimerHtml}
+  const body = `${disclaimerHtml}
   ${schemaLd}
   ${freshnessBadge}${printBtn}
   <article>
     <h1>${titleHtml}</h1>
     ${calculatorHtml}
-    <Fragment set:html={${JSON.stringify(contentHtml)}} />
+    ${contentHtml}
   </article>
   ${dataSourcesHtml}
   ${trustHtml}
   ${config ? buildCalculatorScript(config) : ''}`;
 
-    return wrapInAstroLayout(article.title, article.metaDescription || '', body, ogTags);
+  return wrapInHtmlPage(article.title, article.metaDescription || '', body, pageShell, ogTags);
 }

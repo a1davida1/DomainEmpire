@@ -7,7 +7,6 @@ import { randomUUID } from 'node:crypto';
 
 const bulkDeploySchema = z.object({
     domainIds: z.array(z.string().uuid()).min(1).max(50),
-    createRepo: z.boolean().default(true),
     triggerBuild: z.boolean().default(true),
     addCustomDomain: z.boolean().default(true),
 });
@@ -29,7 +28,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const { domainIds, createRepo, triggerBuild, addCustomDomain } = bulkDeploySchema.parse(body);
+        const { domainIds, triggerBuild, addCustomDomain } = bulkDeploySchema.parse(body);
 
         // Deduplicate domainIds to handle duplicates correctly
         const uniqueDomainIds = [...new Set(domainIds)];
@@ -55,7 +54,6 @@ export async function POST(request: NextRequest) {
                     priority: 3,
                     payload: {
                         domain: domain.domain,
-                        createRepo,
                         triggerBuild,
                         addCustomDomain,
                     },

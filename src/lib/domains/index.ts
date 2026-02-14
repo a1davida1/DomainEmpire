@@ -1,5 +1,5 @@
 import { db, domains, articles, keywords } from '@/lib/db';
-import { eq, sql, and, isNull } from 'drizzle-orm';
+import { eq, sql, and, isNull, desc } from 'drizzle-orm';
 
 export async function getDomain(id: string) {
     try {
@@ -37,7 +37,7 @@ export async function getRecentArticles(domainId: string) {
             })
             .from(articles)
             .where(and(eq(articles.domainId, domainId), isNull(articles.deletedAt)))
-            .orderBy(articles.createdAt)
+            .orderBy(desc(articles.createdAt))
             .limit(5);
     } catch {
         return [];

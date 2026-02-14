@@ -18,7 +18,6 @@ export function DeployAllButton({ domainIds }: Readonly<{ domainIds: string[] }>
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 domainIds: batch,
-                createRepo: true,
                 triggerBuild: true,
             }),
         });
@@ -37,8 +36,8 @@ export function DeployAllButton({ domainIds }: Readonly<{ domainIds: string[] }>
         if (!confirm(
             `Deploy ${count} domain${count !== 1 ? 's' : ''}?\n\n` +
             `This will:\n` +
-            `• Create GitHub repositories\n` +
-            `• Deploy to Cloudflare Pages\n` +
+            `• Generate static HTML files\n` +
+            `• Upload directly to Cloudflare Pages\n` +
             `• Update DNS (if GoDaddy configured)\n\n` +
             `Make sure the worker is running: npm run worker`
         )) {
