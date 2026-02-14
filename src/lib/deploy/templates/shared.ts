@@ -197,7 +197,9 @@ export function buildSchemaJsonLd(
                 description: article.metaDescription || '',
                 url: `https://${domain}/${article.slug}`,
                 mainEntityOfPage: { '@type': 'WebPage', '@id': `https://${domain}/${article.slug}` },
-                dateModified: article.updatedAt ? new Date(article.updatedAt).toISOString() : new Date().toISOString(),
+                dateModified: article.updatedAt
+                    ? new Date(article.updatedAt).toISOString()
+                    : (article.publishedAt ? new Date(article.publishedAt).toISOString() : undefined),
                 datePublished: article.publishedAt ? new Date(article.publishedAt).toISOString() : undefined,
                 inLanguage: 'en',
                 wordCount: article.contentMarkdown ? article.contentMarkdown.split(/\s+/).length : undefined,
@@ -270,7 +272,7 @@ export function buildOpenGraphTags(article: Article, domain: string): string {
         `<meta property="og:type" content="article">`,
         `<meta property="og:site_name" content="${escapeAttr(domain)}">`,
         `<meta property="og:locale" content="en_US">`,
-        `<meta name="twitter:card" content="summary_large_image">`,
+        `<meta name="twitter:card" content="summary">`,
         `<meta name="twitter:title" content="${title}">`,
         `<meta name="twitter:description" content="${description}">`,
     ];

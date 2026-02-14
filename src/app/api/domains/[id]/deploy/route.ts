@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db, domains, contentQueue } from '@/lib/db';
+import { db, domains } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
 import { eq, and, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { checkIdempotencyKey, storeIdempotencyResult } from '@/lib/api/idempotency';
+import { enqueueContentJob } from '@/lib/queue/content-queue';
 
 const deploySchema = z.object({
     triggerBuild: z.boolean().default(true),
@@ -54,7 +55,7 @@ export async function POST(request: NextRequest, { params }: PageProps) {
         // If multi-user support is added, verify domain ownership here
 
         const jobId = randomUUID();
-        await db.insert(contentQueue).values({
+        await enqueueContentJob({
             id: jobId,
             domainId: id,
             jobType: 'deploy',

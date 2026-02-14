@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db, domains, contentQueue } from '@/lib/db';
+import { db, domains } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
 import { inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
+import { enqueueContentJobs, requeueContentJobIds } from '@/lib/queue/content-queue';
 
 const bulkDeploySchema = z.object({
     domainIds: z.array(z.string().uuid()).min(1).max(50),
@@ -70,7 +71,7 @@ export async function POST(request: NextRequest) {
 
         await db.transaction(async (tx) => {
             // Single bulk insert for all jobs
-            await tx.insert(contentQueue).values(jobRecords.map(j => j.record));
+            await enqueueContentJobs(jobRecords.map(j => j.record), tx);
 
             // Populate jobs array after successful insert
             for (const j of jobRecords) {
@@ -78,10 +79,23 @@ export async function POST(request: NextRequest) {
             }
         });
 
+        const jobIds = jobs.map((job) => job.jobId);
+        let requeueWarning: string | undefined;
+        try {
+            await requeueContentJobIds(jobIds);
+        } catch (requeueError) {
+            requeueWarning = 'Jobs persisted but requeue notification failed; jobs will be picked up by background reconciler';
+            console.error('Bulk deploy requeue failed after commit:', {
+                jobIds,
+                error: requeueError instanceof Error ? requeueError.message : String(requeueError),
+            });
+        }
+
         return NextResponse.json({
             success: true,
             queued: jobs.length,
             jobs,
+            ...(requeueWarning && { warning: requeueWarning }),
         });
     } catch (error) {
         if (error instanceof z.ZodError) {

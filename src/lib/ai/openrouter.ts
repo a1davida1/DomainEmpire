@@ -4,6 +4,8 @@
  * Unified API gateway for multiple AI models (Grok, Claude, etc.)
  * Includes retry logic, cost tracking, and error handling.
  */
+import { withCircuitBreaker } from '@/lib/tpilot/core/circuit-breaker';
+import { withRetry } from '@/lib/tpilot/core/retry';
 
 export const MODEL_CONFIG = {
     // Fast, cheap operations
@@ -66,10 +68,20 @@ interface OpenRouterResponse {
     model: string;
 }
 
+class OpenRouterHttpError extends Error {
+    readonly status: number;
+
+    constructor(status: number, message: string) {
+        super(message);
+        this.name = 'OpenRouterHttpError';
+        this.status = status;
+    }
+}
+
 export class OpenRouterClient {
     private apiKey: string;
     private baseUrl = 'https://openrouter.ai/api/v1';
-    private maxRetries = 3;
+    private maxAttempts = 3;
     private baseDelay = 1000;
 
     constructor(apiKey?: string) {
@@ -101,84 +113,68 @@ export class OpenRouterClient {
         options: GenerateOptions = {}
     ): Promise<AIResponse> {
         const startTime = Date.now();
-        let lastError: Error | null = null;
+        return withCircuitBreaker(
+            'openrouter',
+            () =>
+                withRetry(
+                    async () => {
+                        const messages: Array<{ role: string; content: string }> = [];
 
-        for (let attempt = 0; attempt < this.maxRetries; attempt++) {
-            try {
-                const messages: Array<{ role: string; content: string }> = [];
+                        if (options.systemPrompt) {
+                            messages.push({ role: 'system', content: options.systemPrompt });
+                        }
+                        messages.push({ role: 'user', content: prompt });
 
-                if (options.systemPrompt) {
-                    messages.push({ role: 'system', content: options.systemPrompt });
-                }
-                messages.push({ role: 'user', content: prompt });
+                        const response = await fetch(`${this.baseUrl}/chat/completions`, {
+                            method: 'POST',
+                            headers: {
+                                Authorization: `Bearer ${this.apiKey}`,
+                                'Content-Type': 'application/json',
+                                'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'https://localhost:3000',
+                                'X-Title': 'Domain Empire',
+                            },
+                            body: JSON.stringify({
+                                model,
+                                messages,
+                                temperature: options.temperature ?? 0.7,
+                                max_tokens: options.maxTokens ?? 4096,
+                            }),
+                        });
 
-                const response = await fetch(`${this.baseUrl}/chat/completions`, {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${this.apiKey}`,
-                        'Content-Type': 'application/json',
-                        'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'https://localhost:3000',
-                        'X-Title': 'Domain Empire',
+                        if (!response.ok) {
+                            const errorText = await response.text();
+                            throw new OpenRouterHttpError(
+                                response.status,
+                                `OpenRouter API error: ${response.status} - ${errorText}`,
+                            );
+                        }
+
+                        const data: OpenRouterResponse = await response.json();
+                        const durationMs = Date.now() - startTime;
+                        const cost = this.calculateCost(
+                            model,
+                            data.usage.prompt_tokens,
+                            data.usage.completion_tokens,
+                        );
+
+                        return {
+                            content: data.choices[0]?.message?.content || '',
+                            model: data.model,
+                            inputTokens: data.usage.prompt_tokens,
+                            outputTokens: data.usage.completion_tokens,
+                            cost,
+                            durationMs,
+                        };
                     },
-                    body: JSON.stringify({
-                        model,
-                        messages,
-                        temperature: options.temperature ?? 0.7,
-                        max_tokens: options.maxTokens ?? 4096,
-                    }),
-                });
-
-                if (!response.ok) {
-                    const errorText = await response.text();
-
-                    // Rate limit - wait and retry
-                    if (response.status === 429) {
-                        const delay = this.baseDelay * Math.pow(2, attempt);
-                        console.warn(`Rate limited, waiting ${delay}ms before retry...`);
-                        await this.sleep(delay);
-                        continue;
-                    }
-
-                    // Server error - retry
-                    if (response.status >= 500) {
-                        const delay = this.baseDelay * Math.pow(2, attempt);
-                        console.warn(`Server error ${response.status}, retrying in ${delay}ms...`);
-                        await this.sleep(delay);
-                        continue;
-                    }
-
-                    throw new Error(`OpenRouter API error: ${response.status} - ${errorText}`);
-                }
-
-                const data: OpenRouterResponse = await response.json();
-                const durationMs = Date.now() - startTime;
-
-                const cost = this.calculateCost(
-                    model,
-                    data.usage.prompt_tokens,
-                    data.usage.completion_tokens
-                );
-
-                return {
-                    content: data.choices[0]?.message?.content || '',
-                    model: data.model,
-                    inputTokens: data.usage.prompt_tokens,
-                    outputTokens: data.usage.completion_tokens,
-                    cost,
-                    durationMs,
-                };
-            } catch (error) {
-                lastError = error instanceof Error ? error : new Error(String(error));
-                console.error(`Attempt ${attempt + 1} failed:`, lastError.message);
-
-                if (attempt < this.maxRetries - 1) {
-                    const delay = this.baseDelay * Math.pow(2, attempt);
-                    await this.sleep(delay);
-                }
-            }
-        }
-
-        throw lastError || new Error('All retry attempts failed');
+                    {
+                        maxRetries: Math.max(0, this.maxAttempts - 1),
+                        baseDelayMs: this.baseDelay,
+                        maxDelayMs: 30_000,
+                        label: `openrouter:${model}`,
+                        retryOn: (error: unknown) => this.isRetryableError(error),
+                    },
+                ),
+        );
     }
 
     /**
@@ -225,8 +221,22 @@ export class OpenRouterClient {
         return (inputTokens * pricing.input / 1000) + (outputTokens * pricing.output / 1000);
     }
 
-    private sleep(ms: number): Promise<void> {
-        return new Promise(resolve => setTimeout(resolve, ms));
+    private isRetryableError(error: unknown): boolean {
+        if (error instanceof OpenRouterHttpError) {
+            return error.status === 429 || error.status >= 500;
+        }
+        if (error instanceof Error) {
+            const message = error.message.toLowerCase();
+            return (
+                message.includes('fetch failed') ||
+                message.includes('timeout') ||
+                message.includes('econnrefused') ||
+                message.includes('econnreset') ||
+                message.includes('socket hang up') ||
+                message.includes('network')
+            );
+        }
+        return false;
     }
 }
 

@@ -9,6 +9,7 @@
 import { db } from '@/lib/db';
 import { backlinkSnapshots, domains } from '@/lib/db/schema';
 import { eq, desc } from 'drizzle-orm';
+import { safeFetch } from '@/lib/tpilot/core/ssrf';
 
 export interface BacklinkData {
     source: string;
@@ -71,8 +72,8 @@ async function queryCommonCrawl(domain: string, limit = 50): Promise<BacklinkDat
  */
 async function extractAnchorText(sourceUrl: string, targetDomain: string): Promise<string> {
     try {
-        const response = await fetch(sourceUrl, {
-            signal: AbortSignal.timeout(5000),
+        const response = await safeFetch(sourceUrl, {
+            timeoutMs: 5000,
             headers: { 'User-Agent': 'DomainEmpire-BacklinkChecker/1.0' },
         });
         if (!response.ok) return '';

@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db, domains, contentQueue } from '@/lib/db';
+import { db, domains } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
 import { eq, and, inArray, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
+import { enqueueContentJob } from '@/lib/queue/content-queue';
 
 const bulkSeedSchema = z.object({
     domainIds: z.array(z.string()).optional(),
@@ -53,7 +54,7 @@ export async function POST(request: NextRequest) {
         for (const domain of targetDomains) {
             const jobId = randomUUID();
 
-            await db.insert(contentQueue).values({
+            await enqueueContentJob({
                 id: jobId,
                 domainId: domain.id,
                 jobType: 'bulk_seed', // Valid job type in schema

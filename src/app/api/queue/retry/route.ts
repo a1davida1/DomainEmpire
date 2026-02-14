@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { retryFailedJobs } from '@/lib/ai/worker';
+import { getContentQueueBackendHealth } from '@/lib/queue/content-queue';
 
 // POST /api/queue/retry - Retry failed jobs
 export async function POST(request: NextRequest) {
@@ -17,11 +18,13 @@ export async function POST(request: NextRequest) {
 
         const retriedCount = await retryFailedJobs(limit);
 
+        const backend = await getContentQueueBackendHealth();
         return NextResponse.json({
             retriedCount,
             message: retriedCount > 0
                 ? `Queued ${retriedCount} failed jobs for retry`
                 : 'No failed jobs to retry',
+            backend,
         });
     } catch (error) {
         console.error('Failed to retry jobs:', error);

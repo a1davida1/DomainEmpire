@@ -111,9 +111,22 @@ export default async function ReviewQueuePage() {
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
-                <h1 className="text-3xl font-bold">Review Queue</h1>
-                <div className="text-sm text-muted-foreground">
-                    {reviewArticles.filter(a => a.status === 'review').length} pending review
+                <div>
+                    <h1 className="text-3xl font-bold">Review Queue</h1>
+                    <div className="text-sm text-muted-foreground">
+                        {reviewArticles.filter(a => a.status === 'review').length} pending content reviews
+                    </div>
+                </div>
+                <div className="flex items-center gap-3">
+                    <Link
+                        href="/dashboard/review/domain-buy"
+                        className="px-3 py-2 rounded-md border text-sm hover:bg-muted"
+                    >
+                        Domain Buy Queue
+                    </Link>
+                    <div className="text-sm text-muted-foreground">
+                        Content gate
+                    </div>
                 </div>
             </div>
 

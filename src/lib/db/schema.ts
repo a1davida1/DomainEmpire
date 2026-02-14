@@ -355,7 +355,9 @@ export const contentQueue = pgTable('content_queue', {
             'fetch_analytics', 'keyword_research', 'bulk_seed',
             'research', 'evaluate', 'content_refresh',
             'fetch_gsc', 'check_backlinks', 'check_renewals',
-            'check_datasets'
+            'check_datasets',
+            // Acquisition underwriting pipeline
+            'ingest_listings', 'enrich_candidate', 'score_candidate', 'create_bid_plan'
         ]
     }).notNull(),
 
@@ -405,6 +407,14 @@ export const domainResearch = pgTable('domain_research', {
     domain: text('domain').notNull().unique(),
     tld: text('tld').notNull(),
 
+    // Marketplace listing context
+    listingSource: text('listing_source'), // godaddy_auctions | namejet | dropcatch | dynadot | handreg
+    listingId: text('listing_id'),
+    listingType: text('listing_type'), // auction | closeout | pending_delete | buy_now
+    currentBid: numeric('current_bid', { precision: 18, scale: 2 }),
+    buyNowPrice: numeric('buy_now_price', { precision: 18, scale: 2 }),
+    auctionEndsAt: timestamp('auction_ends_at'),
+
     // Availability
     isAvailable: boolean('is_available'),
     registrationPrice: real('registration_price'),
@@ -415,6 +425,21 @@ export const domainResearch = pgTable('domain_research', {
     keywordCpc: numeric('keyword_cpc', { precision: 12, scale: 2 }),
     estimatedRevenuePotential: numeric('estimated_revenue_potential', { precision: 12, scale: 2 }),
     domainScore: numeric('domain_score', { precision: 5, scale: 2 }),
+    demandScore: real('demand_score'),
+    compsScore: real('comps_score'),
+    tmRiskScore: real('tm_risk_score'),
+    historyRiskScore: real('history_risk_score'),
+    backlinkRiskScore: real('backlink_risk_score'),
+
+    // Underwriting economics
+    compLow: numeric('comp_low', { precision: 18, scale: 2 }),
+    compHigh: numeric('comp_high', { precision: 18, scale: 2 }),
+    recommendedMaxBid: numeric('recommended_max_bid', { precision: 18, scale: 2 }),
+    expected12mRevenueLow: numeric('expected_12m_revenue_low', { precision: 18, scale: 2 }),
+    expected12mRevenueHigh: numeric('expected_12m_revenue_high', { precision: 18, scale: 2 }),
+    confidenceScore: real('confidence_score'),
+    hardFailReason: text('hard_fail_reason'),
+    underwritingVersion: text('underwriting_version'),
 
     // Full evaluation data
     evaluationResult: jsonb('evaluation_result'),
@@ -437,6 +462,22 @@ export const domainResearch = pgTable('domain_research', {
 
     createdAt: timestamp('created_at').defaultNow(),
 });
+
+// ===========================================
+// ACQUISITION EVENTS: Candidate lifecycle audit trail
+// ===========================================
+export const acquisitionEvents = pgTable('acquisition_events', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    domainResearchId: uuid('domain_research_id').notNull().references(() => domainResearch.id, { onDelete: 'cascade' }),
+    eventType: text('event_type').notNull(), // ingested | enriched | hard_fail | scored | watchlist | approved | bought | passed
+    payload: jsonb('payload').default({}),
+    createdBy: text('created_by').default('system'),
+    createdAt: timestamp('created_at').defaultNow(),
+}, (t) => ({
+    domainResearchIdx: index('acquisition_events_domain_research_idx').on(t.domainResearchId),
+    eventTypeIdx: index('acquisition_events_event_type_idx').on(t.eventType),
+    createdIdx: index('acquisition_events_created_idx').on(t.createdAt),
+}));
 
 // ===========================================
 // REVENUE SNAPSHOTS: Daily revenue tracking per domain
@@ -787,6 +828,72 @@ export const approvalPolicies = pgTable('approval_policies', {
 }));
 
 // ===========================================
+// REVIEW TASKS: Human-in-loop approval queue
+// ===========================================
+export const reviewTasks = pgTable('review_tasks', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    taskType: text('task_type', {
+        enum: ['domain_buy', 'content_publish', 'campaign_launch']
+    }).notNull(),
+    entityId: uuid('entity_id').notNull(),
+    domainId: uuid('domain_id').references(() => domains.id, { onDelete: 'set null' }),
+    articleId: uuid('article_id').references(() => articles.id, { onDelete: 'set null' }),
+    domainResearchId: uuid('domain_research_id').references(() => domainResearch.id, { onDelete: 'set null' }),
+    checklistJson: jsonb('checklist_json').$type<Record<string, unknown>>().default({}),
+    status: text('status', {
+        enum: ['pending', 'approved', 'rejected', 'cancelled']
+    }).notNull().default('pending'),
+    slaHours: integer('sla_hours').notNull().default(24),
+    escalateAfterHours: integer('escalate_after_hours').notNull().default(48),
+    autoApproveAfterHours: integer('auto_approve_after_hours'),
+    autoRejectAfterHours: integer('auto_reject_after_hours'),
+    confidenceThresholds: jsonb('confidence_thresholds').$type<Record<string, unknown>>().default({}),
+    reviewerId: uuid('reviewer_id').references(() => users.id, { onDelete: 'set null' }),
+    backupReviewerId: uuid('backup_reviewer_id').references(() => users.id, { onDelete: 'set null' }),
+    reviewedAt: timestamp('reviewed_at'),
+    reviewNotes: text('review_notes'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+}, (t) => ({
+    taskTypeIdx: index('review_task_type_idx').on(t.taskType),
+    taskStatusIdx: index('review_task_status_idx').on(t.status),
+    entityIdx: index('review_task_entity_idx').on(t.entityId),
+    domainIdx: index('review_task_domain_idx').on(t.domainId),
+    articleIdx: index('review_task_article_idx').on(t.articleId),
+    domainResearchIdx: index('review_task_domain_research_idx').on(t.domainResearchId),
+    reviewedAtIdx: index('review_task_reviewed_at_idx').on(t.reviewedAt),
+    reviewerIdx: index('review_task_reviewer_idx').on(t.reviewerId),
+    backupReviewerIdx: index('review_task_backup_reviewer_idx').on(t.backupReviewerId),
+}));
+
+// ===========================================
+// PREVIEW BUILDS: Ephemeral reviewer preview artifacts
+// ===========================================
+export const previewBuilds = pgTable('preview_builds', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    domainId: uuid('domain_id').references(() => domains.id, { onDelete: 'set null' }),
+    articleId: uuid('article_id').references(() => articles.id, { onDelete: 'set null' }),
+    domainResearchId: uuid('domain_research_id').references(() => domainResearch.id, { onDelete: 'set null' }),
+    previewUrl: text('preview_url').notNull(),
+    expiresAt: timestamp('expires_at'),
+    buildStatus: text('build_status', {
+        enum: ['queued', 'building', 'ready', 'failed', 'expired']
+    }).notNull().default('queued'),
+    buildLog: text('build_log'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+}, (t) => ({
+    domainIdx: index('preview_build_domain_idx').on(t.domainId),
+    articleIdx: index('preview_build_article_idx').on(t.articleId),
+    domainResearchIdx: index('preview_build_domain_research_idx').on(t.domainResearchId),
+    statusIdx: index('preview_build_status_idx').on(t.buildStatus),
+    expiresIdx: index('preview_build_expires_idx').on(t.expiresAt),
+}));
+
+// ===========================================
 // CITATIONS: Structured source citations per article
 // ===========================================
 export const citations = pgTable('citations', {
@@ -1033,6 +1140,8 @@ export const domainsRelations = relations(domains, ({ many, one }) => ({
     competitors: many(competitors),
     backlinkSnapshots: many(backlinkSnapshots),
     approvalPolicies: many(approvalPolicies),
+    reviewTasks: many(reviewTasks),
+    previewBuilds: many(previewBuilds),
     disclosureConfig: one(disclosureConfigs),
     complianceSnapshots: many(complianceSnapshots),
     datasets: many(datasets),
@@ -1062,6 +1171,8 @@ export const articlesRelations = relations(articles, ({ one, many }) => ({
     revisions: many(contentRevisions),
     reviewEvents: many(reviewEvents),
     qaResults: many(qaChecklistResults),
+    reviewTasks: many(reviewTasks),
+    previewBuilds: many(previewBuilds),
     citations: many(citations),
     articleDatasets: many(articleDatasets),
 }));
@@ -1105,6 +1216,10 @@ export const usersRelations = relations(users, ({ many }) => ({
     sessions: many(sessions),
     reviewEvents: many(reviewEvents),
     revisions: many(contentRevisions),
+    createdReviewTasks: many(reviewTasks, { relationName: 'review_task_creator' }),
+    reviewedTasks: many(reviewTasks, { relationName: 'review_task_reviewer' }),
+    backupReviewTasks: many(reviewTasks, { relationName: 'review_task_backup_reviewer' }),
+    createdPreviewBuilds: many(previewBuilds, { relationName: 'preview_build_creator' }),
 }));
 
 export const sessionsRelations = relations(sessions, ({ one }) => ({
@@ -1159,6 +1274,73 @@ export const approvalPoliciesRelations = relations(approvalPolicies, ({ one }) =
     domain: one(domains, {
         fields: [approvalPolicies.domainId],
         references: [domains.id],
+    }),
+}));
+
+export const domainResearchRelations = relations(domainResearch, ({ one, many }) => ({
+    domain: one(domains, {
+        fields: [domainResearch.domainId],
+        references: [domains.id],
+    }),
+    acquisitionEvents: many(acquisitionEvents),
+    reviewTasks: many(reviewTasks),
+    previewBuilds: many(previewBuilds),
+}));
+
+export const acquisitionEventsRelations = relations(acquisitionEvents, ({ one }) => ({
+    domainResearch: one(domainResearch, {
+        fields: [acquisitionEvents.domainResearchId],
+        references: [domainResearch.id],
+    }),
+}));
+
+export const reviewTasksRelations = relations(reviewTasks, ({ one }) => ({
+    domain: one(domains, {
+        fields: [reviewTasks.domainId],
+        references: [domains.id],
+    }),
+    article: one(articles, {
+        fields: [reviewTasks.articleId],
+        references: [articles.id],
+    }),
+    domainResearch: one(domainResearch, {
+        fields: [reviewTasks.domainResearchId],
+        references: [domainResearch.id],
+    }),
+    createdByUser: one(users, {
+        fields: [reviewTasks.createdBy],
+        references: [users.id],
+        relationName: 'review_task_creator',
+    }),
+    reviewer: one(users, {
+        fields: [reviewTasks.reviewerId],
+        references: [users.id],
+        relationName: 'review_task_reviewer',
+    }),
+    backupReviewer: one(users, {
+        fields: [reviewTasks.backupReviewerId],
+        references: [users.id],
+        relationName: 'review_task_backup_reviewer',
+    }),
+}));
+
+export const previewBuildsRelations = relations(previewBuilds, ({ one }) => ({
+    domain: one(domains, {
+        fields: [previewBuilds.domainId],
+        references: [domains.id],
+    }),
+    article: one(articles, {
+        fields: [previewBuilds.articleId],
+        references: [articles.id],
+    }),
+    domainResearch: one(domainResearch, {
+        fields: [previewBuilds.domainResearchId],
+        references: [domainResearch.id],
+    }),
+    createdByUser: one(users, {
+        fields: [previewBuilds.createdBy],
+        references: [users.id],
+        relationName: 'preview_build_creator',
     }),
 }));
 
@@ -1243,6 +1425,7 @@ export type NewArticle = typeof articles.$inferInsert;
 export type MonetizationProfile = typeof monetizationProfiles.$inferSelect;
 export type ContentQueueJob = typeof contentQueue.$inferSelect;
 export type DomainResearch = typeof domainResearch.$inferSelect;
+export type AcquisitionEvent = typeof acquisitionEvents.$inferSelect;
 export type RevenueSnapshot = typeof revenueSnapshots.$inferSelect;
 export type ApiCallLog = typeof apiCallLogs.$inferSelect;
 export type Expense = typeof expenses.$inferSelect;
@@ -1258,6 +1441,8 @@ export type ReviewEvent = typeof reviewEvents.$inferSelect;
 export type QaChecklistTemplate = typeof qaChecklistTemplates.$inferSelect;
 export type QaChecklistResult = typeof qaChecklistResults.$inferSelect;
 export type ApprovalPolicy = typeof approvalPolicies.$inferSelect;
+export type ReviewTask = typeof reviewTasks.$inferSelect;
+export type PreviewBuild = typeof previewBuilds.$inferSelect;
 export type Citation = typeof citations.$inferSelect;
 export type DisclosureConfig = typeof disclosureConfigs.$inferSelect;
 export type ComplianceSnapshot = typeof complianceSnapshots.$inferSelect;

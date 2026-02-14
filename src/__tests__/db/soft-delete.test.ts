@@ -132,8 +132,9 @@ describe('restoreDomain', () => {
         expect(result).toEqual({ domain: 'example.com' });
     });
 
-    it('returns null when domain not found', async () => {
-        mockSelectReturning.mockResolvedValueOnce([]);
+    it('returns object with null domain when not found', async () => {
+        mockSelectReturning.mockReset();
+        mockSelectReturning.mockResolvedValue([]);
         const result = await restoreDomain('nonexistent');
         expect(result).toEqual({ domain: null });
     });

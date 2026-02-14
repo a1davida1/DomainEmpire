@@ -43,9 +43,9 @@ export async function GET(request: NextRequest) {
                     attempts: job.attempts,
                     maxAttempts: job.maxAttempts,
                     // Include step progress from result
-                    steps: result?.steps || null,
-                    filesDeployed: result?.filesDeployed || null,
-                    cfProject: result?.cfProject || null,
+                    steps: result?.steps ?? null,
+                    filesDeployed: result?.filesDeployed ?? null,
+                    cfProject: result?.cfProject ?? null,
                 };
             }),
         });

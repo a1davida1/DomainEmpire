@@ -18,6 +18,7 @@ import { getOrCreateVoiceSeed } from './voice-seed';
 import { createRevision } from '@/lib/audit/revisions';
 import { classifyYmylLevel } from '@/lib/review/ymyl';
 import { calculatorConfigSchema, comparisonDataSchema } from '@/lib/validation/articles';
+import { enqueueContentJob } from '@/lib/queue/content-queue';
 
 // Helper to slugify string
 function slugify(text: string) {
@@ -244,7 +245,7 @@ Respond with JSON:
     }).where(eq(contentQueue.id, jobId));
 
     // Queue next job (draft generation) - minimal payload
-    await db.insert(contentQueue).values({
+    await enqueueContentJob({
         jobType: 'generate_draft',
         domainId: job.domainId,
         articleId: job.articleId,
@@ -351,7 +352,7 @@ export async function processDraftJob(jobId: string): Promise<void> {
     }).where(eq(contentQueue.id, jobId));
 
     // Queue humanization
-    await db.insert(contentQueue).values({
+    await enqueueContentJob({
         jobType: 'humanize',
         domainId: job.domainId,
         articleId: job.articleId,
@@ -423,7 +424,7 @@ export async function processHumanizeJob(jobId: string): Promise<void> {
         apiCost: response.cost.toFixed(2),
     }).where(eq(contentQueue.id, jobId));
 
-    await db.insert(contentQueue).values({
+    await enqueueContentJob({
         jobType: 'seo_optimize',
         domainId: job.domainId,
         articleId: job.articleId,
@@ -495,7 +496,7 @@ export async function processSeoOptimizeJob(jobId: string): Promise<void> {
         apiCost: response.cost.toFixed(2),
     }).where(eq(contentQueue.id, jobId));
 
-    await db.insert(contentQueue).values({
+    await enqueueContentJob({
         jobType: 'generate_meta',
         domainId: job.domainId,
         articleId: job.articleId,
@@ -618,7 +619,7 @@ export async function processResearchJob(jobId: string): Promise<void> {
         apiCost: response.cost.toFixed(2),
     }).where(eq(contentQueue.id, jobId));
 
-    await db.insert(contentQueue).values({
+    await enqueueContentJob({
         jobType: 'generate_outline',
         domainId: job.domainId,
         articleId: job.articleId,
@@ -725,7 +726,7 @@ export async function processKeywordResearchJob(jobId: string): Promise<void> {
             status: 'draft',
         }).returning({ id: articles.id });
 
-        await db.insert(contentQueue).values({
+        await enqueueContentJob({
             jobType: 'research', // Now using proper Research stage
             domainId: job.domainId!,
             articleId: newArticle[0].id,

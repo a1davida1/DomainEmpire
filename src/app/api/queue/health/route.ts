@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { getQueueHealth, purgeOldJobs } from '@/lib/ai/worker';
+import { getContentQueueBackendHealth } from '@/lib/queue/content-queue';
 
 // GET /api/queue/health - Get detailed queue health metrics
 export async function GET(request: NextRequest) {
@@ -8,9 +9,15 @@ export async function GET(request: NextRequest) {
     if (authError) return authError;
 
     try {
-        const health = await getQueueHealth();
+        const [health, backend] = await Promise.all([
+            getQueueHealth(),
+            getContentQueueBackendHealth(),
+        ]);
 
-        const response = NextResponse.json(health);
+        const response = NextResponse.json({
+            ...health,
+            backend,
+        });
         // Cache for 30s since this is a health check
         response.headers.set('Cache-Control', 'private, max-age=30');
         return response;

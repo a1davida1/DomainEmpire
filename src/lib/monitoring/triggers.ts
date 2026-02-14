@@ -7,6 +7,7 @@
 import { db, domains, revenueSnapshots, backlinkSnapshots } from '@/lib/db';
 import { eq, and, gte, desc, isNull, sql } from 'drizzle-orm';
 import { createNotification } from '@/lib/notifications';
+import { safeFetch } from '@/lib/tpilot/core/ssrf';
 
 /**
  * Check for traffic drops across all active domains.
@@ -131,9 +132,9 @@ export async function checkSiteHealth() {
 
         for (const domain of deployedDomains) {
             try {
-                const response = await fetch(`https://${domain.domain}/`, {
+                const response = await safeFetch(`https://${domain.domain}/`, {
                     method: 'HEAD',
-                    signal: AbortSignal.timeout(10000),
+                    timeoutMs: 10000,
                 });
 
                 if (!response.ok) {

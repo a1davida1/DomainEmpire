@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { db } from '@/lib/db';
 import { contentRevisions } from '@/lib/db/schema';
 import { eq, desc, and, sql } from 'drizzle-orm';
+export { lcsDiff } from '@/lib/diff';
 
 export type ChangeType = 'ai_generated' | 'ai_refined' | 'manual_edit' | 'status_change' | 'bulk_refresh';
 
@@ -90,5 +91,4 @@ export async function getRevisionPair(articleId: string, revisionNumber: number)
     const newer = revisions.find(r => r.revisionNumber === revisionNumber) || null;
     return { older, newer };
 }
-
 

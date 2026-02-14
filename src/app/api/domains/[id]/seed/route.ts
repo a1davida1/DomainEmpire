@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db, domains, keywords, articles, contentQueue } from '@/lib/db';
+import { db, domains, keywords, articles } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
 import { eq, and, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
+import { enqueueContentJob, requeueContentJobIds } from '@/lib/queue/content-queue';
 
 const MIN_PRIORITY = 1;
 const MAX_PRIORITY = 10;
@@ -111,7 +112,7 @@ export async function POST(request: NextRequest, { params }: PageProps) {
 
             // Queue keyword research job
             const keywordJobId = randomUUID();
-            await db.insert(contentQueue).values({
+            await enqueueContentJob({
                 id: keywordJobId,
                 domainId: id,
                 jobType: 'keyword_research',
@@ -169,7 +170,7 @@ export async function POST(request: NextRequest, { params }: PageProps) {
                 });
 
                 // Queue outline generation job
-                await tx.insert(contentQueue).values({
+                await enqueueContentJob({
                     id: jobId,
                     domainId: id,
                     articleId,
@@ -187,7 +188,7 @@ export async function POST(request: NextRequest, { params }: PageProps) {
                     status: 'pending',
                     scheduledFor: new Date(),
                     maxAttempts: 3,
-                });
+                }, tx);
 
                 // Mark keyword as used by linking to article
                 await tx
@@ -202,6 +203,10 @@ export async function POST(request: NextRequest, { params }: PageProps) {
                 keyword: kw.keyword,
                 jobId,
             });
+        }
+
+        if (createdJobs.length > 0) {
+            await requeueContentJobIds(createdJobs.map((job) => job.jobId));
         }
 
         return NextResponse.json({

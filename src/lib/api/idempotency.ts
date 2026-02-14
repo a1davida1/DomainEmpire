@@ -89,13 +89,27 @@ export async function storeIdempotencyResult(
 
     try {
         const body = await response.clone().text();
+        const expiresAt = new Date(Date.now() + KEY_TTL_MS);
 
-        await db.update(idempotencyKeys).set({
+        await db.insert(idempotencyKeys).values({
+            key,
+            method: request.method,
+            path: request.nextUrl.pathname,
             statusCode: response.status,
             responseBody: body,
             status: 'completed',
-            expiresAt: new Date(Date.now() + KEY_TTL_MS),
-        }).where(eq(idempotencyKeys.key, key));
+            expiresAt,
+        }).onConflictDoUpdate({
+            target: idempotencyKeys.key,
+            set: {
+                method: request.method,
+                path: request.nextUrl.pathname,
+                statusCode: response.status,
+                responseBody: body,
+                status: 'completed',
+                expiresAt,
+            },
+        });
     } catch (error) {
         // Don't fail the request if idempotency storage fails
         console.error('Failed to store idempotency key:', error);

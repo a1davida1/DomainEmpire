@@ -6,9 +6,10 @@
  */
 
 import { db } from '@/lib/db';
-import { articles, contentQueue, domains } from '@/lib/db/schema';
+import { articles, domains } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { createNotification } from '@/lib/notifications';
+import { enqueueContentJob } from '@/lib/queue/content-queue';
 
 interface StaleArticle {
     id: string;
@@ -139,7 +140,7 @@ export async function queueContentRefresh(articleId: string): Promise<string> {
     const domainRecord = await db.select({ domain: domains.domain })
         .from(domains).where(eq(domains.id, article.domainId)).limit(1);
 
-    const [job] = await db.insert(contentQueue).values({
+    const jobId = await enqueueContentJob({
         jobType: 'content_refresh',
         domainId: article.domainId,
         articleId: article.id,
@@ -150,9 +151,9 @@ export async function queueContentRefresh(articleId: string): Promise<string> {
             refreshType: 'full',
         },
         status: 'pending',
-    }).returning({ id: contentQueue.id });
+    });
 
-    return job.id;
+    return jobId;
 }
 
 /**

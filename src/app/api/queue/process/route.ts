@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { runWorkerOnce, getQueueStats, getQueueHealth } from '@/lib/ai/worker';
+import { getContentQueueBackendHealth } from '@/lib/queue/content-queue';
 
 // POST /api/queue/process - Process pending jobs
 export async function POST(request: NextRequest) {
@@ -34,12 +35,21 @@ export async function GET(request: NextRequest) {
         const detailed = url.searchParams.get('detailed') === 'true';
 
         if (detailed) {
-            const health = await getQueueHealth();
-            return NextResponse.json(health);
+            const [health, backend] = await Promise.all([
+                getQueueHealth(),
+                getContentQueueBackendHealth(),
+            ]);
+            return NextResponse.json({
+                ...health,
+                backend,
+            });
         }
 
-        const stats = await getQueueStats();
-        return NextResponse.json({ stats });
+        const [stats, backend] = await Promise.all([
+            getQueueStats(),
+            getContentQueueBackendHealth(),
+        ]);
+        return NextResponse.json({ stats, backend });
     } catch (error) {
         console.error('Failed to get queue stats:', error);
         return NextResponse.json(

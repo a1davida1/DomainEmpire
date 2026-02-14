@@ -47,7 +47,7 @@ function sanitizeHtml(html: string): string {
         allowedTags: sanitizeHtmlLib.defaults.allowedTags.concat(['img', 'h1', 'h2']),
         allowedAttributes: {
             ...sanitizeHtmlLib.defaults.allowedAttributes,
-            '*': ['class'], // Removed 'style' from wildcard
+            '*': ['class', 'style'],
         },
         allowedStyles: {
             '*': {

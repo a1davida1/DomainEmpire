@@ -13,7 +13,9 @@ async function main() {
         console.error('DATABASE_URL is not set');
         process.exit(1);
     }
-    console.log(`Connecting to DB at ${dbUrl.split('@')[1] || 'unknown host'}...`); // Mask credentials
+    const lastAt = dbUrl.lastIndexOf('@');
+    const host = lastAt >= 0 ? dbUrl.slice(lastAt + 1) : 'unknown host';
+    console.log(`Connecting to DB at ${host}...`);
 
     // Use SSL only if not connecting to localhost
     const isLocal = dbUrl.includes('localhost') || dbUrl.includes('127.0.0.1');
@@ -38,6 +40,8 @@ async function main() {
         console.log('--------------------------------------------------');
     } catch (e) {
         console.error('Query failed:', e);
+        process.exitCode = 1;
+        throw e;
     } finally {
         await client.end();
         console.log('Done.');

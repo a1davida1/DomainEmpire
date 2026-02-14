@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db, articles, contentQueue, domains, NewArticle } from '@/lib/db';
+import { db, articles, domains, NewArticle } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
 import { eq, and, sql, isNull } from 'drizzle-orm';
 import { z } from 'zod';
+import { randomUUID } from 'node:crypto';
 import { checkIdempotencyKey, storeIdempotencyResult } from '@/lib/api/idempotency';
+import { enqueueContentJob, requeueContentJobIds } from '@/lib/queue/content-queue';
 
 // Validation schema for creating an article generation job
 const generateArticleSchema = z.object({
@@ -144,9 +146,11 @@ export async function POST(request: NextRequest) {
         const result = await db.transaction(async (tx) => {
             const insertedArticle = await tx.insert(articles).values(newArticle).returning();
             const articleId = insertedArticle[0].id;
+            const queueJobId = randomUUID();
 
             // Create queue job for outline generation (first step)
-            await tx.insert(contentQueue).values({
+            await enqueueContentJob({
+                id: queueJobId,
                 jobType: 'generate_outline',
                 domainId: data.domainId,
                 articleId,
@@ -157,14 +161,15 @@ export async function POST(request: NextRequest) {
                     domainName: domain[0].domain,
                 },
                 status: 'pending',
-            });
+            }, tx);
 
-            return insertedArticle[0];
+            return { article: insertedArticle[0], queueJobId };
         });
+        await requeueContentJobIds([result.queueJobId]);
 
         const response = NextResponse.json(
             {
-                article: result,
+                article: result.article,
                 message: 'Article generation queued successfully',
             },
             { status: 201 }

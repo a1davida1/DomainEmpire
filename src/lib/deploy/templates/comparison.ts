@@ -67,8 +67,9 @@ function buildComparisonTable(data: ComparisonData): string {
       if (val == null) return '<td>—</td>';
 
       if (col.type === 'rating' && typeof val === 'number') {
-        const stars = '★'.repeat(Math.min(val, 5)) + '☆'.repeat(Math.max(5 - val, 0));
-        return `<td data-value="${val}">${stars} ${val}/5</td>`;
+        const clampedVal = Math.max(0, Math.min(val, 5));
+        const stars = '★'.repeat(clampedVal) + '☆'.repeat(5 - clampedVal);
+        return `<td data-value="${clampedVal}">${stars} ${clampedVal}/5</td>`;
       }
       return `<td data-value="${escapeAttr(String(val))}">${escapeHtml(String(val))}</td>`;
     }).join('');

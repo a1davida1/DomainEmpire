@@ -4,6 +4,7 @@ dotenv.config({ path: path.resolve(__dirname, '../../.env.local') });
 
 import { db, domains, contentQueue, articles } from '@/lib/db';
 import { eq } from 'drizzle-orm';
+import { enqueueContentJob } from '@/lib/queue/content-queue';
 
 async function main() {
     console.log('🚀 Triggering E2E Test Job...');
@@ -34,7 +35,7 @@ async function main() {
     console.log(`Created article: ${article.id}`);
 
     // 3. Insert Research Job
-    const [job] = await db.insert(contentQueue).values({
+    const jobId = await enqueueContentJob({
         jobType: 'research',
         domainId: domain.id,
         articleId: article.id,
@@ -44,14 +45,14 @@ async function main() {
         },
         priority: 10,
         status: 'pending',
-    }).returning();
-    console.log(`Queued Research Job: ${job.id}`);
+    });
+    console.log(`Queued Research Job: ${jobId}`);
 
     // 4. Poll for Completion
     console.log('Waiting for worker to process...');
     const start = Date.now();
     while (Date.now() - start < 60000) { // 60s timeout
-        const [updatedJob] = await db.select().from(contentQueue).where(eq(contentQueue.id, job.id));
+        const [updatedJob] = await db.select().from(contentQueue).where(eq(contentQueue.id, jobId));
 
         if (!updatedJob) {
             console.error('❌ Job not found in queue (deleted?)');

@@ -159,7 +159,7 @@ async function stepAddCustomDomain(ctx: DeployContext): Promise<void> {
         await doneStep(ctx, 2, `Linked ${ctx.payload.domain}`);
     } catch (err: unknown) {
         await failStep(ctx, 2, `Failed to link ${ctx.payload.domain}: ${err instanceof Error ? err.message : String(err)}`);
-        return;
+        throw err;
     }
 }
 

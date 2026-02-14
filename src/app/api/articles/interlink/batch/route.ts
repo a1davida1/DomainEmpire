@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireRole, getRequestUser } from '@/lib/auth';
-import { db, articles, contentRevisions, domains } from '@/lib/db';
+import { db, articles, contentRevisions, domains, users } from '@/lib/db';
 import { eq, and, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
@@ -31,8 +31,22 @@ export async function POST(request: NextRequest) {
         const { domainId } = parsed.data;
 
         // Security: Verify domain existence and user access
-        // We retrieve the user context to simulate ownership check
-        const _user = getRequestUser(request);
+        const user = getRequestUser(request);
+
+        if (!user.id) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
+        // Verify the user exists and is active
+        const userResult = await db
+            .select({ id: users.id, isActive: users.isActive })
+            .from(users)
+            .where(eq(users.id, user.id))
+            .limit(1);
+
+        if (userResult.length === 0 || !userResult[0].isActive) {
+            return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
 
         const domainResult = await db
             .select({ id: domains.id })
@@ -44,9 +58,23 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Domain not found' }, { status: 404 });
         }
 
-        // Note: Strict ownership check (domain.ownerId === user.id) is bypassed 
-        // because the current schema implies single-tenant/shared access for Editors.
-        // We have verified the user is at least an 'editor' and the domain exists.
+        // Domain-level authorization: admins have unrestricted access;
+        // editors must have authored content revisions in this domain
+        if (user.role !== 'admin') {
+            const hasAccess = await db
+                .select({ id: contentRevisions.id })
+                .from(contentRevisions)
+                .innerJoin(articles, eq(articles.id, contentRevisions.articleId))
+                .where(and(
+                    eq(articles.domainId, domainId),
+                    eq(contentRevisions.createdById, user.id),
+                ))
+                .limit(1);
+
+            if (hasAccess.length === 0) {
+                return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+            }
+        }
 
         // Get all published articles for this domain
         const published = await db

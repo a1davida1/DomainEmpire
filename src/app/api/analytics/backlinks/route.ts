@@ -4,6 +4,7 @@ import { detectLostBacklinks } from '@/lib/analytics/backlinks';
 import { db } from '@/lib/db';
 import { backlinkSnapshots, contentQueue } from '@/lib/db/schema';
 import { eq, desc, and, inArray } from 'drizzle-orm';
+import { enqueueContentJob } from '@/lib/queue/content-queue';
 
 // GET /api/analytics/backlinks?domainId=xxx — Get latest backlink snapshot
 export async function GET(request: NextRequest) {
@@ -68,14 +69,14 @@ export async function POST(request: NextRequest) {
         }
 
         // Queue as a background job instead of blocking the request
-        const [job] = await db.insert(contentQueue).values({
+        const jobId = await enqueueContentJob({
             jobType: 'check_backlinks',
             domainId,
             priority: 3,
             status: 'pending',
-        }).returning({ id: contentQueue.id });
+        });
 
-        return NextResponse.json({ queued: true, jobId: job.id, message: 'Backlink check queued' }, { status: 202 });
+        return NextResponse.json({ queued: true, jobId, message: 'Backlink check queued' }, { status: 202 });
     } catch (error) {
         console.error(`Backlink check failed for ${domainId || 'unknown'}:`, error);
         return NextResponse.json(

@@ -16,6 +16,7 @@ const mockDelete = vi.fn();
 const mockInsert = vi.fn();
 const mockValues = vi.fn();
 const mockOnConflictDoNothing = vi.fn();
+const mockOnConflictDoUpdate = vi.fn();
 const mockReturning = vi.fn();
 
 vi.mock('@/lib/db', () => ({
@@ -50,7 +51,13 @@ vi.mock('@/lib/db', () => ({
             return {
                 values: (...vArgs: unknown[]) => {
                     mockValues(...vArgs);
-                    return { onConflictDoNothing: () => { mockOnConflictDoNothing(); return Promise.resolve(); } };
+                    return {
+                        onConflictDoNothing: () => { mockOnConflictDoNothing(); return Promise.resolve(); },
+                        onConflictDoUpdate: (...ocArgs: unknown[]) => {
+                            mockOnConflictDoUpdate(...ocArgs);
+                            return Promise.resolve();
+                        },
+                    };
                 },
             };
         },

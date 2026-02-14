@@ -192,6 +192,10 @@ export async function evaluateDomain(
     const nicheProfile = getNicheProfile(detectedNiche);
     const brandSignal = scoreBrandQuality(domain, detectedNiche);
     const subNiche = detectSubNiche(domain, detectedNiche);
+    const acquisitionCost = options.acquisitionCost ?? 12;
+
+    // Deterministic preflight gates: fail fast before paying AI costs.
+    const preflightHardFail = getDeterministicHardFail(domain, brandSignal, acquisitionCost);
 
     // Step 2: Portfolio fit (local DB query)
     const portfolioFit = await analyzePortfolioFit(domain, detectedNiche);
@@ -202,22 +206,71 @@ export async function evaluateDomain(
 
     if (options.quickMode) {
         const [availability, domainAge] = await Promise.all([availabilityPromise, domainAgePromise]);
-        return buildQuickResult(domain, brandSignal, detectedNiche, subNiche, nicheProfile, portfolioFit, options, availability, domainAge);
+        const availabilityHardFail = getAvailabilityHardFail(availability, acquisitionCost);
+        const hardFailReason = preflightHardFail?.reason || availabilityHardFail?.reason;
+
+        let quickResult = buildQuickResult(
+            domain,
+            brandSignal,
+            detectedNiche,
+            subNiche,
+            nicheProfile,
+            portfolioFit,
+            options,
+            availability,
+            domainAge
+        );
+
+        if (hardFailReason) {
+            quickResult = buildHardPassResult(quickResult, hardFailReason);
+        }
+
+        await persistEvaluation(quickResult, detectedNiche).catch(err =>
+            console.error('Failed to persist evaluation:', err)
+        );
+        return quickResult;
+    }
+
+    // Resolve availability/age before AI calls to avoid paying for obvious hard-fails.
+    const [availability, domainAge] = await Promise.all([availabilityPromise, domainAgePromise]);
+    const availabilityHardFail = getAvailabilityHardFail(availability, acquisitionCost);
+    const hardFailReason = preflightHardFail?.reason || availabilityHardFail?.reason;
+
+    if (hardFailReason) {
+        const durationMs = Date.now() - startTime;
+        const result = buildHardPassResult(
+            buildQuickResult(
+                domain,
+                brandSignal,
+                detectedNiche,
+                subNiche,
+                nicheProfile,
+                portfolioFit,
+                options,
+                availability,
+                domainAge
+            ),
+            hardFailReason
+        );
+
+        await persistEvaluation(result, detectedNiche).catch(err =>
+            console.error('Failed to persist evaluation:', err)
+        );
+
+        console.log(`Evaluated ${domain} in ${durationMs}ms — hard pass: ${hardFailReason}`);
+        return result;
     }
 
     // Step 4: AI-powered analysis with error resilience
     const ai = getAIClient();
-    const acquisitionCost = options.acquisitionCost ?? 12;
 
     let keywordData: KeywordSerpResponse | null = null;
     let marketData: MarketAnalysisResponse | null = null;
 
-    // Parallel: keyword/SERP + market + availability + age
-    const [keywordOutcome, marketOutcome, availability, domainAge] = await Promise.all([
+    // Parallel: keyword/SERP + market
+    const [keywordOutcome, marketOutcome] = await Promise.all([
         safeAICall(() => ai.generateJSON<KeywordSerpResponse>('research', keywordSerpPrompt(domain, detectedNiche))),
         safeAICall(() => ai.generateJSON<MarketAnalysisResponse>('research', marketAnalysisPrompt(domain, detectedNiche))),
-        availabilityPromise,
-        domainAgePromise,
     ]);
 
     if (keywordOutcome.success) {
@@ -751,6 +804,62 @@ function isRelatedNiche(a: string, b: string): boolean {
         food: ['health', 'fitness'],
     };
     return relatedPairs[a.toLowerCase()]?.includes(b.toLowerCase()) ?? false;
+}
+
+function getDeterministicHardFail(
+    domain: string,
+    brand: BrandSignal,
+    acquisitionCost: number,
+): { reason: string } | null {
+    const sld = domain.split('.')[0]?.toLowerCase() || '';
+    const blockedTrademarkTokens = [
+        'google', 'youtube', 'facebook', 'instagram', 'tiktok', 'amazon',
+        'apple', 'microsoft', 'netflix', 'paypal', 'stripe', 'tesla',
+        'openai', 'chatgpt', 'claude', 'grok',
+    ];
+
+    if (blockedTrademarkTokens.some(token => sld.includes(token))) {
+        return { reason: 'Hard fail: likely trademark conflict in SLD token set' };
+    }
+
+    if (brand.score < 20) {
+        return { reason: 'Hard fail: brand quality score below minimum threshold (20)' };
+    }
+
+    if (acquisitionCost > 2500) {
+        return { reason: 'Hard fail: acquisition cost exceeds hard cap ($2,500)' };
+    }
+
+    if (acquisitionCost > 500 && !brand.isExactMatch && !brand.isPartialMatch) {
+        return { reason: 'Hard fail: high acquisition cost without keyword/brand match support' };
+    }
+
+    return null;
+}
+
+function getAvailabilityHardFail(
+    availability: { available: boolean; price?: number } | null,
+    acquisitionCost: number,
+): { reason: string } | null {
+    if (availability?.available === false && acquisitionCost <= 25) {
+        return { reason: 'Hard fail: domain is not available at registration pricing; aftermarket underwriting required' };
+    }
+    return null;
+}
+
+function buildHardPassResult(result: EvaluationResult, reason: string): EvaluationResult {
+    return {
+        ...result,
+        recommendation: 'hard_pass',
+        compositeScore: Math.min(result.compositeScore, 20),
+        riskAssessment: {
+            ...result.riskAssessment,
+            overallRisk: 'high',
+            biggestRisk: reason,
+            dealBreaker: reason,
+        },
+        aiSummary: `${reason}. Recommendation forced to hard_pass by deterministic gate.`,
+    };
 }
 
 // ─── Quick Mode (no AI) ────────────────────────────────────

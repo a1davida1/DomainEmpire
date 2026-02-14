@@ -2,6 +2,7 @@
 import { db, domains, contentQueue, articles } from '@/lib/db';
 import { eq, and, inArray, sql, isNull } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
+import { enqueueContentJob } from '@/lib/queue/content-queue';
 
 /**
  * Check for domains that need new content and schedule jobs based on "human-like" patterns.
@@ -95,7 +96,7 @@ export async function checkContentSchedule() {
         // Queue the Job
         console.log(`[Scheduler] Scheduling content for ${domain.domain} at ${nextPostDate.toISOString()}`);
 
-        await db.insert(contentQueue).values({
+        await enqueueContentJob({
             id: randomUUID(),
             jobType: 'keyword_research', // Start of pipeline
             domainId: domain.id,

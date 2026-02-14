@@ -254,9 +254,18 @@ function buildPageShell(
             break;
         case 'newsletter': {
             const baseUrl = process.env.CAPTURE_API_URL || (process.env.NEXTAUTH_URL ? `${process.env.NEXTAUTH_URL}/api/capture` : null);
-            if (!baseUrl) console.warn('[deploy] CAPTURE_API_URL or NEXTAUTH_URL not set — newsletter form will not work on deployed sites');
-            const captureUrl = baseUrl || '/api/capture';
-            footerContent = `<footer>
+            if (!baseUrl) {
+                console.warn('[deploy] CAPTURE_API_URL or NEXTAUTH_URL not set — newsletter form disabled');
+                footerContent = `<footer>
+  <div class="footer-newsletter">
+    <h3>Stay Updated</h3>
+    <p>Newsletter coming soon.</p>
+  </div>
+  <div class="footer-bottom">${footerLinksHtml}<p>&copy; ${new Date().getFullYear()} ${escapeHtml(config.title)}</p></div>
+</footer>`;
+            } else {
+                const captureUrl = baseUrl;
+                footerContent = `<footer>
   <div class="footer-newsletter">
     <h3>Stay Updated</h3>
     <p>Get the latest guides delivered to your inbox.</p>
@@ -299,6 +308,7 @@ function buildPageShell(
 })();
 </script>
 </footer>`;
+            }
             break;
         }
         default: // minimal or multi-column
@@ -449,7 +459,7 @@ function generateHeaders(): string {
 /favicon.svg
   Cache-Control: public, max-age=604800
 
-/*.html
+/**/*.html
   Cache-Control: public, max-age=3600
 
 /robots.txt
