@@ -389,6 +389,7 @@ REFINEMENT TASKS:
 5. Ensure the article flows naturally when read aloud
 6. Add authentic-sounding personal touches or opinions where appropriate
 7. Make sure transitions between sections feel natural
+8. Never use the em dash character. Replace em dashes with commas, parentheses, or colons.
 
 Keep all the factual content, structure, and SEO elements intact.
 Return the refined article in Markdown format.
@@ -435,6 +436,35 @@ Return a JSON object with:
   "ogDescription": "Open Graph description for social sharing",
   "schemaType": "Article" | "HowTo" | "FAQ",
   "suggestedSlug": "url-slug-here"
+}
+`,
+
+  aiReview: (article: string, keyword: string, title: string) => `
+You are a strict editorial reviewer making a release decision for publication quality.
+You are allowed to auto-approve only if all required checks pass.
+
+CONTENT TITLE: ${title}
+PRIMARY KEYWORD: ${keyword}
+
+CONTENT TO REVIEW:
+${article}
+
+REQUIRED CHECKS:
+1. No em dash characters are present.
+2. Claims are concrete and not obviously fabricated.
+3. Tone reads as human, not templated or repetitive.
+4. Structure is coherent and ready to publish.
+5. Primary keyword usage appears natural.
+
+If any required check fails, return reject and requiresHumanReview=true.
+
+Return JSON only:
+{
+  "verdict": "approve" | "reject",
+  "confidence": 0.0,
+  "requiresHumanReview": true | false,
+  "failures": ["list of failed checks"],
+  "summary": "brief editorial rationale"
 }
 `,
 };

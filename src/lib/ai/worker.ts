@@ -24,8 +24,24 @@
  * - fetch_analytics: Pull analytics data
  */
 
-import { db, contentQueue, articles, domains, keywords, domainResearch, acquisitionEvents, reviewTasks, previewBuilds } from '@/lib/db';
-import { eq, and, lte, gt, isNull, or, sql, asc, desc, count, inArray } from 'drizzle-orm';
+import { createHash } from 'node:crypto';
+import {
+    db,
+    contentQueue,
+    articles,
+    domains,
+    keywords,
+    domainResearch,
+    acquisitionEvents,
+    reviewTasks,
+    previewBuilds,
+    promotionCampaigns,
+    promotionJobs,
+    promotionEvents,
+    mediaAssets,
+    mediaAssetUsage,
+} from '@/lib/db';
+import { eq, and, lte, gt, gte, isNull, or, sql, asc, desc, count, inArray } from 'drizzle-orm';
 import { processOutlineJob, processDraftJob, processHumanizeJob, processSeoOptimizeJob, processMetaJob, processKeywordResearchJob, processResearchJob } from './pipeline';
 import { processDeployJob } from '@/lib/deploy/processor';
 import { checkContentSchedule } from './scheduler';
@@ -41,6 +57,11 @@ import { runAllMonitoringChecks } from '@/lib/monitoring/triggers';
 import { calculateBackoff } from '@/lib/tpilot/core/retry';
 import { FailureCategorizer } from '@/lib/tpilot/core/failure-categorizer';
 import { dequeueContentJobIds, enqueueContentJob, requeueContentJobIds } from '@/lib/queue/content-queue';
+import { isFeatureEnabled } from '@/lib/feature-flags';
+import { refreshResearchCacheEntry } from '@/lib/ai/research-cache';
+import { publishToGrowthChannel } from '@/lib/growth/publishers';
+import { refreshExpiringGrowthCredentialsAudit, resolveGrowthPublishCredential } from '@/lib/growth/channel-credentials';
+import { evaluateGrowthPublishPolicy } from '@/lib/growth/policy';
 
 const LOCK_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 const JOB_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes max per job
@@ -423,6 +444,585 @@ async function resolveResearchRowFromPayload(
 }
 
 type AcquisitionStageJobType = 'enrich_candidate' | 'score_candidate' | 'create_bid_plan';
+type GrowthChannel = 'pinterest' | 'youtube_shorts';
+type GrowthExecutionJobType =
+    | 'generate_short_script'
+    | 'render_short_video'
+    | 'publish_pinterest_pin'
+    | 'publish_youtube_short'
+    | 'sync_campaign_metrics';
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const GROWTH_COOLDOWN_HOURS = Number.isFinite(Number.parseInt(process.env.GROWTH_CHANNEL_COOLDOWN_HOURS || '', 10))
+    ? Math.max(1, Number.parseInt(process.env.GROWTH_CHANNEL_COOLDOWN_HOURS || '', 10))
+    : 24;
+const GROWTH_DEFAULT_DAILY_CAP = Number.isFinite(Number.parseInt(process.env.GROWTH_DEFAULT_DAILY_CAP || '', 10))
+    ? Math.max(1, Number.parseInt(process.env.GROWTH_DEFAULT_DAILY_CAP || '', 10))
+    : 2;
+
+function toUuid(value: unknown): string | undefined {
+    if (typeof value !== 'string') return undefined;
+    const trimmed = value.trim();
+    return UUID_REGEX.test(trimmed) ? trimmed : undefined;
+}
+
+function toGrowthChannel(value: unknown): GrowthChannel | null {
+    if (value !== 'pinterest' && value !== 'youtube_shorts') {
+        return null;
+    }
+    return value;
+}
+
+function normalizeGrowthChannels(value: unknown): GrowthChannel[] {
+    if (!Array.isArray(value)) return [];
+    const normalized = value
+        .map((item) => toGrowthChannel(item))
+        .filter((item): item is GrowthChannel => item !== null);
+    return [...new Set(normalized)];
+}
+
+function getGrowthPayload(value: unknown): Record<string, unknown> {
+    return isPlainObject(value) ? value : {};
+}
+
+function buildCreativeHash(seed: string): string {
+    return createHash('sha256').update(seed).digest('hex').slice(0, 24);
+}
+
+function getUtcDayStart(now = new Date()): Date {
+    return new Date(Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        0,
+        0,
+        0,
+        0,
+    ));
+}
+
+function getLinkedPromotionJobId(job: typeof contentQueue.$inferSelect): string | null {
+    const payload = getGrowthPayload(job.payload);
+    return toUuid(payload.promotionJobId) ?? null;
+}
+
+async function markLinkedPromotionJobRunning(job: typeof contentQueue.$inferSelect): Promise<void> {
+    const promotionJobId = getLinkedPromotionJobId(job);
+    if (!promotionJobId) return;
+    await db.update(promotionJobs).set({
+        status: 'running',
+        startedAt: new Date(),
+    }).where(eq(promotionJobs.id, promotionJobId));
+}
+
+async function markLinkedPromotionJobCompleted(job: typeof contentQueue.$inferSelect): Promise<void> {
+    const promotionJobId = getLinkedPromotionJobId(job);
+    if (!promotionJobId) return;
+    await db.update(promotionJobs).set({
+        status: 'completed',
+        completedAt: new Date(),
+        errorMessage: null,
+    }).where(eq(promotionJobs.id, promotionJobId));
+}
+
+async function markLinkedPromotionJobFailed(
+    job: typeof contentQueue.$inferSelect,
+    errorMessage: string,
+    shouldRetry: boolean,
+): Promise<void> {
+    const promotionJobId = getLinkedPromotionJobId(job);
+    if (!promotionJobId) return;
+    await db.update(promotionJobs).set({
+        status: shouldRetry ? 'pending' : 'failed',
+        errorMessage,
+        completedAt: shouldRetry ? null : new Date(),
+    }).where(eq(promotionJobs.id, promotionJobId));
+}
+
+async function enqueueGrowthExecutionJob(opts: {
+    campaignId: string;
+    jobType: GrowthExecutionJobType;
+    priority: number;
+    payload?: Record<string, unknown>;
+}): Promise<boolean> {
+    const existing = await db
+        .select({ id: contentQueue.id })
+        .from(contentQueue)
+        .where(and(
+            eq(contentQueue.jobType, opts.jobType),
+            inArray(contentQueue.status, ['pending', 'processing']),
+            sql`${contentQueue.payload} ->> 'campaignId' = ${opts.campaignId}`,
+        ))
+        .limit(1);
+
+    if (existing.length > 0) {
+        return false;
+    }
+
+    const [promotionJob] = await db.insert(promotionJobs).values({
+        campaignId: opts.campaignId,
+        jobType: opts.jobType,
+        status: 'pending',
+        payload: opts.payload ?? {},
+    }).returning({ id: promotionJobs.id });
+
+    if (!promotionJob) {
+        throw new Error(`Failed to create promotion_jobs row for ${opts.jobType}`);
+    }
+
+    const jobPayload = {
+        ...(opts.payload ?? {}),
+        campaignId: opts.campaignId,
+        promotionJobId: promotionJob.id,
+    };
+
+    const queueJobId = await enqueueContentJob({
+        jobType: opts.jobType,
+        status: 'pending',
+        priority: opts.priority,
+        payload: jobPayload,
+    });
+
+    await db.update(promotionJobs).set({
+        payload: {
+            ...jobPayload,
+            contentQueueJobId: queueJobId,
+        },
+    }).where(eq(promotionJobs.id, promotionJob.id));
+
+    return true;
+}
+
+async function countCampaignPublishesToday(campaignId: string): Promise<number> {
+    const today = getUtcDayStart();
+    const [row] = await db.select({ value: count() })
+        .from(promotionEvents)
+        .where(and(
+            eq(promotionEvents.campaignId, campaignId),
+            eq(promotionEvents.eventType, 'published'),
+            gte(promotionEvents.occurredAt, today),
+        ));
+    return Number(row?.value ?? 0);
+}
+
+async function isCreativeSuppressed(opts: {
+    campaignId: string;
+    channel: GrowthChannel;
+    creativeHash: string;
+    domainResearchId: string;
+}): Promise<{ duplicate: boolean; cooldown: boolean }> {
+    const since = new Date(Date.now() - (GROWTH_COOLDOWN_HOURS * 60 * 60 * 1000));
+
+    const [duplicate] = await db.select({ id: promotionEvents.id })
+        .from(promotionEvents)
+        .where(and(
+            eq(promotionEvents.campaignId, opts.campaignId),
+            eq(promotionEvents.eventType, 'published'),
+            gte(promotionEvents.occurredAt, since),
+            sql`${promotionEvents.attributes} ->> 'channel' = ${opts.channel}`,
+            sql`${promotionEvents.attributes} ->> 'creativeHash' = ${opts.creativeHash}`,
+        ))
+        .limit(1);
+
+    const domainCooldownRows = await db.select({ id: promotionEvents.id })
+        .from(promotionEvents)
+        .innerJoin(promotionCampaigns, eq(promotionEvents.campaignId, promotionCampaigns.id))
+        .where(and(
+            eq(promotionCampaigns.domainResearchId, opts.domainResearchId),
+            eq(promotionEvents.eventType, 'published'),
+            gte(promotionEvents.occurredAt, since),
+            sql`${promotionEvents.attributes} ->> 'channel' = ${opts.channel}`,
+        ))
+        .limit(1);
+
+    return {
+        duplicate: Boolean(duplicate),
+        cooldown: domainCooldownRows.length > 0,
+    };
+}
+
+async function trackMediaUsage(opts: {
+    campaignId: string;
+    assetId?: string;
+    promotionJobId?: string | null;
+}): Promise<void> {
+    if (!opts.assetId || !UUID_REGEX.test(opts.assetId)) {
+        return;
+    }
+
+    await db.insert(mediaAssetUsage).values({
+        assetId: opts.assetId,
+        campaignId: opts.campaignId,
+        jobId: opts.promotionJobId ?? null,
+    });
+
+    await db.update(mediaAssets).set({
+        usageCount: sql`${mediaAssets.usageCount} + 1`,
+    }).where(eq(mediaAssets.id, opts.assetId));
+}
+
+interface CampaignMetricsSnapshot {
+    totalEvents: number;
+    published: number;
+    clicks: number;
+    leads: number;
+    conversions: number;
+    lastPublishedAt: string | null;
+    computedAt: string;
+}
+
+async function syncCampaignMetrics(campaignId: string): Promise<CampaignMetricsSnapshot> {
+    const rows = await db.select({
+        eventType: promotionEvents.eventType,
+        occurredAt: promotionEvents.occurredAt,
+    })
+        .from(promotionEvents)
+        .where(eq(promotionEvents.campaignId, campaignId));
+
+    let published = 0;
+    let clicks = 0;
+    let leads = 0;
+    let conversions = 0;
+    let lastPublishedAt: string | null = null;
+
+    for (const row of rows) {
+        if (row.eventType === 'published') {
+            published += 1;
+            if (row.occurredAt) {
+                const iso = row.occurredAt.toISOString();
+                if (!lastPublishedAt || iso > lastPublishedAt) {
+                    lastPublishedAt = iso;
+                }
+            }
+        }
+        if (row.eventType === 'click') clicks += 1;
+        if (row.eventType === 'lead') leads += 1;
+        if (row.eventType === 'conversion') conversions += 1;
+    }
+
+    const metrics: CampaignMetricsSnapshot = {
+        totalEvents: rows.length,
+        published,
+        clicks,
+        leads,
+        conversions,
+        lastPublishedAt,
+        computedAt: new Date().toISOString(),
+    };
+
+    await db.update(promotionCampaigns).set({
+        metrics,
+        updatedAt: new Date(),
+    }).where(eq(promotionCampaigns.id, campaignId));
+
+    return metrics;
+}
+
+interface PromotionContext {
+    payload: Record<string, unknown>;
+    campaign: typeof promotionCampaigns.$inferSelect;
+    research: typeof domainResearch.$inferSelect;
+}
+
+function resolveCampaignDailyCap(campaign: typeof promotionCampaigns.$inferSelect): number {
+    const configured = typeof campaign.dailyCap === 'number' ? campaign.dailyCap : 0;
+    return configured > 0 ? configured : GROWTH_DEFAULT_DAILY_CAP;
+}
+
+function resolveCampaignChannels(
+    campaign: typeof promotionCampaigns.$inferSelect,
+    payload: Record<string, unknown>,
+): GrowthChannel[] {
+    const payloadChannels = normalizeGrowthChannels(payload.channels);
+    if (payloadChannels.length > 0) {
+        return payloadChannels;
+    }
+    return normalizeGrowthChannels(campaign.channels);
+}
+
+function resolveCreativeHashForPublish(opts: {
+    campaignId: string;
+    domain: string;
+    channel: GrowthChannel;
+    payload: Record<string, unknown>;
+}): string {
+    const explicit = toOptionalString(opts.payload.creativeHash);
+    if (explicit) {
+        return explicit;
+    }
+    const utcDay = getUtcDayStart().toISOString().slice(0, 10);
+    return buildCreativeHash(`${opts.campaignId}:${opts.domain}:${opts.channel}:${utcDay}`);
+}
+
+async function recordPromotionEvent(
+    campaignId: string,
+    eventType: string,
+    attributes: Record<string, unknown>,
+): Promise<void> {
+    await db.insert(promotionEvents).values({
+        campaignId,
+        eventType,
+        attributes,
+    });
+}
+
+async function resolvePromotionContext(
+    payloadInput: unknown,
+    options: { allowCreateCampaign?: boolean } = {},
+): Promise<PromotionContext> {
+    const payload = getGrowthPayload(payloadInput);
+    const payloadCampaignId = toUuid(payload.campaignId);
+    const payloadDomainResearchId = toUuid(payload.domainResearchId);
+
+    let campaign: typeof promotionCampaigns.$inferSelect | null = null;
+    if (payloadCampaignId) {
+        const rows = await db.select()
+            .from(promotionCampaigns)
+            .where(eq(promotionCampaigns.id, payloadCampaignId))
+            .limit(1);
+        campaign = rows[0] ?? null;
+    }
+
+    if (!campaign && payloadDomainResearchId) {
+        const rows = await db.select()
+            .from(promotionCampaigns)
+            .where(eq(promotionCampaigns.domainResearchId, payloadDomainResearchId))
+            .orderBy(desc(promotionCampaigns.createdAt))
+            .limit(1);
+        campaign = rows[0] ?? null;
+    }
+
+    if (!campaign && options.allowCreateCampaign) {
+        const domainResearchId = payloadDomainResearchId;
+        if (!domainResearchId) {
+            throw new Error('create_promotion_plan requires campaignId or domainResearchId');
+        }
+
+        const channels = normalizeGrowthChannels(payload.channels);
+        if (channels.length === 0) {
+            throw new Error('create_promotion_plan requires at least one growth channel');
+        }
+
+        const rawBudget = toOptionalNumber(payload.budget);
+        const budget = rawBudget && rawBudget > 0 ? rawBudget : 0;
+        const rawDailyCap = toOptionalNumber(payload.dailyCap);
+        const dailyCap = rawDailyCap && rawDailyCap > 0
+            ? Math.max(1, Math.floor(rawDailyCap))
+            : GROWTH_DEFAULT_DAILY_CAP;
+
+        const [created] = await db.insert(promotionCampaigns).values({
+            domainResearchId,
+            channels,
+            budget,
+            dailyCap,
+            status: 'draft',
+            metrics: {},
+        }).returning();
+
+        campaign = created ?? null;
+    }
+
+    if (!campaign) {
+        throw new Error('Promotion campaign not found');
+    }
+
+    const researchRows = await db.select()
+        .from(domainResearch)
+        .where(eq(domainResearch.id, campaign.domainResearchId))
+        .limit(1);
+    const research = researchRows[0];
+    if (!research) {
+        throw new Error('Domain research record not found for promotion campaign');
+    }
+
+    return {
+        payload,
+        campaign,
+        research,
+    };
+}
+
+async function resolvePublishAssetId(
+    channel: GrowthChannel,
+    payload: Record<string, unknown>,
+): Promise<string | null> {
+    const explicitAssetId = toUuid(payload.assetId)
+        ?? toUuid(payload.videoAssetId)
+        ?? toUuid(payload.imageAssetId);
+    if (explicitAssetId) {
+        return explicitAssetId;
+    }
+
+    const type = channel === 'youtube_shorts' ? 'video' : 'image';
+    const rows = await db.select({ id: mediaAssets.id })
+        .from(mediaAssets)
+        .where(eq(mediaAssets.type, type))
+        .orderBy(asc(mediaAssets.usageCount), asc(mediaAssets.createdAt))
+        .limit(1);
+
+    return rows[0]?.id ?? null;
+}
+
+function buildPromotionCopy(opts: {
+    channel: GrowthChannel;
+    payload: Record<string, unknown>;
+    research: typeof domainResearch.$inferSelect;
+}): string {
+    const explicit = toOptionalString(opts.payload.copy)
+        || toOptionalString(opts.payload.caption)
+        || toOptionalString(opts.payload.script);
+    if (explicit) {
+        return explicit;
+    }
+
+    if (opts.channel === 'youtube_shorts') {
+        return `Domain spotlight: ${opts.research.domain}. Why this niche name has upside and what makes it a smart acquisition.`;
+    }
+    return `Pin spotlight: ${opts.research.domain}. Explore the niche angle and monetization opportunity.`;
+}
+
+async function runPublishJob(
+    job: typeof contentQueue.$inferSelect,
+    channel: GrowthChannel,
+): Promise<string> {
+    const context = await resolvePromotionContext(job.payload);
+
+    if (context.campaign.status !== 'active') {
+        return `Skipped publish: campaign ${context.campaign.id} is ${context.campaign.status}`;
+    }
+
+    const dailyCap = resolveCampaignDailyCap(context.campaign);
+    const publishesToday = await countCampaignPublishesToday(context.campaign.id);
+    if (publishesToday >= dailyCap) {
+        await recordPromotionEvent(context.campaign.id, 'publish_skipped', {
+            channel,
+            reason: 'daily_cap_reached',
+            dailyCap,
+            publishesToday,
+        });
+        return `Skipped publish: daily cap reached (${publishesToday}/${dailyCap})`;
+    }
+
+    const creativeHash = resolveCreativeHashForPublish({
+        campaignId: context.campaign.id,
+        domain: context.research.domain,
+        channel,
+        payload: context.payload,
+    });
+
+    const suppressed = await isCreativeSuppressed({
+        campaignId: context.campaign.id,
+        channel,
+        creativeHash,
+        domainResearchId: context.research.id,
+    });
+    if (suppressed.duplicate || suppressed.cooldown) {
+        await recordPromotionEvent(context.campaign.id, 'publish_skipped', {
+            channel,
+            creativeHash,
+            reason: suppressed.duplicate ? 'duplicate_creative' : 'domain_cooldown',
+            cooldownHours: GROWTH_COOLDOWN_HOURS,
+        });
+        return suppressed.duplicate
+            ? 'Skipped publish: duplicate creative inside cooldown window'
+            : 'Skipped publish: domain cooldown active for channel';
+    }
+
+    const assetId = await resolvePublishAssetId(channel, context.payload);
+    let assetUrl: string | null = null;
+    if (assetId) {
+        const [assetRow] = await db.select({ url: mediaAssets.url })
+            .from(mediaAssets)
+            .where(eq(mediaAssets.id, assetId))
+            .limit(1);
+        assetUrl = assetRow?.url ?? null;
+    }
+
+    const destinationUrl = toOptionalString(context.payload.destinationUrl) || `https://${context.research.domain}`;
+    const copy = buildPromotionCopy({
+        channel,
+        payload: context.payload,
+        research: context.research,
+    });
+    const policyCheck = evaluateGrowthPublishPolicy({
+        channel,
+        copy,
+        destinationUrl,
+    });
+
+    if (!policyCheck.allowed) {
+        await recordPromotionEvent(context.campaign.id, 'publish_blocked', {
+            channel,
+            creativeHash,
+            destinationUrl,
+            blockReasons: policyCheck.blockReasons,
+            policyWarnings: policyCheck.warnings,
+            policyChanges: policyCheck.changes,
+        });
+
+        await enqueueGrowthExecutionJob({
+            campaignId: context.campaign.id,
+            jobType: 'sync_campaign_metrics',
+            priority: 1,
+            payload: {
+                sourceJobId: job.id,
+                sourceChannel: channel,
+                sourceStage: 'publish_blocked',
+            },
+        });
+
+        return `Blocked publish: ${policyCheck.blockReasons.join('; ')}`;
+    }
+
+    const launchedBy = toUuid(context.payload.launchedBy)
+        ?? toUuid(context.payload.requestedBy)
+        ?? null;
+    const credential = await resolveGrowthPublishCredential(launchedBy, channel);
+    const publishResult = await publishToGrowthChannel(channel, {
+        campaignId: context.campaign.id,
+        domain: context.research.domain,
+        destinationUrl,
+        copy: policyCheck.normalizedCopy,
+        creativeHash,
+        assetUrl,
+    }, {
+        credential,
+    });
+
+    await recordPromotionEvent(context.campaign.id, 'published', {
+        channel,
+        creativeHash,
+        assetId,
+        assetUrl,
+        destinationUrl,
+        copy: policyCheck.normalizedCopy,
+        externalPostId: publishResult.externalPostId,
+        publishStatus: publishResult.status,
+        publishMetadata: publishResult.metadata,
+        policyWarnings: policyCheck.warnings,
+        policyChanges: policyCheck.changes,
+        launchedBy,
+        credentialSource: credential ? 'stored' : 'env',
+    });
+
+    await trackMediaUsage({
+        campaignId: context.campaign.id,
+        assetId: assetId ?? undefined,
+        promotionJobId: getLinkedPromotionJobId(job),
+    });
+
+    await enqueueGrowthExecutionJob({
+        campaignId: context.campaign.id,
+        jobType: 'sync_campaign_metrics',
+        priority: 1,
+        payload: {
+            sourceJobId: job.id,
+            sourceChannel: channel,
+        },
+    });
+
+    return `Published ${channel} creative for ${context.research.domain} (${publishResult.externalPostId})`;
+}
 
 async function enqueueAcquisitionStageJobIfMissing(
     jobType: AcquisitionStageJobType,
@@ -1059,6 +1659,8 @@ async function processJob(job: typeof contentQueue.$inferSelect): Promise<boolea
             timeoutId = setTimeout(() => reject(new Error(`Job timed out after ${JOB_TIMEOUT_MS / 1000}s`)), JOB_TIMEOUT_MS);
         });
 
+        await markLinkedPromotionJobRunning(job);
+
         // Race the job against the timeout
         const jobPromise = executeJob(job);
         await Promise.race([jobPromise, timeoutPromise]);
@@ -1066,6 +1668,7 @@ async function processJob(job: typeof contentQueue.$inferSelect): Promise<boolea
         if (timeoutId) {
             clearTimeout(timeoutId);
         }
+        await markLinkedPromotionJobCompleted(job);
         const durationMs = Date.now() - startTime;
         console.log(`[Worker] Job ${job.id} completed in ${durationMs}ms`);
         return true;
@@ -1083,6 +1686,11 @@ async function processJob(job: typeof contentQueue.$inferSelect): Promise<boolea
         const attempts = (job.attempts || 0) + 1;
         const maxAttempts = job.maxAttempts || 3;
         const shouldRetry = categorized.retryable && attempts < maxAttempts;
+        try {
+            await markLinkedPromotionJobFailed(job, detailedError, shouldRetry);
+        } catch (promotionJobError) {
+            console.error(`[Worker] Failed to update linked promotion job for ${job.id}:`, promotionJobError);
+        }
 
         if (!shouldRetry) {
             // Dead letter — permanently failed
@@ -1302,7 +1910,17 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
             await markJobComplete(job.id, `Found ${staleCount} stale dataset(s)`);
             break;
         }
+        case 'refresh_research_cache': {
+            await refreshResearchCacheEntry(job.payload);
+            await markJobComplete(job.id, 'Research cache refreshed');
+            break;
+        }
         case 'ingest_listings': {
+            if (!isFeatureEnabled('acquisition_underwriting_v1')) {
+                await markJobComplete(job.id, 'Skipped: acquisition_underwriting_v1 disabled');
+                break;
+            }
+
             const { candidates, createdBy } = parseIngestListingsPayload(job.payload);
             if (candidates.length === 0) {
                 await markJobFailed(job.id, 'Failed: invalid payload - no valid listings found');
@@ -1354,6 +1972,11 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
             break;
         }
         case 'enrich_candidate': {
+            if (!isFeatureEnabled('acquisition_underwriting_v1')) {
+                await markJobComplete(job.id, 'Skipped: acquisition_underwriting_v1 disabled');
+                break;
+            }
+
             if (!isPlainObject(job.payload)) {
                 await markJobFailed(job.id, 'Failed: invalid payload for enrich_candidate');
                 break;
@@ -1415,6 +2038,11 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
             break;
         }
         case 'score_candidate': {
+            if (!isFeatureEnabled('acquisition_underwriting_v1')) {
+                await markJobComplete(job.id, 'Skipped: acquisition_underwriting_v1 disabled');
+                break;
+            }
+
             if (!isPlainObject(job.payload)) {
                 await markJobFailed(job.id, 'Failed: invalid payload for score_candidate');
                 break;
@@ -1474,7 +2102,7 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
                 confidenceScore: underwriting.confidenceScore,
                 hardFailReason: underwriting.hardFailReason,
                 underwritingVersion: UNDERWRITING_VERSION,
-                domainScore: evaluation.compositeScore.toString(),
+                domainScore: evaluation.compositeScore,
                 keywordVolume: evaluation.signals.keyword?.volume ?? null,
                 keywordCpc: keywordCpc === null ? null : keywordCpc.toString(),
                 estimatedRevenuePotential: estimatedRevenuePotential.toString(),
@@ -1542,6 +2170,11 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
             break;
         }
         case 'create_bid_plan': {
+            if (!isFeatureEnabled('acquisition_underwriting_v1')) {
+                await markJobComplete(job.id, 'Skipped: acquisition_underwriting_v1 disabled');
+                break;
+            }
+
             if (!isPlainObject(job.payload)) {
                 await markJobFailed(job.id, 'Failed: invalid payload for create_bid_plan');
                 break;
@@ -1579,6 +2212,262 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
             );
 
             await markJobComplete(job.id, plan.message);
+            break;
+        }
+        case 'create_promotion_plan': {
+            if (!isFeatureEnabled('growth_channels_v1')) {
+                await markJobComplete(job.id, 'Skipped: growth_channels_v1 disabled');
+                break;
+            }
+
+            const context = await resolvePromotionContext(job.payload, { allowCreateCampaign: true });
+            const channels = resolveCampaignChannels(context.campaign, context.payload);
+            if (channels.length === 0) {
+                throw new Error('Promotion campaign has no valid channels');
+            }
+
+            if (context.campaign.status === 'cancelled' || context.campaign.status === 'completed') {
+                await markJobComplete(
+                    job.id,
+                    `Skipped: campaign ${context.campaign.id} is ${context.campaign.status}`,
+                );
+                break;
+            }
+
+            await db.update(promotionCampaigns).set({
+                status: 'active',
+                updatedAt: new Date(),
+            }).where(eq(promotionCampaigns.id, context.campaign.id));
+
+            await recordPromotionEvent(context.campaign.id, 'plan_created', {
+                channels,
+                budget: context.campaign.budget,
+                dailyCap: resolveCampaignDailyCap(context.campaign),
+                sourceJobId: job.id,
+            });
+
+            const launchedBy = toUuid(context.payload.launchedBy)
+                ?? toUuid(context.payload.requestedBy)
+                ?? null;
+            let queued = 0;
+            for (const channel of channels) {
+                if (channel === 'youtube_shorts') {
+                    const didQueue = await enqueueGrowthExecutionJob({
+                        campaignId: context.campaign.id,
+                        jobType: 'generate_short_script',
+                        priority: job.priority ?? 2,
+                        payload: {
+                            channel,
+                            domainResearchId: context.research.id,
+                            domain: context.research.domain,
+                            destinationUrl: `https://${context.research.domain}`,
+                            launchedBy,
+                        },
+                    });
+                    if (didQueue) queued += 1;
+                    continue;
+                }
+
+                if (channel === 'pinterest') {
+                    const didQueue = await enqueueGrowthExecutionJob({
+                        campaignId: context.campaign.id,
+                        jobType: 'publish_pinterest_pin',
+                        priority: job.priority ?? 2,
+                        payload: {
+                            channel,
+                            domainResearchId: context.research.id,
+                            domain: context.research.domain,
+                            destinationUrl: `https://${context.research.domain}`,
+                            launchedBy,
+                        },
+                    });
+                    if (didQueue) queued += 1;
+                }
+            }
+
+            const queuedMetrics = await enqueueGrowthExecutionJob({
+                campaignId: context.campaign.id,
+                jobType: 'sync_campaign_metrics',
+                priority: 1,
+                payload: {
+                    sourceJobId: job.id,
+                    sourceStage: 'create_promotion_plan',
+                    launchedBy,
+                },
+            });
+            if (queuedMetrics) queued += 1;
+
+            await markJobComplete(
+                job.id,
+                `Activated campaign ${context.campaign.id}; queued ${queued} growth job(s)`,
+            );
+            break;
+        }
+        case 'generate_short_script': {
+            if (!isFeatureEnabled('growth_channels_v1')) {
+                await markJobComplete(job.id, 'Skipped: growth_channels_v1 disabled');
+                break;
+            }
+
+            const context = await resolvePromotionContext(job.payload);
+            if (context.campaign.status !== 'active') {
+                await markJobComplete(
+                    job.id,
+                    `Skipped script generation: campaign ${context.campaign.id} is ${context.campaign.status}`,
+                );
+                break;
+            }
+
+            const channel = toGrowthChannel(context.payload.channel) ?? 'youtube_shorts';
+            if (channel !== 'youtube_shorts') {
+                throw new Error('generate_short_script only supports youtube_shorts');
+            }
+
+            const defaultScript = [
+                `Quick domain spotlight: ${context.research.domain}.`,
+                `This name has monetization upside and a clear niche angle.`,
+                `Review the opportunity and decide if this belongs in the portfolio.`,
+            ].join(' ');
+            const script = toOptionalString(context.payload.script) || defaultScript;
+            const creativeHash = buildCreativeHash(`${context.campaign.id}:${channel}:${script}`);
+
+            await recordPromotionEvent(context.campaign.id, 'script_generated', {
+                channel,
+                creativeHash,
+                script,
+                wordCount: script.split(/\s+/).filter(Boolean).length,
+            });
+
+            const queuedRender = await enqueueGrowthExecutionJob({
+                campaignId: context.campaign.id,
+                jobType: 'render_short_video',
+                priority: job.priority ?? 2,
+                payload: {
+                    channel,
+                    script,
+                    creativeHash,
+                    domainResearchId: context.research.id,
+                    destinationUrl: toOptionalString(context.payload.destinationUrl) || `https://${context.research.domain}`,
+                    launchedBy: toUuid(context.payload.launchedBy)
+                        ?? toUuid(context.payload.requestedBy)
+                        ?? null,
+                },
+            });
+
+            await markJobComplete(
+                job.id,
+                queuedRender
+                    ? `Script generated for ${context.research.domain}`
+                    : `Script generated; render already queued for campaign ${context.campaign.id}`,
+            );
+            break;
+        }
+        case 'render_short_video': {
+            if (!isFeatureEnabled('growth_channels_v1')) {
+                await markJobComplete(job.id, 'Skipped: growth_channels_v1 disabled');
+                break;
+            }
+
+            const context = await resolvePromotionContext(job.payload);
+            if (context.campaign.status !== 'active') {
+                await markJobComplete(
+                    job.id,
+                    `Skipped render: campaign ${context.campaign.id} is ${context.campaign.status}`,
+                );
+                break;
+            }
+
+            const script = toOptionalString(context.payload.script)
+                || `Domain spotlight for ${context.research.domain}.`;
+            const creativeHash = toOptionalString(context.payload.creativeHash)
+                || buildCreativeHash(`${context.campaign.id}:youtube_shorts:${script}`);
+            const assetUrl = toOptionalString(context.payload.assetUrl)
+                || `generated://shorts/${context.campaign.id}/${creativeHash}.mp4`;
+            const tags = [context.research.domain, 'youtube_shorts', creativeHash];
+
+            const [asset] = await db.insert(mediaAssets).values({
+                type: 'video',
+                url: assetUrl,
+                tags,
+            }).returning({ id: mediaAssets.id });
+            if (!asset) {
+                throw new Error('Failed to persist rendered video asset');
+            }
+
+            await recordPromotionEvent(context.campaign.id, 'video_rendered', {
+                channel: 'youtube_shorts',
+                creativeHash,
+                assetId: asset.id,
+                assetUrl,
+                scriptWordCount: script.split(/\s+/).filter(Boolean).length,
+            });
+
+            const queuedPublish = await enqueueGrowthExecutionJob({
+                campaignId: context.campaign.id,
+                jobType: 'publish_youtube_short',
+                priority: job.priority ?? 2,
+                payload: {
+                    channel: 'youtube_shorts',
+                    creativeHash,
+                    assetId: asset.id,
+                    domainResearchId: context.research.id,
+                    destinationUrl: toOptionalString(context.payload.destinationUrl) || `https://${context.research.domain}`,
+                    copy: script,
+                    launchedBy: toUuid(context.payload.launchedBy)
+                        ?? toUuid(context.payload.requestedBy)
+                        ?? null,
+                },
+            });
+
+            await markJobComplete(
+                job.id,
+                queuedPublish
+                    ? `Rendered short for ${context.research.domain}`
+                    : `Render saved; publish already queued for campaign ${context.campaign.id}`,
+            );
+            break;
+        }
+        case 'publish_pinterest_pin': {
+            if (!isFeatureEnabled('growth_channels_v1')) {
+                await markJobComplete(job.id, 'Skipped: growth_channels_v1 disabled');
+                break;
+            }
+
+            const message = await runPublishJob(job, 'pinterest');
+            await markJobComplete(job.id, message);
+            break;
+        }
+        case 'publish_youtube_short': {
+            if (!isFeatureEnabled('growth_channels_v1')) {
+                await markJobComplete(job.id, 'Skipped: growth_channels_v1 disabled');
+                break;
+            }
+
+            const message = await runPublishJob(job, 'youtube_shorts');
+            await markJobComplete(job.id, message);
+            break;
+        }
+        case 'sync_campaign_metrics': {
+            if (!isFeatureEnabled('growth_channels_v1')) {
+                await markJobComplete(job.id, 'Skipped: growth_channels_v1 disabled');
+                break;
+            }
+
+            const context = await resolvePromotionContext(job.payload);
+            const metrics = await syncCampaignMetrics(context.campaign.id);
+
+            await recordPromotionEvent(context.campaign.id, 'metrics_synced', {
+                sourceJobId: job.id,
+                published: metrics.published,
+                clicks: metrics.clicks,
+                leads: metrics.leads,
+                conversions: metrics.conversions,
+            });
+
+            await markJobComplete(
+                job.id,
+                `Metrics synced: ${metrics.published} published, ${metrics.clicks} clicks, ${metrics.leads} leads`,
+            );
             break;
         }
         default:
@@ -1763,6 +2652,16 @@ export async function runWorkerContinuously(options: WorkerOptions = {}): Promis
                 await snapshotCompliance().catch((err: unknown) => console.error('[Compliance] Error:', err));
                 await checkStaleDatasets().catch((err: unknown) => console.error('[DatasetFreshness] Error:', err));
                 await purgeExpiredSessions().catch((err: unknown) => console.error('[SessionPurge] Error:', err));
+                await refreshExpiringGrowthCredentialsAudit()
+                    .then((summary) => {
+                        if (summary.due > 0) {
+                            console.log(
+                                `[GrowthCredentialAudit] due=${summary.due} refreshed=${summary.refreshed} ` +
+                                `unchanged=${summary.unchanged} failed=${summary.failed} revoked=${summary.revoked}`,
+                            );
+                        }
+                    })
+                    .catch((err: unknown) => console.error('[GrowthCredentialAudit] Error:', err));
                 await runAllMonitoringChecks().catch((err: unknown) => console.error('[Monitoring] Error:', err));
                 lastSchedulerCheck = now;
             }

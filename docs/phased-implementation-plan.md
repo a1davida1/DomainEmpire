@@ -10,6 +10,7 @@ Build a reliable domain pipeline that can:
 4. Scale quickly once quality and ROI guardrails are proven.
 
 This plan intentionally starts small, validates economics, then scales.
+Assumption: ebook authoring is external; app scope is ingesting/linking KDP assets and attribution, not generating full manuscripts in-app.
 
 ---
 
@@ -23,6 +24,40 @@ This plan intentionally starts small, validates economics, then scales.
 6. Lead capture and subscriber tracking (`src/app/api/capture/route.ts`, `src/lib/subscribers/index.ts`).
 7. PDF generation primitives that can be reused in KDP pipeline (`src/lib/pdf/generator.ts`).
 8. Research cache fallback for offline/degraded research queries (`cachedKnowledgeBase` — see Phase 1 spec).
+
+---
+
+## Implementation Status (2026-02-14)
+
+1. `Phase 0` mostly complete:
+   - feature flags implemented (`acquisition_underwriting_v1`, `preview_gate_v1`, `growth_channels_v1`, `kdp_generator_v1`)
+   - queue failure categorization + retry paths wired in worker
+2. `Phase 1` complete for MVP scope:
+   - acquisition ingestion/enrichment/scoring/bid-plan job chain is implemented
+   - underwriting outputs and event logging are persisted
+   - research cache (`research_cache`) and refresh job path are implemented
+3. `Phase 2` partial:
+   - `review_tasks` + preview enforcement exists for domain buying
+   - auto-action constraints for review tasks are implemented in schema + API validation
+4. `Phase 3` in progress:
+   - growth schema foundation implemented: `promotion_campaigns`, `promotion_jobs`, `promotion_events`, `media_assets`, `media_asset_usage`
+   - growth worker jobs implemented: `create_promotion_plan`, `generate_short_script`, `render_short_video`, `publish_pinterest_pin`, `publish_youtube_short`, `sync_campaign_metrics`
+   - growth API implemented: `GET/POST /api/growth/campaigns`, `POST /api/growth/campaigns/[id]/launch`
+   - campaign launch review gate implemented (`campaign_launch` review task required when `preview_gate_v1` is enabled)
+   - attribution foundation implemented: `click_events` table, subscriber source linkage, `POST /api/growth/click-events`, UTM ingestion on `/api/capture`
+   - media vault API implemented: `GET/POST /api/growth/media-assets`, `PATCH/DELETE /api/growth/media-assets/[id]`, `POST /api/growth/media-assets/[id]/usage`
+   - channel publish adapter layer implemented with mock/live switch (`GROWTH_PUBLISH_MOCK`), worker integration, and live API call paths for Pinterest/YouTube
+   - encrypted credential vault implemented for growth channels (`growth_channel_credentials`, `GET/PUT/DELETE /api/growth/channel-credentials`)
+   - credential refresh automation implemented: auto-refresh on publish for expiring tokens + manual refresh endpoint (`POST /api/growth/channel-credentials`) + warning alerts on refresh failure
+   - reconnect drill path implemented (`POST /api/growth/channel-credentials/reconnect`) and credential rotation runbook added (`docs/ops/growth-credential-rotation-runbook.md`)
+   - policy preflight baseline implemented in publish path (HTTPS destination enforcement, banned-term blocking, hashtag guardrails, punctuation normalization including no em dashes)
+   - worker publish path now resolves per-user stored credentials (with env fallback) via `launchedBy` propagation across growth jobs
+   - guardrails implemented in worker: daily caps, duplicate creative suppression, per-domain cooldown, campaign metrics sync
+
+Open gaps for Phase 3 exit:
+1. Credential lifecycle completion: execute and validate rotation/reconnect drill in staging with incident checklist.
+2. Platform policy compliance tuning for live publishing (expand beyond baseline preflight with channel policy packs + audit dashboard).
+3. Media file ingestion/storage provider integration (S3/R2/local) and reviewer-facing vault UI.
 
 ---
 
@@ -580,4 +615,3 @@ The `subscribers` table stores PII (email, name, phone, ip_address, user_agent, 
 4. Channel campaigns produce >= 50 attributable leads/month with CAC < $20; measured by campaign attribution within 30-day window.
 5. KDP pipeline produces >= 2 complete packages per month with < 20% manual intervention; measured by `kdp_completion_rate`.
 6. System handles >= 50 domains with queue lag < 1h and error rate < 2%; measured by `queue_lag_p99` and `error_rate` dashboards.
-

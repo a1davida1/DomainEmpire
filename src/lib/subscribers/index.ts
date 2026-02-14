@@ -18,6 +18,9 @@ interface CaptureInput {
     ipAddress?: string;
     userAgent?: string;
     referrer?: string;
+    sourceCampaignId?: string;
+    sourceClickId?: string;
+    originalUtm?: Record<string, string>;
 }
 
 /**
@@ -48,6 +51,9 @@ export async function captureSubscriber(input: CaptureInput) {
         name: input.name || null,
         phone: input.phone || null,
         source: input.source || 'lead_form',
+        sourceCampaignId: input.sourceCampaignId || null,
+        sourceClickId: input.sourceClickId || null,
+        originalUtm: input.originalUtm || {},
         formData: input.formData || {},
         articleId: input.articleId || null,
         estimatedValue,
@@ -66,6 +72,9 @@ export async function captureSubscriber(input: CaptureInput) {
                 name: sql`COALESCE(${record.name}, ${subscribers.name})`,
                 phone: sql`COALESCE(${record.phone}, ${subscribers.phone})`,
                 formData: sql`${subscribers.formData} || ${JSON.stringify(record.formData)}::jsonb`,
+                sourceCampaignId: sql`COALESCE(${record.sourceCampaignId}, ${subscribers.sourceCampaignId})`,
+                sourceClickId: sql`COALESCE(${record.sourceClickId}, ${subscribers.sourceClickId})`,
+                originalUtm: sql`${subscribers.originalUtm} || ${JSON.stringify(record.originalUtm)}::jsonb`,
                 updatedAt: new Date(),
             },
         })

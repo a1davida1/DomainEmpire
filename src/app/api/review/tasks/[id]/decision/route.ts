@@ -18,6 +18,9 @@ export async function POST(
     const authError = await requireRole(request, 'reviewer');
     if (authError) return authError;
     const user = getRequestUser(request);
+    if (!user) {
+        return NextResponse.json({ error: 'Unable to identify user' }, { status: 401 });
+    }
     const { id } = await params;
 
     try {

@@ -24,6 +24,7 @@ import { scoreBrandQuality, type BrandSignal } from './brand-scorer';
 import { detectNiche, getNicheProfile, estimateRevenue, detectSubNiche, type NicheProfile } from './niche-data';
 import { keywordSerpPrompt, marketAnalysisPrompt, investmentThesisPrompt } from './prompts';
 import { getAIClient } from '@/lib/ai/openrouter';
+import { generateResearchWithCache } from '@/lib/ai/research-cache';
 import { db, domains, domainResearch, apiCallLogs, revenueSnapshots } from '@/lib/db';
 import { eq, and, gte, sql } from 'drizzle-orm';
 import { checkDomainAvailability } from '@/lib/deploy/godaddy';
@@ -267,10 +268,84 @@ export async function evaluateDomain(
     let keywordData: KeywordSerpResponse | null = null;
     let marketData: MarketAnalysisResponse | null = null;
 
+    const emptyKeywordResearch: KeywordSerpResponse = {
+        primaryKeyword: {
+            keyword: '',
+            monthlyVolume: 0,
+            cpc: 0,
+            difficulty: 0,
+        },
+        longTailKeywords: [],
+        serpAnalysis: {
+            weakCompetitorsInTop10: 0,
+            featuredSnippetAvailable: false,
+            forumResultsPresent: false,
+            avgTopResultWordCount: 0,
+            contentGaps: [],
+        },
+        keywordOpportunityScore: 0,
+        reasoning: '',
+    };
+
+    const emptyMarketResearch: MarketAnalysisResponse = {
+        market: {
+            sizeEstimate: '',
+            trend: 'stable',
+            trendReasoning: '',
+            recentDevelopments: [],
+        },
+        monetization: {
+            bestAdNetwork: '',
+            estimatedRpm: [0, 0],
+            topAffiliatePrograms: [],
+            leadGenViable: false,
+            leadGenValueRange: [0, 0],
+            additionalRevenueSources: [],
+        },
+        risks: {
+            ymylSeverity: 'none',
+            regulatoryRisks: [],
+            trademarkConcern: false,
+            trademarkNotes: '',
+            seasonalityScore: 0,
+            aiContentRisk: 'medium',
+        },
+        comparableSales: {
+            recentSales: [],
+            estimatedMarketValue: [0, 0],
+        },
+        marketScore: 0,
+        reasoning: '',
+    };
+
     // Parallel: keyword/SERP + market
     const [keywordOutcome, marketOutcome] = await Promise.all([
-        safeAICall(() => ai.generateJSON<KeywordSerpResponse>('research', keywordSerpPrompt(domain, detectedNiche))),
-        safeAICall(() => ai.generateJSON<MarketAnalysisResponse>('research', marketAnalysisPrompt(domain, detectedNiche))),
+        safeAICall(async () => {
+            const response = await generateResearchWithCache<KeywordSerpResponse>({
+                queryText: `keyword-serp:${domain}:${detectedNiche}`,
+                prompt: keywordSerpPrompt(domain, detectedNiche),
+                domainPriority: 3,
+                emptyResult: emptyKeywordResearch,
+                queueRefreshOnMiss: true,
+            });
+            if (response.cacheStatus === 'miss' && response.model === 'cachedKnowledgeBase' && response.fallbackUsed) {
+                throw new Error('Keyword research unavailable: cache miss and external provider failure');
+            }
+            return response;
+        }),
+        safeAICall(async () => {
+            const response = await generateResearchWithCache<MarketAnalysisResponse>({
+                queryText: `market-analysis:${domain}:${detectedNiche}`,
+                prompt: marketAnalysisPrompt(domain, detectedNiche),
+                domainPriority: 3,
+                emptyResult: emptyMarketResearch,
+                queueRefreshOnMiss: true,
+            });
+            if (response.cacheStatus === 'miss' && response.model === 'cachedKnowledgeBase' && response.fallbackUsed) {
+                throw new Error('Market research unavailable: cache miss and external provider failure');
+            }
+            return response;
+        }),
     ]);
 
     if (keywordOutcome.success) {
@@ -417,13 +492,32 @@ async function safeAICall<T>(fn: () => Promise<T>): Promise<SafeResult<T>> {
     }
 }
 
-async function logApiCall(stage: string, result: { model: string; inputTokens: number; outputTokens: number; cost: number; durationMs: number }): Promise<void> {
+async function logApiCall(
+    stage: string,
+    result: {
+        model: string;
+        modelKey?: string;
+        resolvedModel?: string;
+        promptVersion?: string;
+        routingVersion?: string;
+        fallbackUsed?: boolean;
+        inputTokens: number;
+        outputTokens: number;
+        cost: number;
+        durationMs: number;
+    },
+): Promise<void> {
     await db.insert(apiCallLogs).values({
         stage: stage as 'evaluate',
+        modelKey: result.modelKey || 'legacy',
         model: result.model,
+        resolvedModel: result.resolvedModel || result.model,
+        promptVersion: result.promptVersion || 'legacy.v1',
+        routingVersion: result.routingVersion || 'legacy',
+        fallbackUsed: result.fallbackUsed === true,
         inputTokens: result.inputTokens,
         outputTokens: result.outputTokens,
-        cost: result.cost,
+        cost: result.cost.toFixed(4),
         durationMs: result.durationMs,
     }).catch(() => { }); // Don't fail on log error
 }

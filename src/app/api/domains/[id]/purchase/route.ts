@@ -4,6 +4,7 @@ import { checkAvailability, purchaseDomain } from '@/lib/domain/purchase';
 import { db, acquisitionEvents, domainResearch, reviewTasks } from '@/lib/db';
 import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
+import { isFeatureEnabled } from '@/lib/feature-flags';
 
 const checkSchema = z.object({
     domain: z.string().min(3).max(253),
@@ -162,7 +163,8 @@ export async function POST(
             .orderBy(desc(reviewTasks.reviewedAt))
             .limit(1);
 
-        if (!approvedReviewTask && !wantsOverride) {
+        const previewGateEnabled = isFeatureEnabled('preview_gate_v1', { userId: user.id });
+        if (previewGateEnabled && !approvedReviewTask && !wantsOverride) {
             return NextResponse.json({
                 error: 'Purchase blocked: domain_buy review task is not approved',
                 recommendation: {

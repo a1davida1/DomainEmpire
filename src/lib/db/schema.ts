@@ -357,7 +357,12 @@ export const contentQueue = pgTable('content_queue', {
             'fetch_gsc', 'check_backlinks', 'check_renewals',
             'check_datasets',
             // Acquisition underwriting pipeline
-            'ingest_listings', 'enrich_candidate', 'score_candidate', 'create_bid_plan'
+            'ingest_listings', 'enrich_candidate', 'score_candidate', 'create_bid_plan',
+            // Research cache maintenance
+            'refresh_research_cache',
+            // Growth channel pipeline
+            'create_promotion_plan', 'generate_short_script', 'render_short_video',
+            'publish_pinterest_pin', 'publish_youtube_short', 'sync_campaign_metrics'
         ]
     }).notNull(),
 
@@ -411,8 +416,8 @@ export const domainResearch = pgTable('domain_research', {
     listingSource: text('listing_source'), // godaddy_auctions | namejet | dropcatch | dynadot | handreg
     listingId: text('listing_id'),
     listingType: text('listing_type'), // auction | closeout | pending_delete | buy_now
-    currentBid: numeric('current_bid', { precision: 18, scale: 2 }),
-    buyNowPrice: numeric('buy_now_price', { precision: 18, scale: 2 }),
+    currentBid: numeric('current_bid', { precision: 18, scale: 2, mode: 'number' }),
+    buyNowPrice: numeric('buy_now_price', { precision: 18, scale: 2, mode: 'number' }),
     auctionEndsAt: timestamp('auction_ends_at'),
 
     // Availability
@@ -424,7 +429,7 @@ export const domainResearch = pgTable('domain_research', {
     keywordVolume: integer('keyword_volume'),
     keywordCpc: numeric('keyword_cpc', { precision: 12, scale: 2 }),
     estimatedRevenuePotential: numeric('estimated_revenue_potential', { precision: 12, scale: 2 }),
-    domainScore: numeric('domain_score', { precision: 5, scale: 2 }),
+    domainScore: numeric('domain_score', { precision: 5, scale: 2, mode: 'number' }),
     demandScore: real('demand_score'),
     compsScore: real('comps_score'),
     tmRiskScore: real('tm_risk_score'),
@@ -432,11 +437,11 @@ export const domainResearch = pgTable('domain_research', {
     backlinkRiskScore: real('backlink_risk_score'),
 
     // Underwriting economics
-    compLow: numeric('comp_low', { precision: 18, scale: 2 }),
-    compHigh: numeric('comp_high', { precision: 18, scale: 2 }),
-    recommendedMaxBid: numeric('recommended_max_bid', { precision: 18, scale: 2 }),
-    expected12mRevenueLow: numeric('expected_12m_revenue_low', { precision: 18, scale: 2 }),
-    expected12mRevenueHigh: numeric('expected_12m_revenue_high', { precision: 18, scale: 2 }),
+    compLow: numeric('comp_low', { precision: 18, scale: 2, mode: 'number' }),
+    compHigh: numeric('comp_high', { precision: 18, scale: 2, mode: 'number' }),
+    recommendedMaxBid: numeric('recommended_max_bid', { precision: 18, scale: 2, mode: 'number' }),
+    expected12mRevenueLow: numeric('expected_12m_revenue_low', { precision: 18, scale: 2, mode: 'number' }),
+    expected12mRevenueHigh: numeric('expected_12m_revenue_high', { precision: 18, scale: 2, mode: 'number' }),
     confidenceScore: real('confidence_score'),
     hardFailReason: text('hard_fail_reason'),
     underwritingVersion: text('underwriting_version'),
@@ -477,6 +482,133 @@ export const acquisitionEvents = pgTable('acquisition_events', {
     domainResearchIdx: index('acquisition_events_domain_research_idx').on(t.domainResearchId),
     eventTypeIdx: index('acquisition_events_event_type_idx').on(t.eventType),
     createdIdx: index('acquisition_events_created_idx').on(t.createdAt),
+}));
+
+// ===========================================
+// RESEARCH CACHE: Local fallback for online research jobs
+// ===========================================
+export const researchCache = pgTable('research_cache', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    queryHash: text('query_hash').notNull(),
+    queryText: text('query_text').notNull(),
+    resultJson: jsonb('result_json').default({}).notNull(),
+    sourceModel: text('source_model'),
+    fetchedAt: timestamp('fetched_at').defaultNow().notNull(),
+    expiresAt: timestamp('expires_at').notNull(),
+    domainPriority: integer('domain_priority').default(0).notNull(),
+}, (t) => ({
+    queryHashUidx: uniqueIndex('research_cache_query_hash_uidx').on(t.queryHash),
+    fetchedIdx: index('research_cache_fetched_idx').on(t.fetchedAt),
+    expiresIdx: index('research_cache_expires_idx').on(t.expiresAt),
+    domainPriorityIdx: index('research_cache_domain_priority_idx').on(t.domainPriority),
+}));
+
+// ===========================================
+// PROMOTION CAMPAIGNS: Growth channel orchestration
+// ===========================================
+export const promotionCampaigns = pgTable('promotion_campaigns', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    domainResearchId: uuid('domain_research_id').notNull().references(() => domainResearch.id, { onDelete: 'cascade' }),
+    channels: jsonb('channels').$type<string[]>().default([]).notNull(), // e.g. ["pinterest", "youtube_shorts"]
+    budget: real('budget').default(0).notNull(),
+    status: text('status', {
+        enum: ['draft', 'active', 'paused', 'completed', 'cancelled'],
+    }).default('draft').notNull(),
+    dailyCap: integer('daily_cap').default(0).notNull(),
+    metrics: jsonb('metrics').default({}).notNull(),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+}, (t) => ({
+    domainResearchIdx: index('promotion_campaign_domain_research_idx').on(t.domainResearchId),
+    statusIdx: index('promotion_campaign_status_idx').on(t.status),
+    createdIdx: index('promotion_campaign_created_idx').on(t.createdAt),
+}));
+
+export const promotionJobs = pgTable('promotion_jobs', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    campaignId: uuid('campaign_id').notNull().references(() => promotionCampaigns.id, { onDelete: 'cascade' }),
+    jobType: text('job_type').notNull(), // e.g. generate_short_script, publish_pin
+    status: text('status', {
+        enum: ['pending', 'running', 'completed', 'failed', 'cancelled'],
+    }).default('pending').notNull(),
+    payload: jsonb('payload').default({}).notNull(),
+    errorMessage: text('error_message'),
+    createdAt: timestamp('created_at').defaultNow(),
+    startedAt: timestamp('started_at'),
+    completedAt: timestamp('completed_at'),
+}, (t) => ({
+    campaignIdx: index('promotion_job_campaign_idx').on(t.campaignId),
+    statusIdx: index('promotion_job_status_idx').on(t.status),
+    createdIdx: index('promotion_job_created_idx').on(t.createdAt),
+}));
+
+export const promotionEvents = pgTable('promotion_events', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    campaignId: uuid('campaign_id').notNull().references(() => promotionCampaigns.id, { onDelete: 'cascade' }),
+    eventType: text('event_type').notNull(), // impression, click, lead, conversion
+    occurredAt: timestamp('occurred_at').defaultNow().notNull(),
+    attributes: jsonb('attributes').default({}).notNull(),
+}, (t) => ({
+    campaignIdx: index('promotion_event_campaign_idx').on(t.campaignId),
+    typeIdx: index('promotion_event_type_idx').on(t.eventType),
+    occurredIdx: index('promotion_event_occurred_idx').on(t.occurredAt),
+}));
+
+export const growthChannelCredentials = pgTable('growth_channel_credentials', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    channel: text('channel', {
+        enum: ['pinterest', 'youtube_shorts'],
+    }).notNull(),
+    encryptedAccessToken: text('encrypted_access_token').notNull(),
+    encryptedRefreshToken: text('encrypted_refresh_token'),
+    accessTokenExpiresAt: timestamp('access_token_expires_at'),
+    refreshTokenExpiresAt: timestamp('refresh_token_expires_at'),
+    scopes: jsonb('scopes').$type<string[]>().default([]).notNull(),
+    providerAccountId: text('provider_account_id'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}).notNull(),
+    lastValidatedAt: timestamp('last_validated_at'),
+    lastRefreshAt: timestamp('last_refresh_at'),
+    revokedAt: timestamp('revoked_at'),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+}, (t) => ({
+    userChannelUidx: uniqueIndex('growth_credential_user_channel_uidx').on(t.userId, t.channel),
+    userIdx: index('growth_credential_user_idx').on(t.userId),
+    channelIdx: index('growth_credential_channel_idx').on(t.channel),
+    expiresIdx: index('growth_credential_access_expires_idx').on(t.accessTokenExpiresAt),
+    revokedIdx: index('growth_credential_revoked_idx').on(t.revokedAt),
+}));
+
+export const mediaAssets = pgTable('media_assets', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    type: text('type', {
+        enum: ['image', 'video', 'script', 'voiceover'],
+    }).notNull(),
+    url: text('url').notNull(),
+    folder: text('folder').default('inbox').notNull(),
+    tags: jsonb('tags').$type<string[]>().default([]).notNull(),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}).notNull(),
+    usageCount: integer('usage_count').default(0).notNull(),
+    createdAt: timestamp('created_at').defaultNow(),
+}, (t) => ({
+    typeIdx: index('media_asset_type_idx').on(t.type),
+    folderIdx: index('media_asset_folder_idx').on(t.folder),
+    usageCountIdx: index('media_asset_usage_count_idx').on(t.usageCount),
+    createdIdx: index('media_asset_created_idx').on(t.createdAt),
+}));
+
+export const mediaAssetUsage = pgTable('media_asset_usage', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    assetId: uuid('asset_id').notNull().references(() => mediaAssets.id, { onDelete: 'cascade' }),
+    campaignId: uuid('campaign_id').notNull().references(() => promotionCampaigns.id, { onDelete: 'cascade' }),
+    jobId: uuid('job_id').references(() => promotionJobs.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at').defaultNow(),
+}, (t) => ({
+    assetIdx: index('media_asset_usage_asset_idx').on(t.assetId),
+    campaignIdx: index('media_asset_usage_campaign_idx').on(t.campaignId),
+    jobIdx: index('media_asset_usage_job_idx').on(t.jobId),
+    createdIdx: index('media_asset_usage_created_idx').on(t.createdAt),
 }));
 
 // ===========================================
@@ -545,7 +677,12 @@ export const apiCallLogs = pgTable('api_call_logs', {
     stage: text('stage', {
         enum: ['keyword_research', 'outline', 'draft', 'humanize', 'seo', 'meta', 'classify', 'research', 'evaluate']
     }).notNull(),
+    modelKey: text('model_key').notNull().default('legacy'),
     model: text('model').notNull(),
+    resolvedModel: text('resolved_model').notNull().default('legacy'),
+    promptVersion: text('prompt_version').notNull().default('legacy.v1'),
+    routingVersion: text('routing_version').notNull().default('legacy'),
+    fallbackUsed: boolean('fallback_used').notNull().default(false),
     inputTokens: integer('input_tokens').notNull(),
     outputTokens: integer('output_tokens').notNull(),
     cost: numeric('cost', { precision: 12, scale: 4 }).notNull(),
@@ -856,6 +993,10 @@ export const reviewTasks = pgTable('review_tasks', {
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow(),
 }, (t) => ({
+    autoActionCheck: check(
+        'review_tasks_auto_action_check',
+        sql`${t.autoApproveAfterHours} IS NULL OR ${t.autoRejectAfterHours} IS NULL`,
+    ),
     taskTypeIdx: index('review_task_type_idx').on(t.taskType),
     taskStatusIdx: index('review_task_status_idx').on(t.status),
     entityIdx: index('review_task_entity_idx').on(t.entityId),
@@ -1018,6 +1159,31 @@ export const articleDatasets = pgTable('article_datasets', {
 }));
 
 // ===========================================
+// CLICK EVENTS: Campaign click attribution
+// ===========================================
+export const clickEvents = pgTable('click_events', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    campaignId: uuid('campaign_id').references(() => promotionCampaigns.id, { onDelete: 'set null' }),
+    occurredAt: timestamp('occurred_at').defaultNow().notNull(),
+    visitorId: text('visitor_id'),
+    fullUrl: text('full_url').notNull(),
+    utmSource: text('utm_source'),
+    utmMedium: text('utm_medium'),
+    utmCampaign: text('utm_campaign'),
+    utmTerm: text('utm_term'),
+    utmContent: text('utm_content'),
+    referrer: text('referrer'),
+    userAgent: text('user_agent'),
+    ipHash: text('ip_hash'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => ({
+    campaignIdx: index('click_event_campaign_idx').on(t.campaignId),
+    occurredIdx: index('click_event_occurred_idx').on(t.occurredAt),
+    visitorIdx: index('click_event_visitor_idx').on(t.visitorId),
+    utmCampaignIdx: index('click_event_utm_campaign_idx').on(t.utmCampaign),
+}));
+
+// ===========================================
 // SUBSCRIBERS: Email captures from deployed sites
 // ===========================================
 export const subscribers = pgTable('subscribers', {
@@ -1034,6 +1200,9 @@ export const subscribers = pgTable('subscribers', {
     source: text('source', {
         enum: ['lead_form', 'newsletter', 'wizard', 'popup', 'scroll_cta']
     }).notNull().default('lead_form'),
+    sourceCampaignId: uuid('source_campaign_id').references(() => promotionCampaigns.id, { onDelete: 'set null' }),
+    sourceClickId: uuid('source_click_id').references(() => clickEvents.id, { onDelete: 'set null' }),
+    originalUtm: jsonb('original_utm').$type<Record<string, string>>().default({}),
 
     // Custom form data (arbitrary fields from leadGenConfig)
     formData: jsonb('form_data').$type<Record<string, string>>().default({}),
@@ -1059,6 +1228,8 @@ export const subscribers = pgTable('subscribers', {
     emailIdx: index('subscriber_email_idx').on(t.email),
     sourceIdx: index('subscriber_source_idx').on(t.source),
     statusIdx: index('subscriber_status_idx').on(t.status),
+    sourceCampaignIdx: index('subscriber_source_campaign_idx').on(t.sourceCampaignId),
+    sourceClickIdx: index('subscriber_source_click_idx').on(t.sourceClickId),
     domainEmailUnq: unique('subscriber_domain_email_unq').on(t.domainId, t.email),
 }));
 
@@ -1220,6 +1391,7 @@ export const usersRelations = relations(users, ({ many }) => ({
     reviewedTasks: many(reviewTasks, { relationName: 'review_task_reviewer' }),
     backupReviewTasks: many(reviewTasks, { relationName: 'review_task_backup_reviewer' }),
     createdPreviewBuilds: many(previewBuilds, { relationName: 'preview_build_creator' }),
+    growthChannelCredentials: many(growthChannelCredentials),
 }));
 
 export const sessionsRelations = relations(sessions, ({ one }) => ({
@@ -1388,6 +1560,14 @@ export const articleDatasetsRelations = relations(articleDatasets, ({ one }) => 
     }),
 }));
 
+export const clickEventsRelations = relations(clickEvents, ({ one, many }) => ({
+    campaign: one(promotionCampaigns, {
+        fields: [clickEvents.campaignId],
+        references: [promotionCampaigns.id],
+    }),
+    subscribers: many(subscribers),
+}));
+
 export const subscribersRelations = relations(subscribers, ({ one }) => ({
     domain: one(domains, {
         fields: [subscribers.domainId],
@@ -1396,6 +1576,21 @@ export const subscribersRelations = relations(subscribers, ({ one }) => ({
     article: one(articles, {
         fields: [subscribers.articleId],
         references: [articles.id],
+    }),
+    sourceCampaign: one(promotionCampaigns, {
+        fields: [subscribers.sourceCampaignId],
+        references: [promotionCampaigns.id],
+    }),
+    sourceClick: one(clickEvents, {
+        fields: [subscribers.sourceClickId],
+        references: [clickEvents.id],
+    }),
+}));
+
+export const growthChannelCredentialsRelations = relations(growthChannelCredentials, ({ one }) => ({
+    user: one(users, {
+        fields: [growthChannelCredentials.userId],
+        references: [users.id],
     }),
 }));
 
@@ -1426,6 +1621,13 @@ export type MonetizationProfile = typeof monetizationProfiles.$inferSelect;
 export type ContentQueueJob = typeof contentQueue.$inferSelect;
 export type DomainResearch = typeof domainResearch.$inferSelect;
 export type AcquisitionEvent = typeof acquisitionEvents.$inferSelect;
+export type ResearchCache = typeof researchCache.$inferSelect;
+export type PromotionCampaign = typeof promotionCampaigns.$inferSelect;
+export type PromotionJob = typeof promotionJobs.$inferSelect;
+export type PromotionEvent = typeof promotionEvents.$inferSelect;
+export type GrowthChannelCredential = typeof growthChannelCredentials.$inferSelect;
+export type MediaAsset = typeof mediaAssets.$inferSelect;
+export type MediaAssetUsage = typeof mediaAssetUsage.$inferSelect;
 export type RevenueSnapshot = typeof revenueSnapshots.$inferSelect;
 export type ApiCallLog = typeof apiCallLogs.$inferSelect;
 export type Expense = typeof expenses.$inferSelect;
@@ -1450,6 +1652,7 @@ export type Dataset = typeof datasets.$inferSelect;
 export type NewDataset = typeof datasets.$inferInsert;
 export type ArticleDataset = typeof articleDatasets.$inferSelect;
 export type NewArticleDataset = typeof articleDatasets.$inferInsert;
+export type ClickEvent = typeof clickEvents.$inferSelect;
 export type Subscriber = typeof subscribers.$inferSelect;
 export type NewSubscriber = typeof subscribers.$inferInsert;
 export type AbTest = typeof abTests.$inferSelect;

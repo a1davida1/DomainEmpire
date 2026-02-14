@@ -62,6 +62,9 @@ async function approveTaskAction(formData: FormData) {
     }
 
     const taskId = String(formData.get('taskId') || '');
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(taskId)) {
+        redirect('/dashboard/review/domain-buy?error=Invalid+task+ID');
+    }
     const notesInput = String(formData.get('reviewNotes') || '').trim();
     const reviewNotes = notesInput.length >= 8 ? notesInput : 'Approved from domain-buy review queue';
 
@@ -80,12 +83,12 @@ async function approveTaskAction(formData: FormData) {
                 role: user.role,
             },
         });
-        revalidatePath('/dashboard/review/domain-buy');
-        redirect('/dashboard/review/domain-buy?message=approved');
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to approve';
         redirect(`/dashboard/review/domain-buy?error=${encodeURIComponent(message)}`);
     }
+    revalidatePath('/dashboard/review/domain-buy');
+    redirect('/dashboard/review/domain-buy?message=approved');
 }
 
 async function rejectTaskAction(formData: FormData) {
@@ -99,6 +102,9 @@ async function rejectTaskAction(formData: FormData) {
     }
 
     const taskId = String(formData.get('taskId') || '');
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(taskId)) {
+        redirect('/dashboard/review/domain-buy?error=Invalid+task+ID');
+    }
     const notesInput = String(formData.get('reviewNotes') || '').trim();
     const reviewNotes = notesInput.length >= 8 ? notesInput : 'Rejected from domain-buy review queue';
 
@@ -112,12 +118,12 @@ async function rejectTaskAction(formData: FormData) {
                 role: user.role,
             },
         });
-        revalidatePath('/dashboard/review/domain-buy');
-        redirect('/dashboard/review/domain-buy?message=rejected');
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to reject';
         redirect(`/dashboard/review/domain-buy?error=${encodeURIComponent(message)}`);
     }
+    revalidatePath('/dashboard/review/domain-buy');
+    redirect('/dashboard/review/domain-buy?message=rejected');
 }
 
 export default async function DomainBuyReviewPage({
@@ -304,7 +310,7 @@ export default async function DomainBuyReviewPage({
 
                                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                                     <div className="text-xs text-muted-foreground">
-                                        Preview: {preview?.buildStatus || 'ready'}
+                                        Preview: {preview ? preview.buildStatus : 'none'}
                                         {preview?.expiresAt ? ` | Expires ${new Date(preview.expiresAt).toLocaleString()}` : ''}
                                     </div>
                                     <div className="flex flex-wrap gap-2">

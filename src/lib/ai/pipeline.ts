@@ -19,6 +19,7 @@ import { createRevision } from '@/lib/audit/revisions';
 import { classifyYmylLevel } from '@/lib/review/ymyl';
 import { calculatorConfigSchema, comparisonDataSchema } from '@/lib/validation/articles';
 import { enqueueContentJob } from '@/lib/queue/content-queue';
+import { generateResearchWithCache } from '@/lib/ai/research-cache';
 
 // Helper to slugify string
 function slugify(text: string) {
@@ -28,6 +29,78 @@ function slugify(text: string) {
         .replaceAll(/-+/g, '-')            // Replace multiple - with single -
         .replaceAll(/^-+/, '')             // Trim - from start of text
         .replaceAll(/-+$/, '');            // Trim - from end of text
+}
+
+type AiReviewerVerdict = 'approve' | 'reject';
+
+type AiReviewEvaluation = {
+    verdict: AiReviewerVerdict;
+    confidence: number;
+    requiresHumanReview: boolean;
+    failures: string[];
+    summary: string;
+};
+
+type AiReviewEvaluationWithUsage = AiReviewEvaluation & {
+    modelKey: string;
+    model: string;
+    resolvedModel: string;
+    promptVersion: string;
+    routingVersion: string;
+    fallbackUsed: boolean;
+    inputTokens: number;
+    outputTokens: number;
+    cost: number;
+    durationMs: number;
+};
+
+const DEFAULT_OPUS_REVIEW_MODEL = process.env.OPENROUTER_OPUS_REVIEW_MODEL || 'anthropic/claude-opus-4.1';
+
+function isAiReviewFallbackEnabled(): boolean {
+    return process.env.AI_REVIEW_FALLBACK_ENABLED === 'true';
+}
+
+function stripEmDashes(content: string): { content: string; changed: boolean } {
+    const sanitized = content.replace(/\u2014/g, ' - ');
+    return {
+        content: sanitized,
+        changed: sanitized !== content,
+    };
+}
+
+async function evaluateWithAiReviewer(opts: {
+    ai: ReturnType<typeof getAIClient>;
+    contentMarkdown: string;
+    keyword: string;
+    title: string;
+}): Promise<AiReviewEvaluationWithUsage> {
+    const response = await opts.ai.generateJSON<AiReviewEvaluation>(
+        'humanization',
+        PROMPTS.aiReview(opts.contentMarkdown, opts.keyword, opts.title),
+        {
+            model: DEFAULT_OPUS_REVIEW_MODEL,
+            temperature: 0.1,
+            maxTokens: 1200,
+        },
+    );
+
+    return {
+        verdict: response.data.verdict === 'approve' ? 'approve' : 'reject',
+        confidence: typeof response.data.confidence === 'number' ? response.data.confidence : 0,
+        requiresHumanReview: response.data.requiresHumanReview !== false,
+        failures: Array.isArray(response.data.failures) ? response.data.failures : [],
+        summary: response.data.summary || '',
+        modelKey: response.modelKey,
+        model: response.model,
+        resolvedModel: response.resolvedModel,
+        promptVersion: response.promptVersion,
+        routingVersion: response.routingVersion,
+        fallbackUsed: response.fallbackUsed,
+        inputTokens: response.inputTokens,
+        outputTokens: response.outputTokens,
+        cost: response.cost,
+        durationMs: response.durationMs,
+    };
 }
 
 // Content type enum values matching schema
@@ -192,7 +265,12 @@ Respond with JSON:
     await db.insert(apiCallLogs).values({
         articleId: job.articleId,
         stage: 'outline',
+        modelKey: response.modelKey,
         model: response.model,
+        resolvedModel: response.resolvedModel,
+        promptVersion: response.promptVersion,
+        routingVersion: response.routingVersion,
+        fallbackUsed: response.fallbackUsed,
         inputTokens: response.inputTokens,
         outputTokens: response.outputTokens,
         cost: response.cost.toFixed(4),
@@ -314,7 +392,12 @@ export async function processDraftJob(jobId: string): Promise<void> {
     await db.insert(apiCallLogs).values({
         articleId: job.articleId,
         stage: 'draft',
+        modelKey: response.modelKey,
         model: response.model,
+        resolvedModel: response.resolvedModel,
+        promptVersion: response.promptVersion,
+        routingVersion: response.routingVersion,
+        fallbackUsed: response.fallbackUsed,
         inputTokens: response.inputTokens,
         outputTokens: response.outputTokens,
         cost: response.cost.toFixed(4),
@@ -322,14 +405,15 @@ export async function processDraftJob(jobId: string): Promise<void> {
         domainId: job.domainId,
     });
 
-    const wordCount = response.content.split(/\s+/).filter(Boolean).length;
+    const sanitizedDraft = stripEmDashes(response.content).content;
+    const wordCount = sanitizedDraft.split(/\s+/).filter(Boolean).length;
     if (wordCount < 100 && contentType !== 'calculator') {
         throw new Error(`AI generated suspiciously short content (${wordCount} words). This usually indicates an error or refusal.`);
     }
 
     // Update article
     await db.update(articles).set({
-        contentMarkdown: response.content,
+        contentMarkdown: sanitizedDraft,
         wordCount,
         generationPasses: 1,
     }).where(eq(articles.id, job.articleId!));
@@ -337,7 +421,7 @@ export async function processDraftJob(jobId: string): Promise<void> {
     await createRevision({
         articleId: job.articleId!,
         title: article.title,
-        contentMarkdown: response.content,
+        contentMarkdown: sanitizedDraft,
         metaDescription: article.metaDescription,
         changeType: 'ai_generated',
         changeSummary: `Draft generated (${wordCount} words)`,
@@ -392,7 +476,12 @@ export async function processHumanizeJob(jobId: string): Promise<void> {
     await db.insert(apiCallLogs).values({
         articleId: job.articleId,
         stage: 'humanize',
+        modelKey: response.modelKey,
         model: response.model,
+        resolvedModel: response.resolvedModel,
+        promptVersion: response.promptVersion,
+        routingVersion: response.routingVersion,
+        fallbackUsed: response.fallbackUsed,
         inputTokens: response.inputTokens,
         outputTokens: response.outputTokens,
         cost: response.cost.toFixed(4),
@@ -400,10 +489,11 @@ export async function processHumanizeJob(jobId: string): Promise<void> {
         domainId: job.domainId,
     });
 
-    const wordCount = response.content.split(/\s+/).filter(Boolean).length;
+    const sanitizedHumanized = stripEmDashes(response.content).content;
+    const wordCount = sanitizedHumanized.split(/\s+/).filter(Boolean).length;
 
     await db.update(articles).set({
-        contentMarkdown: response.content,
+        contentMarkdown: sanitizedHumanized,
         wordCount,
         generationPasses: 2,
     }).where(eq(articles.id, job.articleId!));
@@ -411,7 +501,7 @@ export async function processHumanizeJob(jobId: string): Promise<void> {
     await createRevision({
         articleId: job.articleId!,
         title: articleRecord[0]?.title || null,
-        contentMarkdown: response.content,
+        contentMarkdown: sanitizedHumanized,
         metaDescription: articleRecord[0]?.metaDescription || null,
         changeType: 'ai_refined',
         changeSummary: `Humanized (${wordCount} words)`,
@@ -464,7 +554,12 @@ export async function processSeoOptimizeJob(jobId: string): Promise<void> {
     await db.insert(apiCallLogs).values({
         articleId: job.articleId,
         stage: 'seo',
+        modelKey: response.modelKey,
         model: response.model,
+        resolvedModel: response.resolvedModel,
+        promptVersion: response.promptVersion,
+        routingVersion: response.routingVersion,
+        fallbackUsed: response.fallbackUsed,
         inputTokens: response.inputTokens,
         outputTokens: response.outputTokens,
         cost: response.cost.toFixed(4),
@@ -472,10 +567,11 @@ export async function processSeoOptimizeJob(jobId: string): Promise<void> {
         domainId: job.domainId,
     });
 
-    const wordCount = response.content.split(/\s+/).filter(Boolean).length;
+    const sanitizedSeoContent = stripEmDashes(response.content).content;
+    const wordCount = sanitizedSeoContent.split(/\s+/).filter(Boolean).length;
 
     await db.update(articles).set({
-        contentMarkdown: response.content,
+        contentMarkdown: sanitizedSeoContent,
         wordCount,
         generationPasses: 3,
     }).where(eq(articles.id, job.articleId!));
@@ -483,7 +579,7 @@ export async function processSeoOptimizeJob(jobId: string): Promise<void> {
     await createRevision({
         articleId: job.articleId!,
         title: article.title,
-        contentMarkdown: response.content,
+        contentMarkdown: sanitizedSeoContent,
         metaDescription: article.metaDescription,
         changeType: 'ai_refined',
         changeSummary: `SEO optimized (${wordCount} words)`,
@@ -516,6 +612,7 @@ export async function processMetaJob(jobId: string): Promise<void> {
     const article = articleRecord[0];
 
     if (!article.contentMarkdown) throw new Error('Content not found for meta generation');
+    const normalizedContent = stripEmDashes(article.contentMarkdown).content;
 
     const response = await ai.generateJSON<{
         title: string;
@@ -526,13 +623,18 @@ export async function processMetaJob(jobId: string): Promise<void> {
         suggestedSlug: string;
     }>(
         'seoOptimize', // Meta uses Haiku or similar
-        PROMPTS.meta(article.contentMarkdown, article.targetKeyword || '')
+        PROMPTS.meta(normalizedContent, article.targetKeyword || '')
     );
 
     await db.insert(apiCallLogs).values({
         articleId: job.articleId,
         stage: 'meta',
+        modelKey: response.modelKey,
         model: response.model,
+        resolvedModel: response.resolvedModel,
+        promptVersion: response.promptVersion,
+        routingVersion: response.routingVersion,
+        fallbackUsed: response.fallbackUsed,
         inputTokens: response.inputTokens,
         outputTokens: response.outputTokens,
         cost: response.cost.toFixed(4),
@@ -550,56 +652,152 @@ export async function processMetaJob(jobId: string): Promise<void> {
     const ymylLevel = classifyYmylLevel({
         niche: domainForYmyl[0]?.niche,
         keyword: article.targetKeyword,
-        contentMarkdown: article.contentMarkdown,
+        contentMarkdown: normalizedContent,
     });
+
+    let aiReview: AiReviewEvaluationWithUsage | null = null;
+    let aiReviewFallbackError: string | null = null;
+
+    if (isAiReviewFallbackEnabled()) {
+        try {
+            aiReview = await evaluateWithAiReviewer({
+                ai,
+                contentMarkdown: normalizedContent,
+                keyword: article.targetKeyword || '',
+                title: response.data.title,
+            });
+
+            await db.insert(apiCallLogs).values({
+                articleId: job.articleId,
+                stage: 'classify',
+                modelKey: aiReview.modelKey,
+                model: aiReview.model,
+                resolvedModel: aiReview.resolvedModel,
+                promptVersion: aiReview.promptVersion,
+                routingVersion: aiReview.routingVersion,
+                fallbackUsed: aiReview.fallbackUsed,
+                inputTokens: aiReview.inputTokens,
+                outputTokens: aiReview.outputTokens,
+                cost: aiReview.cost.toFixed(4),
+                durationMs: aiReview.durationMs,
+                domainId: job.domainId,
+            });
+        } catch (error) {
+            aiReviewFallbackError = error instanceof Error ? error.message : 'AI reviewer unavailable';
+            console.error('AI reviewer fallback failed, routing to human review:', error);
+        }
+    }
+
+    const autoApprovedByAi = Boolean(
+        aiReview
+        && aiReview.verdict === 'approve'
+        && aiReview.requiresHumanReview === false
+        && aiReview.failures.length === 0,
+    );
+
+    const nextStatus = autoApprovedByAi ? 'approved' : 'review';
+    const nextGenerationPasses = aiReview ? 5 : 4;
+    const reviewTimestamp = new Date();
 
     await db.update(articles).set({
         title: response.data.title,
         metaDescription: response.data.metaDescription,
         slug: safeSlug,
-        status: 'review', // Ready for human review
-        generationPasses: 4,
+        contentMarkdown: normalizedContent,
+        status: nextStatus,
+        reviewRequestedAt: nextStatus === 'review' ? reviewTimestamp : null,
+        lastReviewedAt: nextStatus === 'approved' ? reviewTimestamp : null,
+        generationPasses: nextGenerationPasses,
         ymylLevel,
     }).where(eq(articles.id, job.articleId!));
+
+    const revisionSummary = autoApprovedByAi
+        ? 'Meta generated, approved by AI reviewer fallback (Opus)'
+        : aiReview
+            ? 'Meta generated, AI reviewer flagged for human review'
+            : 'Meta generated, moved to review';
 
     await createRevision({
         articleId: job.articleId!,
         title: response.data.title,
-        contentMarkdown: article.contentMarkdown,
+        contentMarkdown: normalizedContent,
         metaDescription: response.data.metaDescription,
         changeType: 'ai_refined',
-        changeSummary: 'Meta generated, moved to review',
+        changeSummary: revisionSummary,
     });
+
+    const queueResult = aiReview
+        ? {
+            ...response.data,
+            aiReview: {
+                verdict: aiReview.verdict,
+                confidence: aiReview.confidence,
+                requiresHumanReview: aiReview.requiresHumanReview,
+                failures: aiReview.failures,
+                summary: aiReview.summary,
+                model: aiReview.model,
+                modelKey: aiReview.modelKey,
+                resolvedModel: aiReview.resolvedModel,
+                promptVersion: aiReview.promptVersion,
+                routingVersion: aiReview.routingVersion,
+                fallbackUsed: aiReview.fallbackUsed,
+            },
+            aiReviewerFallbackError: aiReviewFallbackError,
+            finalStatus: nextStatus,
+        }
+        : {
+            ...response.data,
+            aiReviewerFallbackError: aiReviewFallbackError,
+            finalStatus: nextStatus,
+        };
 
     await db.update(contentQueue).set({
         status: 'completed',
         completedAt: new Date(),
-        result: response.data,
+        result: queueResult,
         apiTokensUsed: response.inputTokens + response.outputTokens,
         apiCost: response.cost.toFixed(2),
     }).where(eq(contentQueue.id, jobId));
 }
 
 export async function processResearchJob(jobId: string): Promise<void> {
-    const ai = getAIClient();
     const jobs = await db.select().from(contentQueue).where(eq(contentQueue.id, jobId)).limit(1);
     const job = jobs[0];
-    const payload = job.payload as { targetKeyword: string; domainName: string };
+    const payload = job.payload as {
+        targetKeyword: string;
+        domainName: string;
+        domainPriority?: number;
+    };
 
-    const response = await ai.generateJSON<{
+    const emptyResearch = {
+        statistics: [],
+        quotes: [],
+        competitorHooks: [],
+        recentDevelopments: [],
+    };
+
+    const response = await generateResearchWithCache<{
         statistics: Array<{ stat: string; source: string; date: string }>;
         quotes: Array<{ quote: string; author: string; source: string }>;
         competitorHooks: string[];
         recentDevelopments: string[];
-    }>(
-        'research',
-        PROMPTS.research(payload.targetKeyword, payload.domainName)
-    );
+    }>({
+        queryText: `${payload.targetKeyword} @ ${payload.domainName}`,
+        prompt: PROMPTS.research(payload.targetKeyword, payload.domainName),
+        domainPriority: typeof payload.domainPriority === 'number' ? payload.domainPriority : 0,
+        emptyResult: emptyResearch,
+        queueRefreshOnMiss: true,
+    });
 
     await db.insert(apiCallLogs).values({
         articleId: job.articleId,
         stage: 'research',
+        modelKey: response.modelKey,
         model: response.model,
+        resolvedModel: response.resolvedModel,
+        promptVersion: response.promptVersion,
+        routingVersion: response.routingVersion,
+        fallbackUsed: response.fallbackUsed,
         inputTokens: response.inputTokens,
         outputTokens: response.outputTokens,
         cost: response.cost.toFixed(4),
@@ -614,7 +812,11 @@ export async function processResearchJob(jobId: string): Promise<void> {
     await db.update(contentQueue).set({
         status: 'completed',
         completedAt: new Date(),
-        result: response.data,
+        result: {
+            ...response.data,
+            cacheStatus: response.cacheStatus,
+            cacheEntries: response.cacheEntries,
+        },
         apiTokensUsed: response.inputTokens + response.outputTokens,
         apiCost: response.cost.toFixed(2),
     }).where(eq(contentQueue.id, jobId));
@@ -688,7 +890,12 @@ export async function processKeywordResearchJob(jobId: string): Promise<void> {
     // Track costs
     await db.insert(apiCallLogs).values({
         stage: 'keyword_research',
+        modelKey: response.modelKey,
         model: response.model,
+        resolvedModel: response.resolvedModel,
+        promptVersion: response.promptVersion,
+        routingVersion: response.routingVersion,
+        fallbackUsed: response.fallbackUsed,
         inputTokens: response.inputTokens,
         outputTokens: response.outputTokens,
         cost: response.cost.toFixed(4),

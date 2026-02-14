@@ -27,6 +27,29 @@ export const MODEL_CONFIG = {
     research: 'perplexity/sonar-reasoning',
 } as const;
 
+export type AIModelTask = keyof typeof MODEL_CONFIG;
+
+type RoutingProfile = {
+    fallbackTasks: AIModelTask[];
+    promptVersion: string;
+};
+
+export const MODEL_ROUTING_VERSION = '2026-02-14.v1';
+
+// Explicit task-to-model fallback chain and prompt-version governance.
+const MODEL_ROUTING_REGISTRY: Record<AIModelTask, RoutingProfile> = {
+    keywordResearch: { fallbackTasks: ['seoOptimize'], promptVersion: 'keyword.v1' },
+    domainClassify: { fallbackTasks: ['seoOptimize'], promptVersion: 'domain-classify.v1' },
+    titleGeneration: { fallbackTasks: ['seoOptimize'], promptVersion: 'title.v1' },
+    seoOptimize: { fallbackTasks: ['humanization'], promptVersion: 'seo.v1' },
+    outlineGeneration: { fallbackTasks: ['humanization', 'seoOptimize'], promptVersion: 'outline.v1' },
+    draftGeneration: { fallbackTasks: ['humanization', 'seoOptimize'], promptVersion: 'draft.v1' },
+    humanization: { fallbackTasks: ['draftGeneration', 'seoOptimize'], promptVersion: 'humanize.v2' },
+    bulkOperations: { fallbackTasks: ['keywordResearch', 'seoOptimize'], promptVersion: 'bulk.v1' },
+    voiceSeedGeneration: { fallbackTasks: ['draftGeneration', 'seoOptimize'], promptVersion: 'voice-seed.v1' },
+    research: { fallbackTasks: ['seoOptimize'], promptVersion: 'research.v1' },
+};
+
 // Pricing per 1K tokens (approximate, check OpenRouter for current)
 const MODEL_PRICING: Record<string, { input: number; output: number; perRequestFee?: number }> = {
     'x-ai/grok-3-fast': { input: 0.005, output: 0.025 },
@@ -35,7 +58,7 @@ const MODEL_PRICING: Record<string, { input: number; output: number; perRequestF
     'perplexity/sonar-reasoning': { input: 0.001, output: 0.005, perRequestFee: 0.01 },
 };
 
-export interface AIResponse {
+interface BaseAIResponse {
     content: string;
     model: string;
     inputTokens: number;
@@ -44,11 +67,21 @@ export interface AIResponse {
     durationMs: number;
 }
 
+export interface AIResponse extends BaseAIResponse {
+    modelKey: AIModelTask;
+    resolvedModel: string;
+    promptVersion: string;
+    routingVersion: string;
+    fallbackUsed: boolean;
+    fallbackIndex: number;
+}
+
 export interface GenerateOptions {
     model?: string;
     temperature?: number;
     maxTokens?: number;
     systemPrompt?: string;
+    promptVersion?: string;
 }
 
 interface OpenRouterResponse {
@@ -96,12 +129,44 @@ export class OpenRouterClient {
      * Model is automatically selected based on task
      */
     async generate(
-        task: keyof typeof MODEL_CONFIG,
+        task: AIModelTask,
         prompt: string,
         options: GenerateOptions = {}
     ): Promise<AIResponse> {
-        const model = options.model || MODEL_CONFIG[task];
-        return this.generateWithModel(model, prompt, options);
+        const routingProfile = MODEL_ROUTING_REGISTRY[task];
+        const promptVersion = options.promptVersion || routingProfile.promptVersion;
+        const configuredModels = [
+            options.model || MODEL_CONFIG[task],
+            ...routingProfile.fallbackTasks.map((fallbackTask) => MODEL_CONFIG[fallbackTask]),
+        ];
+        const modelsToTry = configuredModels.filter((model, idx) => configuredModels.indexOf(model) === idx);
+
+        let lastError: unknown;
+        for (let index = 0; index < modelsToTry.length; index += 1) {
+            const model = modelsToTry[index];
+            try {
+                const response = await this.generateWithModel(model, prompt, options);
+                const resolvedModel = response.model || model;
+                return {
+                    ...response,
+                    modelKey: task,
+                    resolvedModel,
+                    promptVersion,
+                    routingVersion: MODEL_ROUTING_VERSION,
+                    fallbackUsed: index > 0,
+                    fallbackIndex: index,
+                };
+            } catch (error) {
+                lastError = error;
+            }
+        }
+
+        const attempted = modelsToTry.join(', ');
+        const baseMessage = `All configured models failed for task "${task}" (attempted: ${attempted})`;
+        if (lastError instanceof Error) {
+            throw new Error(`${baseMessage}: ${lastError.message}`);
+        }
+        throw new Error(baseMessage);
     }
 
     /**
@@ -111,7 +176,7 @@ export class OpenRouterClient {
         model: string,
         prompt: string,
         options: GenerateOptions = {}
-    ): Promise<AIResponse> {
+    ): Promise<BaseAIResponse> {
         const startTime = Date.now();
         return withCircuitBreaker(
             'openrouter',
@@ -181,7 +246,7 @@ export class OpenRouterClient {
      * Generate with JSON output (for structured responses)
      */
     async generateJSON<T>(
-        task: keyof typeof MODEL_CONFIG,
+        task: AIModelTask,
         prompt: string,
         options: GenerateOptions = {}
     ): Promise<{ data: T } & Omit<AIResponse, 'content'>> {
@@ -202,7 +267,13 @@ export class OpenRouterClient {
             const data = JSON.parse(jsonStr) as T;
             return {
                 data,
+                modelKey: response.modelKey,
                 model: response.model,
+                resolvedModel: response.resolvedModel,
+                promptVersion: response.promptVersion,
+                routingVersion: response.routingVersion,
+                fallbackUsed: response.fallbackUsed,
+                fallbackIndex: response.fallbackIndex,
                 inputTokens: response.inputTokens,
                 outputTokens: response.outputTokens,
                 cost: response.cost,

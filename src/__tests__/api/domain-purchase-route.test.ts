@@ -5,6 +5,7 @@ const mockRequireAuth = vi.fn();
 const mockGetRequestUser = vi.fn();
 const mockPurchaseDomain = vi.fn();
 const mockCheckAvailability = vi.fn();
+const mockIsFeatureEnabled = vi.fn();
 
 const mockSelect = vi.fn();
 const mockFrom = vi.fn();
@@ -21,6 +22,10 @@ vi.mock('@/lib/auth', () => ({
 vi.mock('@/lib/domain/purchase', () => ({
     purchaseDomain: mockPurchaseDomain,
     checkAvailability: mockCheckAvailability,
+}));
+
+vi.mock('@/lib/feature-flags', () => ({
+    isFeatureEnabled: mockIsFeatureEnabled,
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -79,6 +84,7 @@ describe('domains/[id]/purchase route', () => {
 
         mockRequireAuth.mockResolvedValue(null);
         mockGetRequestUser.mockReturnValue({ id: 'user-1', role: 'reviewer', name: 'Reviewer 1' });
+        mockIsFeatureEnabled.mockReturnValue(true);
 
         mockLimit.mockResolvedValue([]);
         mockWhere.mockReturnValue({
@@ -248,5 +254,27 @@ describe('domains/[id]/purchase route', () => {
         const body = await response.json();
         expect(body.error).toContain('review task');
         expect(mockPurchaseDomain).not.toHaveBeenCalled();
+    });
+
+    it('bypasses review-task gate when preview_gate_v1 is disabled', async () => {
+        mockIsFeatureEnabled.mockImplementation((flag: string) => flag !== 'preview_gate_v1');
+        mockLimit
+            .mockResolvedValueOnce([{
+                id: 'research-1',
+                domain: 'alpha.com',
+                decision: 'buy',
+                decisionReason: 'Approved by underwriting',
+                hardFailReason: null,
+                recommendedMaxBid: 40,
+            }])
+            .mockResolvedValueOnce([]);
+
+        const response = await POST(makeRequest({
+            domain: 'alpha.com',
+            confirmed: true,
+        }), { params: Promise.resolve({ id: 'research-1' }) });
+
+        expect(response.status).toBe(201);
+        expect(mockPurchaseDomain).toHaveBeenCalled();
     });
 });

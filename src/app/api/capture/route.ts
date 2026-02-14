@@ -22,9 +22,48 @@ const captureSchema = z.object({
     source: z.enum(['lead_form', 'newsletter', 'wizard', 'popup', 'scroll_cta']).optional(),
     formData: z.record(z.string(), z.string()).optional(),
     articleId: z.string().uuid().optional(),
+    sourceCampaignId: z.string().uuid().optional(),
+    sourceClickId: z.string().uuid().optional(),
+    originalUtm: z.record(z.string(), z.string()).optional(),
     // Honeypot field — must be empty
-    lead_hp_field: z.string().max(0).optional(),
+    lead_hp_field: z.string().max(200).optional(),
 });
+
+const UTM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'] as const;
+
+function extractUtmFromUrl(urlRaw: string | null): Record<string, string> {
+    if (!urlRaw) return {};
+    try {
+        const parsed = new URL(urlRaw);
+        const utm: Record<string, string> = {};
+        for (const key of UTM_KEYS) {
+            const value = parsed.searchParams.get(key);
+            if (value && value.trim().length > 0) {
+                utm[key] = value.trim();
+            }
+        }
+        return utm;
+    } catch {
+        return {};
+    }
+}
+
+function extractUtmFromFormData(formData?: Record<string, string>): Record<string, string> {
+    if (!formData) return {};
+    const utm: Record<string, string> = {};
+    for (const key of UTM_KEYS) {
+        const value = formData[key];
+        if (typeof value === 'string' && value.trim().length > 0) {
+            utm[key] = value.trim();
+        }
+    }
+    return utm;
+}
+
+function toUuid(value: string | undefined): string | undefined {
+    if (!value) return undefined;
+    return z.string().uuid().safeParse(value).success ? value : undefined;
+}
 
 function corsHeaders() {
     return {
@@ -73,6 +112,17 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ success: true }, { status: 201, headers: corsHeaders() });
         }
 
+        const referrer = request.headers.get('referer') ?? undefined;
+        const referrerUtm = extractUtmFromUrl(referrer ?? null);
+        const formDataUtm = extractUtmFromFormData(parsed.data.formData as Record<string, string> | undefined);
+        const mergedUtm = {
+            ...referrerUtm,
+            ...formDataUtm,
+            ...(parsed.data.originalUtm ?? {}),
+        };
+        const sourceCampaignId = parsed.data.sourceCampaignId
+            ?? toUuid(mergedUtm.utm_campaign);
+
         const subscriber = await captureSubscriber({
             domainId: parsed.data.domainId,
             email: parsed.data.email,
@@ -81,9 +131,12 @@ export async function POST(request: NextRequest) {
             source: parsed.data.source,
             formData: parsed.data.formData as Record<string, string> | undefined,
             articleId: parsed.data.articleId,
+            sourceCampaignId,
+            sourceClickId: parsed.data.sourceClickId,
+            originalUtm: mergedUtm,
             ipAddress: ip !== 'unknown' ? ip : undefined,
             userAgent: request.headers.get('user-agent') ?? undefined,
-            referrer: request.headers.get('referer') ?? undefined,
+            referrer,
         });
 
         return NextResponse.json(

@@ -115,7 +115,7 @@ export default async function DomainBuyPreviewPage({
                     </div>
                     <div>
                         <div className="text-xs text-muted-foreground">Domain Score</div>
-                        <div className="font-semibold">{candidate.domainScore || '-'}</div>
+                        <div className="font-semibold">{score(candidate.domainScore)}</div>
                     </div>
                 </div>
 
@@ -136,7 +136,7 @@ export default async function DomainBuyPreviewPage({
 
                 <div className="text-sm">
                     <span className="text-xs text-muted-foreground">Decision</span>
-                    <div className="font-semibold">{candidate.decision}</div>
+                    <div className="font-semibold">{candidate.decision ?? 'No decision yet'}</div>
                     <div className="text-muted-foreground">{candidate.decisionReason || 'No decision note yet'}</div>
                 </div>
 

@@ -7,6 +7,9 @@ import { db, reviewTasks } from '@/lib/db';
 const taskTypeEnum = z.enum(['domain_buy', 'content_publish', 'campaign_launch']);
 const taskStatusEnum = z.enum(['pending', 'approved', 'rejected', 'cancelled']);
 
+const DEFAULT_SLA_HOURS = 24;
+const DEFAULT_ESCALATE_AFTER_HOURS = 48;
+
 const createTaskSchema = z.object({
     taskType: taskTypeEnum,
     entityId: z.string().uuid().optional(),
@@ -37,11 +40,9 @@ const createTaskSchema = z.object({
             message: 'domainResearchId is required for domain_buy tasks',
         });
     }
-    if (
-        typeof value.slaHours === 'number'
-        && typeof value.escalateAfterHours === 'number'
-        && value.escalateAfterHours < value.slaHours
-    ) {
+    const resolvedSla = value.slaHours ?? DEFAULT_SLA_HOURS;
+    const resolvedEscalate = value.escalateAfterHours ?? DEFAULT_ESCALATE_AFTER_HOURS;
+    if (resolvedEscalate < resolvedSla) {
         ctx.addIssue({
             code: z.ZodIssueCode.custom,
             path: ['escalateAfterHours'],
@@ -167,8 +168,8 @@ export async function POST(request: NextRequest) {
             domainResearchId: payload.domainResearchId ?? null,
             checklistJson: payload.checklistJson ?? {},
             status: 'pending',
-            slaHours: payload.slaHours ?? 24,
-            escalateAfterHours: payload.escalateAfterHours ?? 48,
+            slaHours: payload.slaHours ?? DEFAULT_SLA_HOURS,
+            escalateAfterHours: payload.escalateAfterHours ?? DEFAULT_ESCALATE_AFTER_HOURS,
             autoApproveAfterHours: payload.autoApproveAfterHours ?? null,
             autoRejectAfterHours: payload.autoRejectAfterHours ?? null,
             backupReviewerId: payload.backupReviewerId ?? null,

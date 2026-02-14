@@ -73,34 +73,39 @@ function isChecklistApproved(checklist: Record<string, unknown>): boolean {
 }
 
 export async function decideReviewTask(input: ReviewTaskDecisionInput): Promise<ReviewTaskDecisionResult> {
-    const [task] = await db
-        .select()
-        .from(reviewTasks)
-        .where(eq(reviewTasks.id, input.taskId))
-        .limit(1);
-
-    if (!task) {
-        throw new NotFoundError('Review task not found');
-    }
-
-    if (task.status !== 'pending' && input.actor.role !== 'admin') {
-        throw new ConflictError(`Task already finalized as ${task.status}. Admin role required to override.`);
-    }
-
-    const mergedChecklist = {
-        ...(task.checklistJson as Record<string, unknown> | null ?? {}),
-        ...(input.checklistPatch ?? {}),
-    };
-
-    if (task.taskType === 'domain_buy' && input.status === 'approved' && !isChecklistApproved(mergedChecklist)) {
-        throw new ChecklistValidationError('Cannot approve domain_buy task: checklist requirements not satisfied');
-    }
-
     let bidPlanQueued = false;
     let bidPlanQueueResearchId: string | null = null;
     let bidPlanQueueDomain: string | null = null;
+    let resolvedTaskId: string = '';
 
     await db.transaction(async (tx) => {
+        // Lock the row to prevent concurrent decision races (TOCTOU)
+        const [task] = await tx
+            .select()
+            .from(reviewTasks)
+            .where(eq(reviewTasks.id, input.taskId))
+            .limit(1)
+            .for('update');
+
+        if (!task) {
+            throw new NotFoundError('Review task not found');
+        }
+
+        resolvedTaskId = task.id;
+
+        if (task.status !== 'pending' && input.actor.role !== 'admin') {
+            throw new ConflictError(`Task already finalized as ${task.status}. Admin role required to override.`);
+        }
+
+        const mergedChecklist = {
+            ...(task.checklistJson as Record<string, unknown> | null ?? {}),
+            ...(input.checklistPatch ?? {}),
+        };
+
+        if (task.taskType === 'domain_buy' && input.status === 'approved' && !isChecklistApproved(mergedChecklist)) {
+            throw new ChecklistValidationError('Cannot approve domain_buy task: checklist requirements not satisfied');
+        }
+
         await tx.update(reviewTasks).set({
             status: input.status,
             reviewNotes: input.reviewNotes,
@@ -173,6 +178,18 @@ export async function decideReviewTask(input: ReviewTaskDecisionInput): Promise<
                         reviewNotes: input.reviewNotes,
                     },
                 });
+            } else if (input.status === 'cancelled') {
+                await tx.insert(acquisitionEvents).values({
+                    domainResearchId: research.id,
+                    eventType: 'cancelled',
+                    createdBy: input.actor.id,
+                    payload: {
+                        source: 'review_task',
+                        reviewTaskId: task.id,
+                        decision: 'cancelled',
+                        reviewNotes: input.reviewNotes,
+                    },
+                });
             }
         }
     });
@@ -186,7 +203,7 @@ export async function decideReviewTask(input: ReviewTaskDecisionInput): Promise<
     }
 
     return {
-        taskId: task.id,
+        taskId: resolvedTaskId || input.taskId,
         status: input.status,
         bidPlanQueued,
     };
