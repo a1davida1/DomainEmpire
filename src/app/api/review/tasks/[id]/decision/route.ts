@@ -51,6 +51,7 @@ export async function POST(
             status: result.status,
             reviewNotes: parsed.data.reviewNotes,
             bidPlanQueued: result.bidPlanQueued,
+            campaignLaunchQueued: result.campaignLaunchQueued,
         });
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to update review task';

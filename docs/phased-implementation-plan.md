@@ -44,6 +44,7 @@ Assumption: KDP manuscript authoring is external; app scope is ingesting/linking
    - growth worker jobs implemented: `create_promotion_plan`, `generate_short_script`, `render_short_video`, `publish_pinterest_pin`, `publish_youtube_short`, `sync_campaign_metrics`
    - growth API implemented: `GET/POST /api/growth/campaigns`, `POST /api/growth/campaigns/[id]/launch`
    - campaign launch review gate implemented (`campaign_launch` review task required when `preview_gate_v1` is enabled)
+   - campaign launch approval handoff implemented in review decision path: approving a `campaign_launch` review task now queues `create_promotion_plan` automatically with advisory-lock dedupe
    - attribution foundation implemented: `click_events` table, subscriber source linkage, `POST /api/growth/click-events`, UTM ingestion on `/api/capture`
    - media vault API implemented: `GET/POST /api/growth/media-assets`, `PATCH/DELETE /api/growth/media-assets/[id]`, `POST /api/growth/media-assets/[id]/usage`
    - channel publish adapter layer implemented with mock/live switch (`GROWTH_PUBLISH_MOCK`), worker integration, and live API call paths for Pinterest/YouTube
@@ -55,6 +56,16 @@ Assumption: KDP manuscript authoring is external; app scope is ingesting/linking
    - canonical domain lifecycle state machine baseline now implemented: `domains.lifecycle_state`, append-only lifecycle transition audit log (`domain_lifecycle_events`), and transition API (`GET/POST /api/domains/[id]/lifecycle`) with actor-role transition policy checks
    - portfolio finance ledger baseline now implemented: canonical ledger entries (`domain_finance_ledger_entries`) and per-domain monthly close snapshots (`domain_finance_monthly_closes`) with APIs (`GET/POST /api/finance/ledger`, `GET/POST /api/finance/monthly-close`)
    - monetization reconciliation baseline now implemented: finance reconciliation summary endpoint (`GET /api/finance/reconciliation`) comparing ledger revenue vs revenue snapshots with variance statusing and partner margin reporting
+   - revenue ingest now emits reconciliation anomaly notifications (warning/critical) when post-ingest ledger-vs-snapshot variance exceeds tolerance
+   - hourly worker scheduler now runs automated reconciliation sweeps (`runRevenueReconciliationSweep`) with notification alerts for warning/critical domain variance
+   - capital allocation automation now includes shared recommendation/apply service extraction, hourly worker sweep execution (`runCapitalAllocationSweep`) with env-gated dry-run/apply controls, and manual sweep trigger endpoint (`POST /api/growth/capital-allocation/sweep`); this baseline is tracked as Stream B.1 and runs concurrently where possible, but depends on Stream B revenue ingestion/reconciliation and ROI baselines.
+   - capital allocation closed-loop tuning baseline implemented: policy feedback endpoint (`GET /api/growth/capital-allocation/policy-feedback`) plus optional sweep-time auto-tune (`GROWTH_CAPITAL_ALLOCATION_POLICY_AUTO_TUNE`) to reweight thresholds from realized pre/post outcomes
+
+     - required safety guardrails before enabling `GROWTH_CAPITAL_ALLOCATION_POLICY_AUTO_TUNE` in production (enforced/configured in sweep config + env policy settings, with optional run-time overrides on `POST /api/growth/capital-allocation/sweep`):
+       - validation sequence (must run in order): fetch policy feedback -> verify `GROWTH_CAPITAL_ALLOCATION_AUTO_TUNE_MIN_SAMPLES` and `GROWTH_CAPITAL_ALLOCATION_AUTO_TUNE_MIN_CONFIDENCE` thresholds -> compute absolute and percent candidate deltas on the same numeric scale -> enforce the stricter cap (`min(absCap, pctCap)` from `GROWTH_CAPITAL_ALLOCATION_AUTO_TUNE_MAX_ABS_DELTA` and `GROWTH_CAPITAL_ALLOCATION_AUTO_TUNE_MAX_PCT_DELTA`) -> persist the tuned policy snapshot + metadata.
+       - rollback triggers + automated rollback: rollback decisions use `GROWTH_CAPITAL_ALLOCATION_AUTO_TUNE_ROLLBACK_DEGRADE_PCT` over `GROWTH_CAPITAL_ALLOCATION_AUTO_TUNE_ROLLBACK_WINDOWS` consecutive configured-duration evaluation windows (default evaluation window: 7 days from the feedback pre/post window config). "Two consecutive windows" means two back-to-back configured evaluation windows with degradation above the rollback threshold; on trigger, automatically restore the prior policy snapshot and record rollback metadata.
+       - alert routing + severity: auto-tune activation emits a warning alert; rollback trigger emits a critical alert. Route alerts to `OPS_ALERT_WEBHOOK_URL` (fallback `GROWTH_FAIRNESS_OPS_WEBHOOK_URL`) with explicit severity mapping in payload metadata.
+       - mandatory approval gate for production auto-tune: production enablement must require approved actor roles before `GROWTH_CAPITAL_ALLOCATION_POLICY_AUTO_TUNE=true` takes effect (recommended allowed roles: `admin` and `expert`; configure gate via `GROWTH_CAPITAL_ALLOCATION_AUTO_TUNE_REQUIRE_APPROVAL=true` and role allow-list setting). `expert` maps to the first-class auth role in `src/lib/auth/index.ts` role hierarchy (`admin > expert > reviewer > editor`) and is managed through user role administration.
    - growth dashboard credential tab now includes drill execution controls + recent drill evidence history (run IDs, statuses, checklist failures)
    - AI prompt archival implemented for content pipeline and evaluator calls (`api_call_logs.prompt_hash`, `api_call_logs.prompt_body`) to preserve per-stage prompt evidence for audit/debug workflows
    - deterministic tool QA now stores calculator unit-test pass evidence (`qa_checklist_results.unit_test_pass_id`, `calculation_config_hash`, `calculation_harness_version`) with API validation when `calc_tested` is checked
@@ -67,6 +78,8 @@ Assumption: KDP manuscript authoring is external; app scope is ingesting/linking
    - guardrails implemented in worker: daily caps, duplicate creative suppression, per-domain cooldown, campaign metrics sync
    - per-domain channel compatibility implemented (`domain_channel_profiles`, `/api/domains/[id]/channel-compatibility`, dashboard editor)
    - growth publish scheduling now supports per-domain jitter + UTC quiet-hours windows for Pinterest and YouTube Shorts publish jobs
+   - nameserver cutover preflight safety implemented for single + bulk operations (`POST /api/domains/[id]/nameservers` and `POST /api/domains/bulk-nameservers` now support `dryRun`) with dashboard confirmation flows showing resolved Cloudflare nameserver plans before registrar mutation
+   - manual registrar-state sync endpoint implemented for ownership ops (`POST /api/domains/[id]/ownership/sync`) to execute connected registrar integration syncs and refresh transfer/lock/DNSSEC/risk signals from provider adapters
    - growth dashboard UI now surfaced (`/dashboard/growth`) for campaign creation/launch, media vault management, and credential management
    - reviewer-facing media vault workflows implemented: provenance metadata, moderation state badges, and bulk actions (`/api/growth/media-assets/bulk`, growth dashboard media tab)
    - media upload storage abstraction implemented (`src/lib/growth/media-storage.ts`) with `local` and `s3_compatible` providers, exposed via `POST /api/growth/media-assets/upload`
@@ -82,12 +95,24 @@ Assumption: KDP manuscript authoring is external; app scope is ingesting/linking
    - fairness policy ops-channel bridge implemented via webhook (`GROWTH_FAIRNESS_OPS_WEBHOOK_URL` / `OPS_ALERT_WEBHOOK_URL`) for blocked assignments and override/warning escalation signals, with dedup/rate-limit guardrails (`OPS_ALERT_MIN_INTERVAL_SECONDS`)
    - incident-playbook bindings implemented for fairness signals (`FAIRNESS-001..004`) with runbook links (`docs/ops/fairness-alert-playbooks.md`) embedded in assignment notifications, webhook payloads, and policy metadata
    - domain workflow profile editor implemented (per-domain writing-phase template IDs, schedule profile, branding color/style metadata)
+   - cross-domain strategy propagation baseline implemented: recommendation and apply APIs (`GET/POST /api/domains/strategies/propagation`) with ROI-driven source/target suggestions, module-scoped config propagation (`site_template`, `schedule`, `writing_workflow`, `branding`), and per-domain propagation history stored in `domains.content_config.strategyPropagationHistory`
+   - strategy propagation automation now includes env-gated hourly sweep execution (`runStrategyPropagationSweep`) with dry-run/apply controls and manual trigger endpoint (`POST /api/domains/strategies/propagation/sweep`)
+   - strategy propagation closed-loop tuning baseline implemented: policy feedback endpoint (`GET /api/domains/strategies/propagation/policy-feedback`) plus optional sweep-time auto-tune (`DOMAIN_STRATEGY_PROPAGATION_SWEEP_AUTO_TUNE`) for score/module/cross-niche policy reweighting
+     - required safety guardrails for `DOMAIN_STRATEGY_PROPAGATION_SWEEP_AUTO_TUNE` and `GET /api/domains/strategies/propagation/policy-feedback`:
+       - confidence-threshold activation gate: `DOMAIN_STRATEGY_PROPAGATION_SWEEP_AUTO_TUNE` may only activate when `GET /api/domains/strategies/propagation/policy-feedback` meets both minimum sample size and statistical confidence thresholds (recommended defaults: `evaluated >= 30`, `confidence >= 0.60`; configure via `DOMAIN_STRATEGY_PROPAGATION_AUTO_TUNE_MIN_SAMPLES` and `DOMAIN_STRATEGY_PROPAGATION_AUTO_TUNE_MIN_CONFIDENCE`).
+       - cross-niche propagation constraints: when `DOMAIN_STRATEGY_PROPAGATION_SWEEP_AUTO_TUNE` adjusts cross-niche behavior, enforce niche allow/deny lists or similarity-score thresholds before applying recommendations from `GET /api/domains/strategies/propagation/policy-feedback` (recommended default: similarity `>= 0.70` unless explicitly whitelisted).
+       - rollback procedure with alerting: if post-propagation metrics from `GET /api/domains/strategies/propagation/policy-feedback` degrade by `>=10%`, auto-revert to the previous propagation policy. Auto-tune activation must emit a warning alert; rollback trigger must emit a critical alert routed through `OPS_ALERT_WEBHOOK_URL` (or equivalent ops channel fallback) with explicit severity mapping.
+       - validation hold period: after `DOMAIN_STRATEGY_PROPAGATION_SWEEP_AUTO_TUNE` applies a policy change, hold propagation expansion until 2 consecutive evaluation windows from `GET /api/domains/strategies/propagation/policy-feedback` pass without degradation. This hold period must still honor `DOMAIN_STRATEGY_PROPAGATION_AUTO_TUNE_MIN_SAMPLES` and `DOMAIN_STRATEGY_PROPAGATION_AUTO_TUNE_MIN_CONFIDENCE` before any further auto-tune activation.
    - deploy theme policy fallback implemented (`resolveDomainTheme`) so unknown/empty theme style values resolve to bucket/niche policy themes instead of generic defaults; CI tests cover policy-theme validity and deterministic variance
    - integration marketplace foundation implemented: `integration_connections` + `integration_sync_runs` schema and API endpoints (`GET/POST/DELETE /api/integrations/connections`, `GET/POST /api/integrations/sync-runs`, `PATCH /api/integrations/sync-runs/[id]`)
    - integration provider catalog endpoint implemented (`GET /api/integrations/providers`) with scope/category/executable-sync metadata
    - executable connection sync path implemented (`POST /api/integrations/connections/[id]/sync`) with first provider adapters: registrar renewal sync (`godaddy`, `namecheap`) and metrics sync (`cloudflare`, `google_search_console`)
+   - executable revenue sync adapters now available for `sedo`, `bodis`, `impact`, `cj`, `awin`, and `rakuten` via connection-configured revenue payloads (`connection.config.revenueRecords`)
    - integrations operations UI surfaced (`/dashboard/integrations`) with provider catalog, connection create/list/delete, and manual sync controls
    - scheduled integration sync automation implemented: hourly worker scheduler enqueue (`run_integration_connection_sync`) with per-connection cadence/lookback config (`autoSyncEnabled`, `syncIntervalMinutes`, `syncLookbackDays`) and execution through the integration sync executor
+   - integration marketplace hardening baseline implemented: connection health summary endpoint (`GET /api/integrations/health/summary`), manual health sweep trigger (`POST /api/integrations/health/sweep`), and env-gated hourly integration health sweeps (`runIntegrationHealthSweep`) with stale/failed-connection alerting
+   - competitor automation baseline implemented: env-gated hourly competitor refresh sweeps (`runCompetitorRefreshSweep`) plus manual trigger endpoint (`POST /api/competitors/sweep`) and keyword-gap alert notifications for high-volume opportunities
+   - domain metrics pipeline baseline expanded with unified current-vs-prior trend summary endpoint (`GET /api/domains/metrics/summary`) covering traffic, clicks, CTR, avg position, revenue, and trend scoring/status
    - content calendar now supports keyword-opportunity mode with difficulty/volume/cpc scoring (`GET /api/content/calendar?strategy=keyword_opportunity`)
    - automated interlinking policy hard-stop implemented (internal interlink suggestion/apply/batch APIs now blocked unless `ENABLE_INTERNAL_LINKING=true`)
    - portfolio cross-domain link blocking enforced at deploy render stage (`ENFORCE_NO_PORTFOLIO_CROSSLINKS`, default on)
@@ -96,6 +121,14 @@ Assumption: KDP manuscript authoring is external; app scope is ingesting/linking
    - domain differentiation guardrails injected into AI prompts (domain-specific perspective/narrative/structure guidance + intent-coverage balancing in keyword research + voice-seed uniqueness hardening)
    - disclosure defaults hardened to always include transparent About, Editorial Policy, and How-We-Make-Money trust pages unless explicitly overridden
    - media storage lifecycle hardening implemented: media assets now soft-delete with configurable retention windows, worker-driven storage purge automation, purge retry backoff, and active-only URL uniqueness (`deleted_at` scoped)
+   - campaign launch review SLA/ops hardening implemented: launch-review summary API (`GET /api/review/tasks/campaign-launch/summary`), manual escalation sweep trigger (`POST /api/review/tasks/campaign-launch/escalations`), hourly worker sweep automation (`runCampaignLaunchReviewEscalationSweep`), Domains dashboard launch-review SLA panel visibility, and dedicated reviewer queue UI (`/dashboard/review/campaign-launch`)
+   - campaign launch reviewer operations expanded: queue scope filters (`mine`/`unassigned`/`all`), claim/release/admin assign controls in queue UI, assignment API (`PATCH /api/review/tasks/[id]/assignment`), and CSV export mode for launch review SLA reporting (`GET /api/review/tasks/campaign-launch/summary?format=csv`)
+   - SLO-driven launch-freeze baseline implemented: burn-aware freeze evaluator (`src/lib/growth/launch-freeze.ts`), launch freeze surfaced in `GET /api/growth/slo/summary`, manual launch endpoint enforcement (`POST /api/growth/campaigns/[id]/launch`), ROI auto-launch enforcement (`applyRoiCampaignAutoplan`), and automatic incident creation (in-app + ops channel) on active freeze
+   - launch-freeze governance hardening implemented: scoped freeze policy controls by channel/action, override governance API (`GET/POST/DELETE /api/growth/launch-freeze/override`) with role-based mutation permissions + expiry windows + append-only override audit history, recovery-hold auto-unfreeze windows, and freeze audit incident metadata with postmortem template linking
+   - growth dashboard now includes launch-freeze governance controls: active-override visibility, role-aware apply/clear override actions (channel/action scope + expiry + reason), and per-campaign launch-freeze blocking badges/disabled launch controls
+   - non-admin override approval handoff implemented: expert users outside override allow-list can submit structured approval requests via `POST /api/growth/launch-freeze/override` (`requestApproval=true`) and dashboard request controls, producing auditable approval-request notifications
+   - override approver decision flow implemented: pending override requests are now surfaced with approve/reject controls on the growth dashboard and processed through `PATCH /api/growth/launch-freeze/override` with mandatory decision rationale + audit linkage to applied overrides
+   - launch-freeze postmortem SLA checks implemented: SLA summary integrated in `GET /api/growth/slo/summary`, dedicated postmortem API (`GET/POST /api/growth/launch-freeze/postmortems`), and hourly worker sweep alerting for overdue incident postmortems (`runGrowthLaunchFreezePostmortemSlaSweep`)
 
 Open gaps for Phase 3 exit:
 1. None currently open in this track (remaining work is rollout execution and staging evidence capture using implemented controls).
@@ -699,7 +732,8 @@ Integration families to support:
 
 1. `Wave A` (immediate): integration connection registry + sync audit trail, keyword-difficulty content prioritization.
 2. `Wave B`: affiliate/parking revenue attribution ingestion, domain lifecycle state transitions + ROI-based resurfacing.
-3. `Wave C`: competitive automation refresh loops, cross-domain strategy propagation, marketplace hardening.
+3. `Wave B.1` (partially parallel with Wave B): capital allocation recommendation/apply + sweep automation (`GET/POST /api/growth/capital-allocation`, `runCapitalAllocationSweep`, `POST /api/growth/capital-allocation/sweep`), dependent on Wave B baselines for revenue/ROI signal quality.
+4. `Wave C` (concurrent where possible): competitive automation refresh loops, cross-domain strategy propagation, marketplace hardening; Stream C runtime hardening depends on specific Stream B baselines.
 
 ### Execution Status Board (2026-02-15)
 
@@ -709,16 +743,16 @@ The following board tracks the requested scope as `done`, `partial`, or `not_sta
 
 | Capability | Status | Current Evidence | Next Action |
 |---|---|---|---|
-| Canonical domain lifecycle state machine | `in_progress` | `domains.lifecycle_state`, `domain_lifecycle_events`, `GET/POST /api/domains/[id]/lifecycle`, and dashboard lifecycle controls now enforce/operate transition policy baseline | Wire lifecycle transitions into acquisition/purchase/build/growth automation hooks |
+| Canonical domain lifecycle state machine | `in_progress` | `domains.lifecycle_state`, `domain_lifecycle_events`, `GET/POST /api/domains/[id]/lifecycle`, dashboard lifecycle controls, and acquisition/purchase automation hooks now enforce lifecycle progression (`score_candidate` -> `underwriting`, buy approvals -> `approved`, successful purchases -> `acquired`) | Extend lifecycle automation through build/growth/monetization transitions |
 | Portfolio finance ledger + per-domain P&L | `partial` | Canonical ledger (`domain_finance_ledger_entries`) and monthly close snapshots (`domain_finance_monthly_closes`) plus APIs are in place | Add P&L dashboard rollups, lock/close governance, and reconciliation checks |
-| Registrar and ownership operations automation | `in_progress` | Added `domain_registrar_profiles`, `domain_ownership_events`, `GET/PATCH /api/domains/[id]/ownership`, `GET /api/domains/renewal-risk`, registrar sync risk snapshots, and domain dashboard ownership controls | Add provider-native transfer/lock/DNSSEC adapters and renewal ROI recommendation automation |
+| Registrar and ownership operations automation | `in_progress` | Added `domain_registrar_profiles`, `domain_ownership_events`, `GET/PATCH /api/domains/[id]/ownership`, `GET /api/domains/renewal-risk`, registrar sync risk snapshots, domain dashboard ownership controls, and nameserver cutover preflight planning (`dryRun`) for single/bulk operations | Add provider-native transfer/lock/DNSSEC adapters and renewal ROI recommendation automation |
 | Platform integrity and anti-abuse controls | `in_progress` | Policy-block enforcement now includes destination-quality controls (private-network blocking, allowlist checks, shortener/redirect guardrails, destination risk scoring), destination-policy blocked-publish notifications, campaign-level suspicious-activity integrity alerts, integrity summary API, click fraud-risk scoring + suspicious click notifications, and targeted lifecycle/ownership rate limits | Broaden rate-limit coverage across additional growth mutation routes and tune fraud thresholds with production data |
-| Operational controls (SLOs, playbooks, rollback) | `in_progress` | Added operational runbooks (`campaign-slo-error-budget.md`, `media-review-playbook.md`, `growth-rollback-procedures.md`) plus `GET /api/growth/slo/summary` with error-budget burn calculations | Wire SLO budget-burn outputs into automatic launch-freeze and incident workflows |
-| Experimentation and incrementality framework | `partial` | `ab_tests` foundation exists | Add holdouts/lift/confidence and stop-scale gates |
-| Automated capital allocation optimizer | `not_started` | No auto allocator by CAC/LTV/payback bands | Implement budget optimizer with hard loss limits |
-| SEO and site health observability | `partial` | `search_quality` alerts, backlink snapshots, monitoring triggers exist | Add ranking volatility/crawl/runtime/conversion anomaly alerting |
-| Monetization reconciliation layer | `in_progress` | Added `GET /api/finance/reconciliation` for ledger-vs-snapshot variance checks and partner margin rollups | Add provider-native payout sync adapters and automated variance/margin anomaly alerts |
-| Data platform hardening | `not_started` | No warehouse contract/replay/versioning layer | Add contracts, replay/backfill, metric versioning checks |
+| Operational controls (SLOs, playbooks, rollback) | `done` | Added operational runbooks (`campaign-slo-error-budget.md`, `media-review-playbook.md`, `growth-rollback-procedures.md`), `GET /api/growth/slo/summary` with error-budget burn calculations, scoped launch-freeze policy controls (channel/action), governed override workflow (`/api/growth/launch-freeze/override` with role controls + expiry + audit), dashboard override mutation controls, non-admin approval handoff requests, explicit approver decision UX (`PATCH /api/growth/launch-freeze/override` approve/reject queue), recovery-hold auto-unfreeze criteria, hourly freeze audit events with incident/postmortem metadata, and postmortem completion SLA monitoring/alerting (`GET/POST /api/growth/launch-freeze/postmortems`, worker sweep checks) | Monitor SLA thresholds and alert fatigue during rollout |
+| Experimentation and incrementality framework | `in_progress` | `ab_tests` foundation exists and decision-gate endpoint (`GET /api/ab-tests/[id]/decision`) now evaluates holdout share, lift, confidence, and stop/scale outcomes | Add automated action execution and campaign-level holdout assignment enforcement |
+| Automated capital allocation optimizer | `in_progress` | Added `GET /api/growth/capital-allocation` with CAC/LTV/payback banding and hard daily/weekly loss-limit guardrails, `POST /api/growth/capital-allocation` apply/dry-run workflow, scheduler-driven auto-apply sweep infrastructure (`runCapitalAllocationSweep`), and closed-loop policy feedback/reweighting baseline (`GET /api/growth/capital-allocation/policy-feedback`, optional `GROWTH_CAPITAL_ALLOCATION_POLICY_AUTO_TUNE`) | Validate auto-tuned thresholds with production guardrails and alert-based rollback triggers |
+| SEO and site health observability | `in_progress` | `search_quality` alerts/backlink snapshots/monitoring triggers exist, plus `GET /api/growth/seo-observability/summary` for ranking volatility, conversion anomaly, indexation, and runtime-failure surfacing | Add automated remediation routing and crawl/runtime recovery playbooks |
+| Monetization reconciliation layer | `in_progress` | Added `GET /api/finance/reconciliation` for ledger-vs-snapshot variance checks and partner margin rollups, plus post-ingest and scheduled warning/critical anomaly notifications | Add direct credentialed payout API adapters and partner-level payout source normalization |
+| Data platform hardening | `in_progress` | Added revenue contract check endpoint `GET /api/data/contracts/revenue`, manual sweep trigger `POST /api/data/contracts/revenue/sweep`, and hourly worker-driven contract sweeps with alert routing | Add replay/backfill jobs, metric version pinning, and multi-source contract suites |
 | Exit and portfolio disposition workflows | `not_started` | No sale workflow automation yet | Add valuation + broker + diligence packet pipeline |
 | Scale architecture hardening | `not_started` | No multi-account sharding/failover controls yet | Add provider sharding, regional failover, capacity controls |
 | Closed-loop model calibration | `not_started` | No realized-outcome retraining loop yet | Add 30/60/90-day policy calibration jobs |
@@ -728,18 +762,18 @@ The following board tracks the requested scope as `done`, `partial`, or `not_sta
 
 | Requirement | Status | Current Evidence |
 |---|---|---|
-| Revenue tracking integrations (parking + affiliate) | `in_progress` | Added normalized ingestion endpoint `POST /api/integrations/revenue/ingest` plus reconciliation summary endpoint `GET /api/finance/reconciliation` for payout variance and partner margin checks | Add provider-native sync adapters and reconciliation anomaly alerts |
-| Domain metrics pipeline | `partial` | Revenue/traffic/CTR/avg position snapshots exist |
+| Revenue tracking integrations (parking + affiliate) | `in_progress` | Added normalized ingestion endpoint `POST /api/integrations/revenue/ingest`, reconciliation summary endpoint `GET /api/finance/reconciliation`, post-ingest variance anomaly notifications, and executable provider sync adapters for `sedo`/`bodis`/`impact`/`cj`/`awin`/`rakuten` via `connection.config.revenueRecords` | Add direct credentialed provider APIs and payout feed normalization |
+| Domain metrics pipeline | `in_progress` | Revenue/traffic/CTR/avg position snapshots exist, plus unified trend summary endpoint (`GET /api/domains/metrics/summary`) with current/prior window deltas and trend scoring |
 | Renewal management automation | `in_progress` | Renewal sync + warning flows augmented with registrar profile risk scoring, renewal window queue API, ownership/transfer operational states, and on-page ownership operations controls |
 | Content pipeline operations | `done` | AI content pipeline + scheduling controls implemented |
-| A/B testing management | `partial` | `ab_tests` API/schema baseline exists |
+| A/B testing management | `in_progress` | `ab_tests` API/schema baseline exists and decision-gate endpoint now provides statistically-gated stop/scale recommendations |
 | Affiliate operations | `partial` | Affiliate profile management exists; full commission reconciliation pending |
-| SEO monitoring | `partial` | Search quality + backlink monitoring exists |
-| Competitive analysis | `partial` | Competitor and snapshot structures exist |
+| SEO monitoring | `in_progress` | Search quality + backlink monitoring exists, with SEO observability summary API for volatility/anomaly surfacing |
+| Competitive analysis | `in_progress` | Competitor and snapshot structures exist, with automated refresh sweep baseline (`runCompetitorRefreshSweep`) and keyword-gap alerting |
 | Domain lifecycle management | `in_progress` | Canonical states defined; transition enforcement being implemented |
-| Cross-domain optimization | `partial` | Strategy/profile primitives exist; automated propagation loops pending |
-| ROI-based prioritization | `in_progress` | Added automated ROI resurfacing endpoint `GET /api/domains/priorities/roi` combining ledger + traffic signals into prioritized action queues | Wire endpoint outputs into dashboard task queues and campaign auto-planning |
-| Integration marketplace | `done` | Connections, sync runs, provider catalog, operations UI implemented |
+| Cross-domain optimization | `in_progress` | Added recommendation/apply propagation APIs (`GET/POST /api/domains/strategies/propagation`) with module-scoped config transfer, per-target propagation audit history in `domains.content_config.strategyPropagationHistory`, automated propagation sweep baseline (`runStrategyPropagationSweep` + `POST /api/domains/strategies/propagation/sweep`), and closed-loop policy feedback/reweighting baseline (`GET /api/domains/strategies/propagation/policy-feedback`, optional `DOMAIN_STRATEGY_PROPAGATION_SWEEP_AUTO_TUNE`) | Tune confidence/sample thresholds and add auto-tune safety rollback policies |
+| ROI-based prioritization | `in_progress` | Added automated ROI resurfacing endpoint `GET /api/domains/priorities/roi` combining ledger + traffic signals into prioritized action queues, domains dashboard ROI priority queue surfacing, ROI-driven campaign draft auto-planning (`GET/POST /api/growth/campaigns/auto-plan`), and approval-gated auto-launch handoff for newly created drafts (queues only when approved; otherwise creates/links pending `campaign_launch` review tasks) with configurable per-action auto-launch policy and launch-review SLA telemetry in apply responses (created/linked counts + due/escalate timestamps) | Surface launch-review SLA telemetry in growth dashboard panels and add escalation alerting for overdue auto-created launch review tasks |
+| Integration marketplace | `done` | Connections, sync runs, provider catalog, operations UI implemented, plus health hardening (`GET /api/integrations/health/summary`, `POST /api/integrations/health/sweep`, hourly `runIntegrationHealthSweep`) |
 
 #### Use Existing Tools Status
 
@@ -752,11 +786,14 @@ The following board tracks the requested scope as `done`, `partial`, or `not_sta
 
 #### Execution Addendum Status
 
-| Wave | Status | Notes |
+Execution model note: Waves are concurrent where possible (partially parallel with explicit dependencies); naming below uses `Stream` labels to avoid sequential-delivery ambiguity. In particular, Stream C cannot be delivered fully in isolation because Stream C runtime hardening assumes Stream B baselines remain available.
+
+| Stream | Status | Notes |
 |---|---|---|
-| Wave A | `done` | Connection registry/sync trail + keyword-opportunity prioritization delivered |
-| Wave B | `in_progress` | Lifecycle + registrar/ownership operations baselines delivered; ROI resurfacing + revenue ingestion + reconciliation summary APIs delivered; provider-native payout adapters still pending |
-| Wave C | `not_started` | Competitive refresh loops and propagation automation pending |
+| Stream A (Wave A) | `done` | Connection registry/sync trail + keyword-opportunity prioritization delivered |
+| Stream B (Wave B) | `in_progress` | Lifecycle + registrar/ownership operations baselines delivered; ROI resurfacing + revenue ingestion + reconciliation summary APIs delivered; config-driven provider revenue adapters delivered; direct credentialed payout adapters still pending |
+| Stream B.1 (Wave B.1) | `in_progress` | Substage of Stream B (not an independent stream): capital allocation recommendation + apply baseline delivered (`GET/POST /api/growth/capital-allocation`), with scheduler-driven auto-apply sweep support (`runCapitalAllocationSweep`) and manual sweep trigger (`POST /api/growth/capital-allocation/sweep`). Depends on Stream B baselines for ROI + revenue signal fidelity and feeds observability/tuning inputs used by Stream C. |
+| Stream C (Wave C) | `done` | Competitive refresh loops baseline delivered (scheduled + manual sweep with keyword-gap alerts), cross-domain strategy propagation automation baseline delivered (recommend/apply APIs + scheduler/manual sweeps + audit history), marketplace health hardening delivered (integration health summary + sweep + hourly alerts), and closed-loop policy tuning baseline delivered for capital allocation + propagation. Dependency note: Stream C runtime hardening assumes Stream B baselines (including Stream B.1 capital allocation baseline inputs) for registrar/ownership operations, ROI resurfacing, and revenue ingestion/reconciliation. |
 
 ### Logical Batch Plan (Execution Order)
 
@@ -773,8 +810,8 @@ The following board tracks the requested scope as `done`, `partial`, or `not_sta
    - Campaign SLOs/error budgets, reviewer playbooks, rollback procedures.
 6. `Batch 6` (`in_progress`): Wave B completion
    - Parking + affiliate ingestion/reconciliation foundation, ROI resurfacing automation.
-7. `Batch 7`: Next-wave observability and experimentation
-   - Holdouts/lift gates, SEO/runtime anomaly monitoring, data contract checks.
+7. `Batch 7` (`in_progress`): Next-wave observability and experimentation
+   - Holdouts/lift gates delivered baseline; capital allocation recommendation + scheduler auto-apply baseline delivered; SEO observability summary baseline delivered; data contract checks delivered baseline.
 8. `Batch 8`: Scale/compliance/exit hardening
    - Disposition workflows, failover/sharding controls, compliance evidence automation.
 

@@ -51,6 +51,7 @@ import { checkContentSchedule } from './scheduler';
 import { evaluateDomain } from '@/lib/evaluation/evaluator';
 import { checkAndRefreshStaleContent } from '@/lib/content/refresh';
 import { checkRenewals } from '@/lib/domain/renewals';
+import { advanceDomainLifecycleForAcquisition } from '@/lib/domain/lifecycle-sync';
 import { checkBacklinks } from '@/lib/analytics/backlinks';
 import { getDomainGSCSummary } from '@/lib/analytics/search-console';
 import { snapshotCompliance } from '@/lib/compliance/metrics';
@@ -67,8 +68,19 @@ import { refreshExpiringGrowthCredentialsAudit, resolveGrowthPublishCredential }
 import { evaluateGrowthPublishPolicy } from '@/lib/growth/policy';
 import { runMediaReviewEscalationSweep } from '@/lib/growth/media-review-escalation';
 import { purgeDeletedGrowthMediaStorage } from '@/lib/growth/media-retention';
+import { runRevenueReconciliationSweep } from '@/lib/finance/reconciliation-monitor';
+import { runRevenueDataContractSweep } from '@/lib/data/contracts-monitor';
+import { runCapitalAllocationSweep } from '@/lib/growth/capital-allocation-monitor';
+import { runCompetitorRefreshSweep } from '@/lib/competitors/refresh-sweep';
+import { runStrategyPropagationSweep } from '@/lib/domain/strategy-propagation-monitor';
+import { runIntegrationHealthSweep } from '@/lib/integrations/health-monitor';
 import { runIntegrationConnectionSync } from '@/lib/integrations/executor';
 import { scheduleIntegrationConnectionSyncJobs } from '@/lib/integrations/scheduler';
+import { runCampaignLaunchReviewEscalationSweep } from '@/lib/review/campaign-launch-sla';
+import {
+    runGrowthLaunchFreezePostmortemSlaSweep,
+    syncGrowthLaunchFreezeAuditState,
+} from '@/lib/growth/launch-freeze';
 import { createNotification } from '@/lib/notifications';
 import {
     evaluatePromotionIntegrityAlert,
@@ -342,6 +354,15 @@ async function logAcquisitionEvent(
 }
 
 async function upsertResearchCandidate(candidate: ListingCandidate) {
+    const [linkedDomain] = await db.select({ id: domains.id })
+        .from(domains)
+        .where(and(
+            eq(domains.domain, candidate.domain),
+            isNull(domains.deletedAt),
+        ))
+        .limit(1);
+    const resolvedDomainId = linkedDomain?.id ?? null;
+
     const inferredAftermarket = candidate.currentBid ?? candidate.buyNowPrice ?? null;
     const inferredRegPrice = candidate.acquisitionCost && candidate.acquisitionCost <= 50
         ? candidate.acquisitionCost
@@ -358,6 +379,7 @@ async function upsertResearchCandidate(candidate: ListingCandidate) {
         auctionEndsAt: candidate.auctionEndsAt,
         aftermarketPrice: inferredAftermarket,
         registrationPrice: inferredRegPrice,
+        domainId: resolvedDomainId,
         decision: 'researching',
         underwritingVersion: UNDERWRITING_VERSION,
     }).onConflictDoUpdate({
@@ -371,6 +393,7 @@ async function upsertResearchCandidate(candidate: ListingCandidate) {
             auctionEndsAt: candidate.auctionEndsAt,
             aftermarketPrice: inferredAftermarket,
             registrationPrice: inferredRegPrice,
+            ...(resolvedDomainId ? { domainId: resolvedDomainId } : {}),
             underwritingVersion: UNDERWRITING_VERSION,
         },
     }).returning();
@@ -438,6 +461,21 @@ async function resolveResearchRowFromPayload(
         .where(eq(domainResearch.domain, normalized.domain))
         .limit(1);
     if (byDomain.length > 0) {
+        if (!byDomain[0].domainId) {
+            const [linkedDomain] = await db.select({ id: domains.id })
+                .from(domains)
+                .where(and(
+                    eq(domains.domain, normalized.domain),
+                    isNull(domains.deletedAt),
+                ))
+                .limit(1);
+            if (linkedDomain?.id) {
+                const [updated] = await db.update(domainResearch).set({
+                    domainId: linkedDomain.id,
+                }).where(eq(domainResearch.id, byDomain[0].id)).returning();
+                return updated ?? byDomain[0];
+            }
+        }
         return byDomain[0];
     }
 
@@ -445,9 +483,18 @@ async function resolveResearchRowFromPayload(
         return null;
     }
 
+    const [linkedDomain] = await db.select({ id: domains.id })
+        .from(domains)
+        .where(and(
+            eq(domains.domain, normalized.domain),
+            isNull(domains.deletedAt),
+        ))
+        .limit(1);
+
     const [created] = await db.insert(domainResearch).values({
         domain: normalized.domain,
         tld: normalized.tld,
+        domainId: linkedDomain?.id ?? null,
         decision: 'researching',
         underwritingVersion: UNDERWRITING_VERSION,
     }).returning();
@@ -2528,6 +2575,30 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
                 decisionReason: decision.reason,
             }).where(eq(domainResearch.id, research.id));
 
+            if (research.domainId) {
+                try {
+                    await advanceDomainLifecycleForAcquisition({
+                        domainId: research.domainId,
+                        targetState: 'underwriting',
+                        actorId: null,
+                        actorRole: 'expert',
+                        reason: 'Automated underwriting pipeline scored domain candidate',
+                        metadata: {
+                            source: 'score_candidate',
+                            domainResearchId: research.id,
+                            decision: decision.decision,
+                            recommendation: evaluation.recommendation,
+                        },
+                    });
+                } catch (lifecycleError) {
+                    console.error('Failed to sync lifecycle to underwriting during score_candidate:', {
+                        domainResearchId: research.id,
+                        domainId: research.domainId,
+                        error: lifecycleError instanceof Error ? lifecycleError.message : String(lifecycleError),
+                    });
+                }
+            }
+
             await syncDomainBuyReviewTask({
                 domainResearchId: research.id,
                 domainId: research.domainId ?? null,
@@ -3227,6 +3298,106 @@ export async function runWorkerContinuously(options: WorkerOptions = {}): Promis
                         }
                     })
                     .catch((err: unknown) => console.error('[IntegrationSyncScheduler] Error:', err));
+                await runRevenueReconciliationSweep()
+                    .then((summary) => {
+                        if (summary.domainsCompared > 0) {
+                            console.log(
+                                `[FinanceReconciliationSweep] domains=${summary.domainsCompared} ` +
+                                `matched=${summary.matched} warning=${summary.warning} critical=${summary.critical} ` +
+                                `alerts=${summary.alertsCreated}`,
+                            );
+                        }
+                    })
+                    .catch((err: unknown) => console.error('[FinanceReconciliationSweep] Error:', err));
+                await runRevenueDataContractSweep()
+                    .then((summary) => {
+                        if (summary.domainsChecked > 0) {
+                            console.log(
+                                `[RevenueContractSweep] domains=${summary.domainsChecked} pass=${summary.pass} ` +
+                                `warning=${summary.warning} critical=${summary.critical} alerts=${summary.alertsCreated} ` +
+                                `rowViolations=${summary.totalRowViolations}`,
+                            );
+                        }
+                    })
+                    .catch((err: unknown) => console.error('[RevenueContractSweep] Error:', err));
+                await runCapitalAllocationSweep()
+                    .then((summary) => {
+                        if (summary.enabled && (summary.recommendations > 0 || summary.candidateUpdates > 0)) {
+                            console.log(
+                                `[CapitalAllocationSweep] dryRun=${summary.dryRun} recs=${summary.recommendations} ` +
+                                `candidates=${summary.candidateUpdates} applied=${summary.appliedCount} ` +
+                                `missing=${summary.missingCampaignCount} hardLimited=${summary.hardLimitedCount}`,
+                            );
+                        }
+                    })
+                    .catch((err: unknown) => console.error('[CapitalAllocationSweep] Error:', err));
+                await runCompetitorRefreshSweep()
+                    .then((summary) => {
+                        if (summary.enabled && summary.scanned > 0) {
+                            console.log(
+                                `[CompetitorRefreshSweep] scanned=${summary.scanned} refreshed=${summary.refreshed} ` +
+                                `failed=${summary.failed} gapAlerts=${summary.gapAlerts}`,
+                            );
+                        }
+                    })
+                    .catch((err: unknown) => console.error('[CompetitorRefreshSweep] Error:', err));
+                await runStrategyPropagationSweep()
+                    .then((summary) => {
+                        if (summary.enabled && summary.candidateTargets > 0) {
+                            console.log(
+                                `[StrategyPropagationSweep] dryRun=${summary.dryRun} recs=${summary.recommendationCount} ` +
+                                `sources=${summary.candidateSources} targets=${summary.candidateTargets} ` +
+                                `appliedSources=${summary.appliedSources} appliedTargets=${summary.appliedTargets} ` +
+                                `errors=${summary.errorCount}`,
+                            );
+                        }
+                    })
+                    .catch((err: unknown) => console.error('[StrategyPropagationSweep] Error:', err));
+                await runIntegrationHealthSweep()
+                    .then((summary) => {
+                        if (summary.enabled && summary.scanned > 0) {
+                            console.log(
+                                `[IntegrationHealthSweep] scanned=${summary.scanned} healthy=${summary.healthy} ` +
+                                `warning=${summary.warning} critical=${summary.critical} alerts=${summary.alertsCreated}`,
+                            );
+                        }
+                    })
+                    .catch((err: unknown) => console.error('[IntegrationHealthSweep] Error:', err));
+                await runCampaignLaunchReviewEscalationSweep()
+                    .then((summary) => {
+                        if (summary.enabled && summary.scanned > 0) {
+                            console.log(
+                                `[CampaignLaunchReviewSweep] scanned=${summary.scanned} pending=${summary.pendingCount} ` +
+                                `eligible=${summary.escalatedEligible} alerted=${summary.alerted} ` +
+                                `cooldownSkipped=${summary.cooldownSkipped} cappedSkipped=${summary.cappedSkipped} ` +
+                                `opsDelivered=${summary.opsDelivered} opsFailed=${summary.opsFailed} errors=${summary.errors}`,
+                            );
+                        }
+                    })
+                    .catch((err: unknown) => console.error('[CampaignLaunchReviewSweep] Error:', err));
+                await syncGrowthLaunchFreezeAuditState()
+                    .then((summary) => {
+                        if (summary.changed) {
+                            console.log(
+                                `[GrowthLaunchFreezeAudit] event=${summary.event} active=${summary.active} ` +
+                                `rawActive=${summary.rawActive} recoveryHold=${summary.recoveryHoldActive} ` +
+                                `recovery=${summary.recoveryHealthyWindows}/${summary.recoveryHealthyWindowsRequired}`,
+                            );
+                        }
+                    })
+                    .catch((err: unknown) => console.error('[GrowthLaunchFreezeAudit] Error:', err));
+                await runGrowthLaunchFreezePostmortemSlaSweep()
+                    .then((summary) => {
+                        if (summary.enabled && (summary.overdue > 0 || summary.alertsCreated > 0)) {
+                            console.log(
+                                `[GrowthLaunchFreezePostmortemSLA] scanned=${summary.scanned} ` +
+                                `overdue=${summary.overdue} completed=${summary.postmortemsCompleted} ` +
+                                `alerts=${summary.alertsCreated} opsSent=${summary.opsAlertsSent} ` +
+                                `opsFailed=${summary.opsAlertsFailed}`,
+                            );
+                        }
+                    })
+                    .catch((err: unknown) => console.error('[GrowthLaunchFreezePostmortemSLA] Error:', err));
                 await runAllMonitoringChecks().catch((err: unknown) => console.error('[Monitoring] Error:', err));
                 lastSchedulerCheck = now;
             }

@@ -13,7 +13,7 @@
 
 import { db, domains, contentQueue, articles } from '@/lib/db';
 import { eq, count } from 'drizzle-orm';
-import { createDirectUploadProject, directUploadDeploy, addCustomDomain } from './cloudflare';
+import { createDirectUploadProject, directUploadDeploy, addCustomDomain, getZoneNameservers } from './cloudflare';
 import { updateNameservers } from './godaddy';
 import { generateSiteFiles } from './generator';
 
@@ -45,7 +45,6 @@ function validateDeployEnv(): string[] {
     const errors: string[] = [];
 
     if (!process.env.CLOUDFLARE_API_TOKEN) errors.push('CLOUDFLARE_API_TOKEN is not set');
-    if (!process.env.CLOUDFLARE_ACCOUNT_ID) errors.push('CLOUDFLARE_ACCOUNT_ID is not set');
 
     return errors;
 }
@@ -147,16 +146,20 @@ async function stepDirectUpload(ctx: DeployContext, files: { path: string; conte
 /**
  * Step 3: Add custom domain to Cloudflare Pages
  */
-async function stepAddCustomDomain(ctx: DeployContext): Promise<void> {
+async function stepAddCustomDomain(ctx: DeployContext): Promise<boolean> {
     if (!ctx.payload.addCustomDomain || !ctx.cfProject) {
         await doneStep(ctx, 2, 'Skipped');
-        return;
+        return false;
     }
 
     await startStep(ctx, 2);
     try {
-        await addCustomDomain(ctx.cfProject, ctx.payload.domain);
+        const result = await addCustomDomain(ctx.cfProject, ctx.payload.domain);
+        if (!result.success) {
+            throw new Error(result.error || 'Unknown Cloudflare domain link error');
+        }
         await doneStep(ctx, 2, `Linked ${ctx.payload.domain}`);
+        return true;
     } catch (err: unknown) {
         await failStep(ctx, 2, `Failed to link ${ctx.payload.domain}: ${err instanceof Error ? err.message : String(err)}`);
         throw err;
@@ -166,8 +169,13 @@ async function stepAddCustomDomain(ctx: DeployContext): Promise<void> {
 /**
  * Step 4: Update DNS via GoDaddy API
  */
-async function stepUpdateDns(ctx: DeployContext): Promise<void> {
-    if (!ctx.payload.addCustomDomain || !process.env.GODADDY_API_KEY || !process.env.CLOUDFLARE_NAMESERVERS) {
+async function stepUpdateDns(ctx: DeployContext, customDomainLinked: boolean): Promise<void> {
+    if (!ctx.payload.addCustomDomain || !customDomainLinked) {
+        await doneStep(ctx, 3, 'Skipped (Custom domain not linked)');
+        return;
+    }
+
+    if (!process.env.GODADDY_API_KEY) {
         await doneStep(ctx, 3, 'Skipped (Missing config)');
         return;
     }
@@ -175,9 +183,24 @@ async function stepUpdateDns(ctx: DeployContext): Promise<void> {
     await startStep(ctx, 3);
 
     try {
-        const nameservers = process.env.CLOUDFLARE_NAMESERVERS.split(',').map(ns => ns.trim());
-        await updateNameservers(ctx.payload.domain, nameservers);
-        await doneStep(ctx, 3, 'Nameservers updated');
+        const [domainRow] = await db.select({ registrar: domains.registrar })
+            .from(domains)
+            .where(eq(domains.id, ctx.domainId))
+            .limit(1);
+
+        if (!domainRow || domainRow.registrar !== 'godaddy') {
+            await doneStep(ctx, 3, 'Skipped (Registrar is not GoDaddy)');
+            return;
+        }
+
+        const zone = await getZoneNameservers(ctx.payload.domain);
+        if (!zone) {
+            await failStep(ctx, 3, `Unable to resolve Cloudflare nameservers for ${ctx.payload.domain}`);
+            return;
+        }
+
+        await updateNameservers(ctx.payload.domain, zone.nameservers);
+        await doneStep(ctx, 3, `Nameservers updated (${zone.nameservers.join(', ')})`);
     } catch (err) {
         await failStep(ctx, 3, err instanceof Error ? err.message : 'DNS update failed');
         console.error(`DNS update failed for ${ctx.payload.domain}:`, err);
@@ -252,8 +275,8 @@ export async function processDeployJob(jobId: string): Promise<void> {
     try {
         const files = await stepGenerateFiles(ctx);
         await stepDirectUpload(ctx, files);
-        await stepAddCustomDomain(ctx);
-        await stepUpdateDns(ctx);
+        const customDomainLinked = await stepAddCustomDomain(ctx);
+        await stepUpdateDns(ctx, customDomainLinked);
 
         // Mark complete
         await db.update(contentQueue).set({

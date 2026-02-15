@@ -1189,6 +1189,12 @@ export const domainFinanceLedgerEntries = pgTable('domain_finance_ledger_entries
     dateIdx: index('domain_finance_ledger_date_idx').on(t.entryDate),
     typeIdx: index('domain_finance_ledger_type_idx').on(t.entryType),
     impactIdx: index('domain_finance_ledger_impact_idx').on(t.impact),
+    sourceIdentityUidx: uniqueIndex('domain_finance_ledger_source_identity_uidx').on(
+        t.domainId,
+        t.entryDate,
+        t.source,
+        t.sourceRef,
+    ),
     sourceRefIdx: index('domain_finance_ledger_source_ref_idx').on(t.sourceRef),
     creatorIdx: index('domain_finance_ledger_created_by_idx').on(t.createdBy),
 }));

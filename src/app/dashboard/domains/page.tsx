@@ -17,8 +17,12 @@ import { isNull } from 'drizzle-orm';
 import { formatDate } from '@/lib/format-utils';
 import { cn } from '@/lib/utils';
 import { DeployAllButton } from '@/components/dashboard/DeployAllButton';
+import { BulkNameserverCutoverButton } from '@/components/dashboard/BulkNameserverCutoverButton';
 import { DomainSearch } from '@/components/dashboard/DomainSearch';
 import { DomainActions } from '@/components/dashboard/DomainActions';
+import { getDomainRoiPriorities } from '@/lib/domain/roi-priority-service';
+import { RoiCampaignAutoplanButton } from '@/components/dashboard/RoiCampaignAutoplanButton';
+import { getCampaignLaunchReviewSlaSummary } from '@/lib/review/campaign-launch-sla';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,6 +39,20 @@ const tierLabels: Record<number, string> = {
     2: 'Secondary',
     3: 'Hold',
 };
+
+const roiActionBadgeClasses: Record<string, string> = {
+    scale: 'bg-emerald-600 text-white',
+    optimize: 'bg-blue-600 text-white',
+    recover: 'bg-amber-600 text-white',
+    incubate: 'bg-violet-600 text-white',
+    hold: 'bg-slate-500 text-white',
+};
+
+const currencyFormatter = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 0,
+});
 
 interface DomainsPageProps {
     readonly searchParams: Promise<{ readonly q?: string; readonly status?: string; readonly tier?: string }>;
@@ -65,10 +83,36 @@ async function getDomains(filters: { q?: string; status?: string; tier?: string 
     }
 }
 
+async function getRoiPriorityPreview() {
+    try {
+        return await getDomainRoiPriorities({
+            limit: 8,
+            windowDays: 30,
+        });
+    } catch (error) {
+        console.error('Failed to load ROI priority preview:', error);
+        return null;
+    }
+}
+
+async function getCampaignLaunchReviewSummaryPreview() {
+    try {
+        return await getCampaignLaunchReviewSlaSummary({
+            limit: 250,
+            topIssueLimit: 3,
+        });
+    } catch (error) {
+        console.error('Failed to load campaign launch review summary preview:', error);
+        return null;
+    }
+}
+
 export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
     const { searchParams } = props;
     const params = await searchParams;
     const { data: allDomains, error } = await getDomains(params);
+    const roiPriority = await getRoiPriorityPreview();
+    const launchReviewSummary = await getCampaignLaunchReviewSummaryPreview();
 
     if (error) {
         return (
@@ -101,6 +145,7 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                 </div>
                 <div className="flex gap-2">
                     <DeployAllButton domainIds={allDomains.filter(d => !d.isDeployed).map(d => d.id)} />
+                    <BulkNameserverCutoverButton domainIds={allDomains.filter(d => d.registrar === 'godaddy').map(d => d.id)} />
                     <Link href="/dashboard/domains/import">
                         <Button variant="outline">
                             Import CSV
@@ -136,6 +181,105 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
             <Suspense>
                 <DomainSearch />
             </Suspense>
+
+            {/* ROI Priority Queue */}
+            <Card>
+                <CardContent className="space-y-4 p-4">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                            <h2 className="text-sm font-semibold">ROI Priority Queue</h2>
+                            <p className="text-xs text-muted-foreground">
+                                Top domains to revisit based on 30-day revenue, cost, and traffic signals.
+                            </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                            {roiPriority ? (
+                                <div className="flex flex-wrap items-center gap-2 text-xs">
+                                    {Object.entries(roiPriority.actionCounts).map(([action, count]) => (
+                                        <Badge key={action} variant="outline">
+                                            {action}: {count}
+                                        </Badge>
+                                    ))}
+                                </div>
+                            ) : null}
+                            {roiPriority && roiPriority.priorities.length > 0 ? (
+                                <RoiCampaignAutoplanButton
+                                    limit={Math.min(roiPriority.priorities.length, 25)}
+                                    windowDays={roiPriority.windowDays}
+                                />
+                            ) : null}
+                        </div>
+                    </div>
+
+                    {!roiPriority || roiPriority.priorities.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">
+                            ROI queue is not available yet. Add ledger and traffic snapshots to activate prioritization.
+                        </p>
+                    ) : (
+                        <div className="space-y-2">
+                            {roiPriority.priorities.map((priority) => (
+                                <div
+                                    key={priority.domainId}
+                                    className="flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between"
+                                >
+                                    <div className="min-w-0">
+                                        <Link
+                                            href={`/dashboard/domains/${priority.domainId}`}
+                                            className="font-medium hover:underline"
+                                        >
+                                            {priority.domain}
+                                        </Link>
+                                        <p className="truncate text-xs text-muted-foreground">
+                                            {priority.reasons[0] || 'No primary signal available'}
+                                        </p>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                                        <Badge className={roiActionBadgeClasses[priority.action] || roiActionBadgeClasses.hold}>
+                                            {priority.action}
+                                        </Badge>
+                                        <Badge variant="outline">
+                                            Score {priority.score}
+                                        </Badge>
+                                        <span className="text-muted-foreground">
+                                            Net {currencyFormatter.format(priority.net30d)}
+                                        </span>
+                                        <span className="text-muted-foreground">
+                                            ROI {priority.roiPct === null ? 'N/A' : `${priority.roiPct.toFixed(1)}%`}
+                                        </span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {launchReviewSummary && launchReviewSummary.pendingCount > 0 ? (
+                        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs">
+                            <div className="mb-2 flex flex-wrap items-center gap-2">
+                                <span className="font-semibold text-amber-900">Launch Review Queue</span>
+                                <Badge variant="outline">Pending {launchReviewSummary.pendingCount}</Badge>
+                                <Badge variant="outline">SLA breached {launchReviewSummary.dueBreachedCount}</Badge>
+                                <Badge variant="outline">Escalated {launchReviewSummary.escalatedCount}</Badge>
+                            </div>
+                            {launchReviewSummary.topOverdue.length > 0 ? (
+                                <div className="space-y-1">
+                                    {launchReviewSummary.topOverdue.map((item) => (
+                                        <div key={item.taskId} className="flex flex-wrap items-center gap-2 text-amber-900">
+                                            <span className="font-medium">{item.domain}</span>
+                                            <span className="text-amber-800/80">Task {item.taskId.slice(0, 8)}</span>
+                                            <span className="text-amber-800/80">
+                                                Due {formatDate(item.dueAt)}
+                                            </span>
+                                            <span className="text-amber-800/80">
+                                                Escalate {formatDate(item.escalateAt)}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : null}
+                        </div>
+                    ) : null}
+                </CardContent>
+            </Card>
 
             {/* Domains Table */}
             <Card>

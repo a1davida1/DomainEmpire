@@ -46,6 +46,7 @@ interface PromotionCampaign {
     budget: number;
     status: CampaignStatus;
     dailyCap: number;
+    metrics?: Record<string, unknown> | null;
     createdAt: string;
     updatedAt: string | null;
     research?: CampaignResearchSummary | null;
@@ -189,6 +190,139 @@ interface GrowthPolicyAuditResponse {
     }>;
     truncated: boolean;
     generatedAt: string;
+}
+
+interface GrowthSloSummaryResponse {
+    windowHours: number;
+    publish: {
+        targetSuccessRate: number;
+        evaluatedCount: number;
+        publishedCount: number;
+        blockedCount: number;
+        failedCount: number;
+        successRate: number | null;
+        failureRate: number | null;
+        burnPct: number | null;
+        status: 'unknown' | 'healthy' | 'warning' | 'critical';
+    };
+    moderation: {
+        targetOnTimeRate: number;
+        dueCount: number;
+        onTimeCount: number;
+        lateCount: number;
+        onTimeRate: number | null;
+        lateRate: number | null;
+        burnPct: number | null;
+        status: 'unknown' | 'healthy' | 'warning' | 'critical';
+    };
+    syncFreshness: {
+        maxLagHours: number;
+        latestCompletedAt: string | null;
+        lagHours: number | null;
+        burnPct: number | null;
+        status: 'unknown' | 'healthy' | 'warning' | 'critical';
+    };
+    overallStatus: 'unknown' | 'healthy' | 'warning' | 'critical';
+    launchFreeze: {
+        active: boolean;
+        rawActive: boolean;
+        recoveryHoldActive: boolean;
+        recoveryHealthyWindows: number;
+        recoveryHealthyWindowsRequired: number;
+        level: 'healthy' | 'warning' | 'critical';
+        reasonCodes: string[];
+        blockedChannels: GrowthChannel[];
+        blockedActions: Array<'scale' | 'optimize' | 'recover' | 'incubate'>;
+        overrideActive: boolean;
+        overrideId: string | null;
+        overrideExpiresAt: string | null;
+        overrideReason: string | null;
+        windowHours: number[];
+    };
+    postmortemSla: {
+        enabled: boolean;
+        scanned: number;
+        overdue: number;
+        alertsCreated: number;
+        opsAlertsSent: number;
+        opsAlertsFailed: number;
+        postmortemsCompleted: number;
+        overdueIncidentKeys: string[];
+    };
+    generatedAt: string;
+}
+
+interface GrowthLaunchFreezeOverrideRecord {
+    id: string;
+    actorUserId: string | null;
+    reason: string;
+    createdAt: string;
+    expiresAt: string | null;
+    postmortemUrl: string | null;
+    incidentKey: string | null;
+    override: {
+        warningBurnPct?: number;
+        criticalBurnPct?: number;
+        blockedChannels?: GrowthChannel[];
+        blockedActions?: Array<'scale' | 'optimize' | 'recover' | 'incubate'>;
+        recoveryHealthyWindowsRequired?: number;
+    };
+    status: 'active' | 'cleared' | 'expired';
+    supersededById: string | null;
+}
+
+interface GrowthLaunchFreezeOverrideRequestRecord {
+    id: string;
+    requestedByUserId: string | null;
+    requestedByRole: string | null;
+    reason: string;
+    submittedAt: string;
+    expiresAt: string | null;
+    postmortemUrl: string | null;
+    incidentKey: string | null;
+    override: {
+        warningBurnPct?: number;
+        criticalBurnPct?: number;
+        blockedChannels?: GrowthChannel[];
+        blockedActions?: Array<'scale' | 'optimize' | 'recover' | 'incubate'>;
+        recoveryHealthyWindowsRequired?: number;
+    };
+    status: 'pending' | 'approved' | 'rejected' | 'expired';
+    decidedAt: string | null;
+    decidedByUserId: string | null;
+    decisionReason: string | null;
+    appliedOverrideId: string | null;
+}
+
+interface GrowthLaunchFreezeOverrideStatusResponse {
+    state: {
+        active: boolean;
+        rawActive: boolean;
+        recoveryHoldActive: boolean;
+        recoveryHealthyWindows: number;
+        recoveryHealthyWindowsRequired: number;
+        level: 'healthy' | 'warning' | 'critical';
+        reasonCodes: string[];
+        blockedChannels: GrowthChannel[];
+        blockedActions: Array<'scale' | 'optimize' | 'recover' | 'incubate'>;
+        overrideActive: boolean;
+        overrideId: string | null;
+        overrideExpiresAt: string | null;
+        overrideReason: string | null;
+        generatedAt: string;
+    };
+    baseConfig: {
+        warningBurnPct: number;
+        criticalBurnPct: number;
+        blockedChannels: GrowthChannel[];
+        blockedActions: Array<'scale' | 'optimize' | 'recover' | 'incubate'>;
+        recoveryHealthyWindowsRequired: number;
+    };
+    activeOverride: GrowthLaunchFreezeOverrideRecord | null;
+    history: GrowthLaunchFreezeOverrideRecord[];
+    requests: GrowthLaunchFreezeOverrideRequestRecord[];
+    overrideAllowedRoles: Array<'admin' | 'expert'>;
+    canMutate: boolean;
 }
 
 interface ModerationApprovalSummary {
@@ -558,6 +692,40 @@ function drillStatusBadgeClass(status: GrowthCredentialDrillStatus): string {
     return 'bg-red-100 text-red-800';
 }
 
+function readCampaignAction(campaign: PromotionCampaign): 'scale' | 'optimize' | 'recover' | 'incubate' | null {
+    const metrics = campaign.metrics;
+    if (!metrics || typeof metrics !== 'object') return null;
+    const raw = typeof (metrics as Record<string, unknown>).action === 'string'
+        ? (metrics as Record<string, unknown>).action as string
+        : null;
+    if (!raw) return null;
+    const normalized = raw.trim().toLowerCase();
+    if (
+        normalized === 'scale'
+        || normalized === 'optimize'
+        || normalized === 'recover'
+        || normalized === 'incubate'
+    ) {
+        return normalized;
+    }
+    return null;
+}
+
+function isCampaignBlockedByLaunchFreeze(
+    campaign: PromotionCampaign,
+    summary: GrowthSloSummaryResponse | null,
+): boolean {
+    const freeze = summary?.launchFreeze;
+    if (!freeze?.active) return false;
+
+    const channelBlocked = campaign.channels.length === 0
+        || campaign.channels.some((channel) => freeze.blockedChannels.includes(channel));
+    const action = readCampaignAction(campaign);
+    const actionBlocked = !action || freeze.blockedActions.includes(action);
+
+    return channelBlocked && actionBlocked;
+}
+
 export default function GrowthDashboardPage() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -572,6 +740,8 @@ export default function GrowthDashboardPage() {
     const [reviewers, setReviewers] = useState<ReviewerDirectoryEntry[]>([]);
     const [moderationPolicyInsights, setModerationPolicyInsights] = useState<ModerationPolicyInsightsResponse | null>(null);
     const [growthPolicyAudit, setGrowthPolicyAudit] = useState<GrowthPolicyAuditResponse | null>(null);
+    const [growthSloSummary, setGrowthSloSummary] = useState<GrowthSloSummaryResponse | null>(null);
+    const [freezeOverrideStatus, setFreezeOverrideStatus] = useState<GrowthLaunchFreezeOverrideStatusResponse | null>(null);
     const [credentials, setCredentials] = useState<GrowthCredentialStatus[]>([]);
     const [credentialDrillRuns, setCredentialDrillRuns] = useState<GrowthCredentialDrillRun[]>([]);
     const [candidates, setCandidates] = useState<DomainResearchCandidate[]>([]);
@@ -590,6 +760,8 @@ export default function GrowthDashboardPage() {
     const [exportingModerationAudit, setExportingModerationAudit] = useState(false);
     const [exportingPolicyInsights, setExportingPolicyInsights] = useState(false);
     const [runningEscalationSweep, setRunningEscalationSweep] = useState(false);
+    const [updatingFreezeOverride, setUpdatingFreezeOverride] = useState(false);
+    const [decidingFreezeRequestId, setDecidingFreezeRequestId] = useState<string | null>(null);
     const [showOnlyPendingModeration, setShowOnlyPendingModeration] = useState(true);
     const [mutatingChannel, setMutatingChannel] = useState<GrowthChannel | null>(null);
     const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
@@ -640,6 +812,19 @@ export default function GrowthDashboardPage() {
             testPublishValidated: false,
         },
     });
+    const [freezeOverrideReason, setFreezeOverrideReason] = useState('');
+    const [freezeOverrideExpiresHours, setFreezeOverrideExpiresHours] = useState('24');
+    const [freezeOverrideChannels, setFreezeOverrideChannels] = useState<Record<GrowthChannel, boolean>>({
+        pinterest: true,
+        youtube_shorts: true,
+    });
+    const [freezeOverrideActions, setFreezeOverrideActions] = useState<Record<'scale' | 'optimize' | 'recover' | 'incubate', boolean>>({
+        scale: true,
+        optimize: true,
+        recover: true,
+        incubate: true,
+    });
+    const [freezeOverrideDecisionReasons, setFreezeOverrideDecisionReasons] = useState<Record<string, string>>({});
 
     const credentialByChannel = useMemo(() => {
         const map = new Map<GrowthChannel, GrowthCredentialStatus>();
@@ -660,6 +845,10 @@ export default function GrowthDashboardPage() {
     const teamLeadReviewers = useMemo(() => {
         return reviewers.filter((reviewer) => reviewer.role === 'expert' || reviewer.role === 'admin');
     }, [reviewers]);
+
+    const pendingFreezeOverrideRequests = useMemo(() => {
+        return freezeOverrideStatus?.requests.filter((entry) => entry.status === 'pending') ?? [];
+    }, [freezeOverrideStatus]);
 
     const recommendedReviewers = useMemo(() => {
         return [...reviewers]
@@ -770,6 +959,8 @@ export default function GrowthDashboardPage() {
             requestJson<GrowthPolicyAuditResponse>('/api/growth/policy-audit?windowHours=168'),
             requestJson<GrowthCredentialListResponse>('/api/growth/channel-credentials'),
             requestJson<GrowthCredentialDrillListResponse>('/api/growth/channel-credentials/drill?limit=20'),
+            requestJson<GrowthSloSummaryResponse>('/api/growth/slo/summary?windowHours=168'),
+            requestJson<GrowthLaunchFreezeOverrideStatusResponse>('/api/growth/launch-freeze/override?historyLimit=10'),
             requestJson<CandidateListResponse>('/api/acquisition/candidates?limit=100'),
         ]);
 
@@ -833,7 +1024,21 @@ export default function GrowthDashboardPage() {
             firstError = (firstError || drillRunsResult.reason) as ApiError;
         }
 
-        const candidatesResult = tasks[8];
+        const sloSummaryResult = tasks[8];
+        if (sloSummaryResult.status === 'fulfilled') {
+            setGrowthSloSummary(sloSummaryResult.value);
+        } else {
+            firstError = (firstError || sloSummaryResult.reason) as ApiError;
+        }
+
+        const freezeOverrideResult = tasks[9];
+        if (freezeOverrideResult.status === 'fulfilled') {
+            setFreezeOverrideStatus(freezeOverrideResult.value);
+        } else {
+            firstError = (firstError || freezeOverrideResult.reason) as ApiError;
+        }
+
+        const candidatesResult = tasks[10];
         if (candidatesResult.status === 'fulfilled') {
             setCandidates(candidatesResult.value.candidates || []);
             setCampaignForm((prev) => {
@@ -954,6 +1159,196 @@ export default function GrowthDashboardPage() {
             setMutatingCampaignId(null);
         }
     }, [refreshDashboard]);
+
+    const handleApplyFreezeOverride = useCallback(async () => {
+        setMessage(null);
+        const reason = freezeOverrideReason.trim();
+        if (reason.length < 12) {
+            setError('Override reason must be at least 12 characters.');
+            return;
+        }
+
+        const blockedChannels = (Object.entries(freezeOverrideChannels) as Array<[GrowthChannel, boolean]>)
+            .filter(([, enabled]) => enabled)
+            .map(([channel]) => channel);
+        if (blockedChannels.length === 0) {
+            setError('Select at least one blocked channel for the temporary override.');
+            return;
+        }
+
+        const blockedActions = (Object.entries(freezeOverrideActions) as Array<[keyof typeof freezeOverrideActions, boolean]>)
+            .filter(([, enabled]) => enabled)
+            .map(([action]) => action);
+        if (blockedActions.length === 0) {
+            setError('Select at least one blocked action for the temporary override.');
+            return;
+        }
+
+        const expiresHours = Number.parseInt(freezeOverrideExpiresHours, 10);
+        if (!Number.isFinite(expiresHours) || expiresHours < 1 || expiresHours > 336) {
+            setError('Override expiry must be between 1 and 336 hours.');
+            return;
+        }
+
+        setUpdatingFreezeOverride(true);
+        try {
+            const expiresAt = new Date(Date.now() + expiresHours * 60 * 60 * 1000).toISOString();
+            await requestJson('/api/growth/launch-freeze/override', {
+                method: 'POST',
+                body: JSON.stringify({
+                    reason,
+                    expiresAt,
+                    override: {
+                        blockedChannels,
+                        blockedActions,
+                    },
+                }),
+            });
+            setFreezeOverrideReason('');
+            setMessage('Launch-freeze override applied.');
+            await refreshDashboard();
+        } catch (requestError) {
+            const typedError = requestError as ApiError;
+            setError(typedError.message || 'Failed to apply launch-freeze override');
+        } finally {
+            setUpdatingFreezeOverride(false);
+        }
+    }, [
+        freezeOverrideReason,
+        freezeOverrideChannels,
+        freezeOverrideActions,
+        freezeOverrideExpiresHours,
+        refreshDashboard,
+    ]);
+
+    const handleRequestFreezeOverrideApproval = useCallback(async () => {
+        setMessage(null);
+        const reason = freezeOverrideReason.trim();
+        if (reason.length < 12) {
+            setError('Override request reason must be at least 12 characters.');
+            return;
+        }
+
+        const blockedChannels = (Object.entries(freezeOverrideChannels) as Array<[GrowthChannel, boolean]>)
+            .filter(([, enabled]) => enabled)
+            .map(([channel]) => channel);
+        if (blockedChannels.length === 0) {
+            setError('Select at least one blocked channel for the override request.');
+            return;
+        }
+
+        const blockedActions = (Object.entries(freezeOverrideActions) as Array<[keyof typeof freezeOverrideActions, boolean]>)
+            .filter(([, enabled]) => enabled)
+            .map(([action]) => action);
+        if (blockedActions.length === 0) {
+            setError('Select at least one blocked action for the override request.');
+            return;
+        }
+
+        const expiresHours = Number.parseInt(freezeOverrideExpiresHours, 10);
+        if (!Number.isFinite(expiresHours) || expiresHours < 1 || expiresHours > 336) {
+            setError('Override request expiry must be between 1 and 336 hours.');
+            return;
+        }
+
+        setUpdatingFreezeOverride(true);
+        try {
+            const expiresAt = new Date(Date.now() + expiresHours * 60 * 60 * 1000).toISOString();
+            await requestJson('/api/growth/launch-freeze/override', {
+                method: 'POST',
+                body: JSON.stringify({
+                    reason,
+                    requestApproval: true,
+                    expiresAt,
+                    override: {
+                        blockedChannels,
+                        blockedActions,
+                    },
+                }),
+            });
+            setFreezeOverrideReason('');
+            setMessage('Override approval request submitted.');
+            await refreshDashboard();
+        } catch (requestError) {
+            const typedError = requestError as ApiError;
+            setError(typedError.message || 'Failed to submit override approval request');
+        } finally {
+            setUpdatingFreezeOverride(false);
+        }
+    }, [
+        freezeOverrideReason,
+        freezeOverrideChannels,
+        freezeOverrideActions,
+        freezeOverrideExpiresHours,
+        refreshDashboard,
+    ]);
+
+    const handleClearFreezeOverride = useCallback(async () => {
+        setMessage(null);
+        const reason = freezeOverrideReason.trim();
+        if (reason.length < 12) {
+            setError('Clear reason must be at least 12 characters.');
+            return;
+        }
+
+        setUpdatingFreezeOverride(true);
+        try {
+            await requestJson('/api/growth/launch-freeze/override', {
+                method: 'DELETE',
+                body: JSON.stringify({
+                    reason,
+                }),
+            });
+            setFreezeOverrideReason('');
+            setMessage('Launch-freeze override cleared.');
+            await refreshDashboard();
+        } catch (requestError) {
+            const typedError = requestError as ApiError;
+            setError(typedError.message || 'Failed to clear launch-freeze override');
+        } finally {
+            setUpdatingFreezeOverride(false);
+        }
+    }, [freezeOverrideReason, refreshDashboard]);
+
+    const handleDecideFreezeOverrideRequest = useCallback(async (
+        requestId: string,
+        decision: 'approved' | 'rejected',
+    ) => {
+        setMessage(null);
+        const reason = (freezeOverrideDecisionReasons[requestId] || '').trim();
+        if (reason.length < 12) {
+            setError('Decision reason must be at least 12 characters.');
+            return;
+        }
+
+        setDecidingFreezeRequestId(requestId);
+        try {
+            await requestJson('/api/growth/launch-freeze/override', {
+                method: 'PATCH',
+                body: JSON.stringify({
+                    requestId,
+                    decision,
+                    decisionReason: reason,
+                }),
+            });
+            setFreezeOverrideDecisionReasons((prev) => {
+                const next = { ...prev };
+                delete next[requestId];
+                return next;
+            });
+            setMessage(
+                decision === 'approved'
+                    ? 'Override request approved.'
+                    : 'Override request rejected.',
+            );
+            await refreshDashboard();
+        } catch (requestError) {
+            const typedError = requestError as ApiError;
+            setError(typedError.message || 'Failed to decide override request');
+        } finally {
+            setDecidingFreezeRequestId(null);
+        }
+    }, [freezeOverrideDecisionReasons, refreshDashboard]);
 
     const handleCreateAsset = useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
@@ -1563,6 +1958,37 @@ export default function GrowthDashboardPage() {
                 </Alert>
             )}
 
+            {growthSloSummary?.launchFreeze.active && (
+                <Alert variant="destructive">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertDescription>
+                        Launch freeze is active ({growthSloSummary.launchFreeze.level}) due to SLO error-budget burn.
+                        {growthSloSummary.launchFreeze.recoveryHoldActive
+                            ? ` Recovery hold is in progress (${growthSloSummary.launchFreeze.recoveryHealthyWindows}/${growthSloSummary.launchFreeze.recoveryHealthyWindowsRequired} healthy windows).`
+                            : ''}
+                        {growthSloSummary.launchFreeze.reasonCodes.length > 0
+                            ? ` Reasons: ${growthSloSummary.launchFreeze.reasonCodes.join(', ')}.`
+                            : ''}
+                        {growthSloSummary.launchFreeze.overrideActive
+                            ? ` Temporary override active${growthSloSummary.launchFreeze.overrideExpiresAt ? ` until ${formatDate(growthSloSummary.launchFreeze.overrideExpiresAt)}` : ''}.`
+                            : ''}
+                    </AlertDescription>
+                </Alert>
+            )}
+
+            {growthSloSummary?.postmortemSla.enabled && growthSloSummary.postmortemSla.overdue > 0 && (
+                <Alert variant="destructive">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertDescription>
+                        {growthSloSummary.postmortemSla.overdue} launch-freeze postmortem
+                        {growthSloSummary.postmortemSla.overdue === 1 ? '' : 's'} overdue.
+                        {growthSloSummary.postmortemSla.overdueIncidentKeys.length > 0
+                            ? ` Incident keys: ${growthSloSummary.postmortemSla.overdueIncidentKeys.slice(0, 3).join(', ')}${growthSloSummary.postmortemSla.overdueIncidentKeys.length > 3 ? '...' : ''}.`
+                            : ''}
+                    </AlertDescription>
+                </Alert>
+            )}
+
             {error && (
                 <Alert variant="destructive">
                     <AlertTriangle className="h-4 w-4" />
@@ -1724,46 +2150,412 @@ export default function GrowthDashboardPage() {
                             {campaigns.length === 0 ? (
                                 <p className="text-sm text-muted-foreground">No campaigns yet.</p>
                             ) : (
-                                campaigns.map((campaign) => (
-                                    <div
-                                        key={campaign.id}
-                                        className="rounded-lg border p-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"
-                                    >
-                                        <div className="space-y-1">
-                                            <div className="flex flex-wrap items-center gap-2">
-                                                <span className="font-medium">
-                                                    {campaign.research?.domain || campaign.domainResearchId}
-                                                </span>
-                                                <Badge className={statusBadgeClass(campaign.status)}>
-                                                    {campaign.status}
-                                                </Badge>
-                                                {campaign.channels.map((channel) => (
-                                                    <Badge key={channel} variant="outline">
-                                                        {CHANNEL_LABELS[channel]}
+                                campaigns.map((campaign) => {
+                                    const freezeBlocked = isCampaignBlockedByLaunchFreeze(campaign, growthSloSummary);
+                                    return (
+                                        <div
+                                            key={campaign.id}
+                                            className="rounded-lg border p-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"
+                                        >
+                                            <div className="space-y-1">
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <span className="font-medium">
+                                                        {campaign.research?.domain || campaign.domainResearchId}
+                                                    </span>
+                                                    <Badge className={statusBadgeClass(campaign.status)}>
+                                                        {campaign.status}
                                                     </Badge>
-                                                ))}
+                                                    {freezeBlocked && (
+                                                        <Badge variant="destructive">
+                                                            Launch freeze
+                                                        </Badge>
+                                                    )}
+                                                    {campaign.channels.map((channel) => (
+                                                        <Badge key={channel} variant="outline">
+                                                            {CHANNEL_LABELS[channel]}
+                                                        </Badge>
+                                                    ))}
+                                                </div>
+                                                <div className="text-xs text-muted-foreground">
+                                                    Budget {formatCurrency(campaign.budget)} • Daily cap {campaign.dailyCap} • Created {formatDate(campaign.createdAt)}
+                                                </div>
+                                                {freezeBlocked && (
+                                                    <div className="text-xs text-red-600">
+                                                        Launch blocked by current freeze scope policy.
+                                                    </div>
+                                                )}
                                             </div>
-                                            <div className="text-xs text-muted-foreground">
-                                                Budget {formatCurrency(campaign.budget)} • Daily cap {campaign.dailyCap} • Created {formatDate(campaign.createdAt)}
+                                            <div>
+                                                <Button
+                                                    size="sm"
+                                                    onClick={() => void handleLaunchCampaign(campaign.id)}
+                                                    disabled={mutatingCampaignId === campaign.id || featureDisabled || freezeBlocked}
+                                                >
+                                                    {mutatingCampaignId === campaign.id
+                                                        ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                        : <Play className="mr-2 h-4 w-4" />}
+                                                    Launch
+                                                </Button>
                                             </div>
                                         </div>
-                                        <div>
-                                            <Button
-                                                size="sm"
-                                                onClick={() => void handleLaunchCampaign(campaign.id)}
-                                                disabled={mutatingCampaignId === campaign.id || featureDisabled}
-                                            >
-                                                {mutatingCampaignId === campaign.id
-                                                    ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                                    : <Play className="mr-2 h-4 w-4" />}
-                                                Launch
-                                            </Button>
-                                        </div>
-                                    </div>
-                                ))
+                                    );
+                                })
                             )}
                         </CardContent>
                     </Card>
+
+                    {freezeOverrideStatus && (
+                        <Card>
+                            <CardHeader>
+                                <CardTitle>Launch Freeze Overrides</CardTitle>
+                                <CardDescription>
+                                    Governed emergency narrowing controls with role-based audit trail.
+                                </CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                <div className="text-xs text-muted-foreground">
+                                    Allowed roles: {freezeOverrideStatus.overrideAllowedRoles.join(', ')}
+                                </div>
+                                {freezeOverrideStatus.activeOverride ? (
+                                    <div className="rounded border p-3 space-y-1 text-sm">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <Badge variant="outline">Active Override</Badge>
+                                            <span className="text-muted-foreground">Created {formatDate(freezeOverrideStatus.activeOverride.createdAt)}</span>
+                                            {freezeOverrideStatus.activeOverride.expiresAt && (
+                                                <span className="text-muted-foreground">Expires {formatDate(freezeOverrideStatus.activeOverride.expiresAt)}</span>
+                                            )}
+                                        </div>
+                                        <div className="text-muted-foreground">
+                                            {freezeOverrideStatus.activeOverride.reason}
+                                        </div>
+                                        <div className="text-xs text-muted-foreground">
+                                            Channels: {(freezeOverrideStatus.activeOverride.override.blockedChannels || []).join(', ') || 'n/a'} •
+                                            Actions: {(freezeOverrideStatus.activeOverride.override.blockedActions || []).join(', ') || 'n/a'}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="rounded border p-3 text-sm text-muted-foreground">
+                                        No active override.
+                                    </div>
+                                )}
+
+                                {freezeOverrideStatus.history.length > 0 && (
+                                    <div className="rounded border overflow-x-auto">
+                                        <table className="min-w-full text-xs">
+                                            <thead className="bg-muted/40">
+                                                <tr>
+                                                    <th className="text-left px-3 py-2">Time</th>
+                                                    <th className="text-left px-3 py-2">Status</th>
+                                                    <th className="text-left px-3 py-2">Reason</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {freezeOverrideStatus.history.slice(0, 6).map((item) => (
+                                                    <tr key={item.id} className="border-t">
+                                                        <td className="px-3 py-2">{formatDate(item.createdAt)}</td>
+                                                        <td className="px-3 py-2">{item.status}</td>
+                                                        <td className="px-3 py-2">{item.reason}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+
+                                {freezeOverrideStatus.canMutate && (
+                                    <div className="space-y-3 rounded border p-3">
+                                        <div className="text-sm font-medium">
+                                            Pending Approval Requests ({pendingFreezeOverrideRequests.length})
+                                        </div>
+                                        {pendingFreezeOverrideRequests.length === 0 ? (
+                                            <div className="text-xs text-muted-foreground">
+                                                No pending override requests.
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-3">
+                                                {pendingFreezeOverrideRequests.map((request) => (
+                                                    <div key={request.id} className="rounded border p-3 space-y-2">
+                                                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                                                            <Badge variant="secondary">{request.status}</Badge>
+                                                            <span className="text-muted-foreground">
+                                                                Submitted {formatDate(request.submittedAt)}
+                                                            </span>
+                                                            <span className="text-muted-foreground">
+                                                                Requester {request.requestedByRole || 'unknown'}
+                                                            </span>
+                                                            {request.expiresAt && (
+                                                                <span className="text-muted-foreground">
+                                                                    Expires {formatDate(request.expiresAt)}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <div className="text-sm text-muted-foreground">
+                                                            {request.reason}
+                                                        </div>
+                                                        <div className="text-xs text-muted-foreground">
+                                                            Channels: {(request.override.blockedChannels || []).join(', ') || 'n/a'} •
+                                                            Actions: {(request.override.blockedActions || []).join(', ') || 'n/a'}
+                                                        </div>
+                                                        <div className="space-y-2">
+                                                            <Label htmlFor={`freezeOverrideDecisionReason-${request.id}`}>
+                                                                Decision reason
+                                                            </Label>
+                                                            <Input
+                                                                id={`freezeOverrideDecisionReason-${request.id}`}
+                                                                value={freezeOverrideDecisionReasons[request.id] || ''}
+                                                                onChange={(event) => setFreezeOverrideDecisionReasons((prev) => ({
+                                                                    ...prev,
+                                                                    [request.id]: event.target.value,
+                                                                }))}
+                                                                placeholder="Why approve/reject this request"
+                                                            />
+                                                        </div>
+                                                        <div className="flex flex-wrap gap-2">
+                                                            <Button
+                                                                type="button"
+                                                                variant="outline"
+                                                                disabled={featureDisabled || decidingFreezeRequestId === request.id}
+                                                                onClick={() => void handleDecideFreezeOverrideRequest(request.id, 'approved')}
+                                                            >
+                                                                {decidingFreezeRequestId === request.id
+                                                                    ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                                    : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                                                                Approve
+                                                            </Button>
+                                                            <Button
+                                                                type="button"
+                                                                variant="destructive"
+                                                                disabled={featureDisabled || decidingFreezeRequestId === request.id}
+                                                                onClick={() => void handleDecideFreezeOverrideRequest(request.id, 'rejected')}
+                                                            >
+                                                                {decidingFreezeRequestId === request.id
+                                                                    ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                                    : <XCircle className="mr-2 h-4 w-4" />}
+                                                                Reject
+                                                            </Button>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {!freezeOverrideStatus.canMutate && freezeOverrideStatus.requests.length > 0 && (
+                                    <div className="rounded border overflow-x-auto">
+                                        <table className="min-w-full text-xs">
+                                            <thead className="bg-muted/40">
+                                                <tr>
+                                                    <th className="text-left px-3 py-2">Submitted</th>
+                                                    <th className="text-left px-3 py-2">Status</th>
+                                                    <th className="text-left px-3 py-2">Reason</th>
+                                                    <th className="text-left px-3 py-2">Decision</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {freezeOverrideStatus.requests.slice(0, 8).map((request) => (
+                                                    <tr key={request.id} className="border-t">
+                                                        <td className="px-3 py-2">{formatDate(request.submittedAt)}</td>
+                                                        <td className="px-3 py-2">{request.status}</td>
+                                                        <td className="px-3 py-2">{request.reason}</td>
+                                                        <td className="px-3 py-2">
+                                                            {request.decisionReason || 'Pending'}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+
+                                {freezeOverrideStatus.canMutate ? (
+                                    <div className="space-y-4 rounded border p-3">
+                                        <div className="grid gap-3 md:grid-cols-2">
+                                            <div className="space-y-2">
+                                                <Label>Blocked Channels (Override)</Label>
+                                                <div className="flex flex-wrap items-center gap-3 text-sm">
+                                                    <label className="inline-flex items-center gap-2">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={freezeOverrideChannels.pinterest}
+                                                            onChange={(event) => setFreezeOverrideChannels((prev) => ({
+                                                                ...prev,
+                                                                pinterest: event.target.checked,
+                                                            }))}
+                                                        />
+                                                        Pinterest
+                                                    </label>
+                                                    <label className="inline-flex items-center gap-2">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={freezeOverrideChannels.youtube_shorts}
+                                                            onChange={(event) => setFreezeOverrideChannels((prev) => ({
+                                                                ...prev,
+                                                                youtube_shorts: event.target.checked,
+                                                            }))}
+                                                        />
+                                                        YouTube Shorts
+                                                    </label>
+                                                </div>
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label>Blocked Actions (Override)</Label>
+                                                <div className="flex flex-wrap items-center gap-3 text-sm">
+                                                    {(['scale', 'optimize', 'recover', 'incubate'] as const).map((action) => (
+                                                        <label key={action} className="inline-flex items-center gap-2">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={freezeOverrideActions[action]}
+                                                                onChange={(event) => setFreezeOverrideActions((prev) => ({
+                                                                    ...prev,
+                                                                    [action]: event.target.checked,
+                                                                }))}
+                                                            />
+                                                            {action}
+                                                        </label>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="grid gap-3 md:grid-cols-2">
+                                            <div className="space-y-2">
+                                                <Label htmlFor="freezeOverrideExpiresHours">Expires in (hours)</Label>
+                                                <Input
+                                                    id="freezeOverrideExpiresHours"
+                                                    type="number"
+                                                    min="1"
+                                                    max="336"
+                                                    step="1"
+                                                    value={freezeOverrideExpiresHours}
+                                                    onChange={(event) => setFreezeOverrideExpiresHours(event.target.value)}
+                                                />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label htmlFor="freezeOverrideReason">Reason</Label>
+                                                <Input
+                                                    id="freezeOverrideReason"
+                                                    value={freezeOverrideReason}
+                                                    onChange={(event) => setFreezeOverrideReason(event.target.value)}
+                                                    placeholder="Incident reason and scope justification"
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="flex flex-wrap gap-2">
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                disabled={updatingFreezeOverride || featureDisabled}
+                                                onClick={() => void handleApplyFreezeOverride()}
+                                            >
+                                                {updatingFreezeOverride
+                                                    ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                    : <Wrench className="mr-2 h-4 w-4" />}
+                                                Apply Override
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                variant="destructive"
+                                                disabled={updatingFreezeOverride || featureDisabled || !freezeOverrideStatus.activeOverride}
+                                                onClick={() => void handleClearFreezeOverride()}
+                                            >
+                                                {updatingFreezeOverride
+                                                    ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                    : <Trash2 className="mr-2 h-4 w-4" />}
+                                                Clear Override
+                                            </Button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-3 rounded border p-3">
+                                        <div className="text-xs text-muted-foreground">
+                                            You can submit an override request for admin approval.
+                                        </div>
+                                        <div className="grid gap-3 md:grid-cols-2">
+                                            <div className="space-y-2">
+                                                <Label>Requested blocked channels</Label>
+                                                <div className="flex flex-wrap items-center gap-3 text-sm">
+                                                    <label className="inline-flex items-center gap-2">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={freezeOverrideChannels.pinterest}
+                                                            onChange={(event) => setFreezeOverrideChannels((prev) => ({
+                                                                ...prev,
+                                                                pinterest: event.target.checked,
+                                                            }))}
+                                                        />
+                                                        Pinterest
+                                                    </label>
+                                                    <label className="inline-flex items-center gap-2">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={freezeOverrideChannels.youtube_shorts}
+                                                            onChange={(event) => setFreezeOverrideChannels((prev) => ({
+                                                                ...prev,
+                                                                youtube_shorts: event.target.checked,
+                                                            }))}
+                                                        />
+                                                        YouTube Shorts
+                                                    </label>
+                                                </div>
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label>Requested blocked actions</Label>
+                                                <div className="flex flex-wrap items-center gap-3 text-sm">
+                                                    {(['scale', 'optimize', 'recover', 'incubate'] as const).map((action) => (
+                                                        <label key={action} className="inline-flex items-center gap-2">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={freezeOverrideActions[action]}
+                                                                onChange={(event) => setFreezeOverrideActions((prev) => ({
+                                                                    ...prev,
+                                                                    [action]: event.target.checked,
+                                                                }))}
+                                                            />
+                                                            {action}
+                                                        </label>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="grid gap-3 md:grid-cols-2">
+                                            <div className="space-y-2">
+                                                <Label htmlFor="freezeOverrideExpiresHoursReadonly">Requested expiry (hours)</Label>
+                                                <Input
+                                                    id="freezeOverrideExpiresHoursReadonly"
+                                                    type="number"
+                                                    min="1"
+                                                    max="336"
+                                                    step="1"
+                                                    value={freezeOverrideExpiresHours}
+                                                    onChange={(event) => setFreezeOverrideExpiresHours(event.target.value)}
+                                                />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label htmlFor="freezeOverrideReasonReadonly">Request reason</Label>
+                                                <Input
+                                                    id="freezeOverrideReasonReadonly"
+                                                    value={freezeOverrideReason}
+                                                    onChange={(event) => setFreezeOverrideReason(event.target.value)}
+                                                    placeholder="Incident reason and scope justification"
+                                                />
+                                            </div>
+                                        </div>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            disabled={updatingFreezeOverride || featureDisabled}
+                                            onClick={() => void handleRequestFreezeOverrideApproval()}
+                                        >
+                                            {updatingFreezeOverride
+                                                ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                : <ClipboardCheck className="mr-2 h-4 w-4" />}
+                                            Request Override Approval
+                                        </Button>
+                                    </div>
+                                )}
+                            </CardContent>
+                        </Card>
+                    )}
 
                     {growthPolicyAudit && (
                         <Card>

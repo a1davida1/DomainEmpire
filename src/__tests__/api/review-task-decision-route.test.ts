@@ -85,6 +85,7 @@ describe('review task decision route', () => {
             taskId: 'task-1',
             status: 'approved',
             bidPlanQueued: true,
+            campaignLaunchQueued: true,
         });
 
         const response = await POST(makeRequest({
@@ -101,6 +102,7 @@ describe('review task decision route', () => {
         const body = await response.json();
         expect(body.success).toBe(true);
         expect(body.bidPlanQueued).toBe(true);
+        expect(body.campaignLaunchQueued).toBe(true);
         expect(mockDecideReviewTask).toHaveBeenCalledWith(expect.objectContaining({
             taskId: 'task-1',
             status: 'approved',

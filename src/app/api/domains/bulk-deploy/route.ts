@@ -5,11 +5,13 @@ import { inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { enqueueContentJobs, requeueContentJobIds } from '@/lib/queue/content-queue';
+import { type DeployPreflightResult, runDeployPreflight } from '@/lib/deploy/preflight';
 
 const bulkDeploySchema = z.object({
     domainIds: z.array(z.string().uuid()).min(1).max(50),
     triggerBuild: z.boolean().default(true),
     addCustomDomain: z.boolean().default(true),
+    dryRun: z.boolean().default(false),
 });
 
 // POST /api/domains/bulk-deploy - Deploy multiple domains
@@ -29,14 +31,14 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const { domainIds, triggerBuild, addCustomDomain } = bulkDeploySchema.parse(body);
+        const { domainIds, triggerBuild, addCustomDomain, dryRun } = bulkDeploySchema.parse(body);
 
         // Deduplicate domainIds to handle duplicates correctly
         const uniqueDomainIds = [...new Set(domainIds)];
 
         // Verify all domains exist
         const existingDomains = await db
-            .select({ id: domains.id, domain: domains.domain })
+            .select({ id: domains.id, domain: domains.domain, registrar: domains.registrar })
             .from(domains)
             .where(inArray(domains.id, uniqueDomainIds));
 
@@ -44,17 +46,92 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Some domains not found' }, { status: 404 });
         }
 
+        const preflightEvaluations = await Promise.all(existingDomains.map(async (domain) => {
+            let preflight: DeployPreflightResult;
+            try {
+                preflight = await runDeployPreflight({
+                    domain: domain.domain,
+                    registrar: domain.registrar,
+                    addCustomDomain,
+                });
+            } catch (preflightError) {
+                const message = preflightError instanceof Error ? preflightError.message : 'Unknown preflight error';
+                console.error('Bulk deploy preflight failed:', {
+                    domainId: domain.id,
+                    domain: domain.domain,
+                    error: message,
+                });
+                preflight = {
+                    ok: false,
+                    zoneNameservers: null,
+                    issues: [{
+                        code: 'deploy_preflight_unavailable',
+                        severity: 'blocking',
+                        message: `Preflight failed for ${domain.domain}: ${message}`,
+                    }],
+                };
+            }
+
+            return {
+                domainId: domain.id,
+                domain: domain.domain,
+                registrar: domain.registrar,
+                preflight,
+            };
+        }));
+
+        const blockedDomains = preflightEvaluations
+            .filter((evaluation) => !evaluation.preflight.ok)
+            .map((evaluation) => ({
+                domainId: evaluation.domainId,
+                domain: evaluation.domain,
+                issues: evaluation.preflight.issues.filter((issue) => issue.severity === 'blocking'),
+            }));
+
+        const eligibleDomains = preflightEvaluations.filter((evaluation) => evaluation.preflight.ok);
+        const preflightWarnings = preflightEvaluations.flatMap((evaluation) => {
+            const warnings = evaluation.preflight.issues.filter((issue) => issue.severity === 'warning');
+            if (warnings.length === 0) return [];
+            return [{
+                domainId: evaluation.domainId,
+                domain: evaluation.domain,
+                issues: warnings,
+            }];
+        });
+
+        if (dryRun) {
+            return NextResponse.json({
+                success: eligibleDomains.length > 0,
+                dryRun: true,
+                requested: uniqueDomainIds.length,
+                queueable: eligibleDomains.length,
+                blocked: blockedDomains.length,
+                blockedDomains,
+                preflightWarnings,
+            });
+        }
+
+        if (eligibleDomains.length === 0) {
+            return NextResponse.json(
+                {
+                    error: 'Deployment preflight failed for all requested domains',
+                    blockedDomains,
+                },
+                { status: 400 },
+            );
+        }
+
         // Build batch of job records
-        const jobRecords = existingDomains.map((domain) => {
+        const jobRecords = eligibleDomains.map((evaluation) => {
             const jobId = randomUUID();
             return {
                 record: {
                     id: jobId,
-                    domainId: domain.id,
+                    domainId: evaluation.domainId,
                     jobType: 'deploy' as const,
                     priority: 3,
                     payload: {
-                        domain: domain.domain,
+                        domain: evaluation.domain,
                         triggerBuild,
                         addCustomDomain,
                     },
@@ -62,7 +139,7 @@ export async function POST(request: NextRequest) {
                     scheduledFor: new Date(),
                     maxAttempts: 3,
                 },
-                meta: { domainId: domain.id, domain: domain.domain, jobId },
+                meta: { domainId: evaluation.domainId, domain: evaluation.domain, jobId },
             };
         });
 
@@ -94,7 +171,11 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({
             success: true,
             queued: jobs.length,
+            queueable: eligibleDomains.length,
+            blocked: blockedDomains.length,
             jobs,
+            blockedDomains,
+            preflightWarnings,
             ...(requeueWarning && { warning: requeueWarning }),
         });
     } catch (error) {

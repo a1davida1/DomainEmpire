@@ -50,20 +50,22 @@ export const INTEGRATION_PROVIDER_CATALOG: IntegrationProviderDefinition[] = [
         displayName: 'Sedo',
         category: 'parking',
         scope: 'both',
-        executableSync: false,
+        executableSync: true,
         supportsScheduledSync: false,
         defaultSyncIntervalMinutes: null,
         defaultLookbackDays: null,
+        notes: 'Revenue sync reads connection.config.revenueRecords baseline payload.',
     },
     {
         provider: 'bodis',
         displayName: 'Bodis',
         category: 'parking',
         scope: 'both',
-        executableSync: false,
+        executableSync: true,
         supportsScheduledSync: false,
         defaultSyncIntervalMinutes: null,
         defaultLookbackDays: null,
+        notes: 'Revenue sync reads connection.config.revenueRecords baseline payload.',
     },
     {
         provider: 'cloudflare',
@@ -151,40 +153,44 @@ export const INTEGRATION_PROVIDER_CATALOG: IntegrationProviderDefinition[] = [
         displayName: 'Impact',
         category: 'affiliate_network',
         scope: 'both',
-        executableSync: false,
+        executableSync: true,
         supportsScheduledSync: false,
         defaultSyncIntervalMinutes: null,
         defaultLookbackDays: null,
+        notes: 'Revenue sync reads connection.config.revenueRecords baseline payload.',
     },
     {
         provider: 'cj',
         displayName: 'CJ Affiliate',
         category: 'affiliate_network',
         scope: 'both',
-        executableSync: false,
+        executableSync: true,
         supportsScheduledSync: false,
         defaultSyncIntervalMinutes: null,
         defaultLookbackDays: null,
+        notes: 'Revenue sync reads connection.config.revenueRecords baseline payload.',
     },
     {
         provider: 'awin',
         displayName: 'Awin',
         category: 'affiliate_network',
         scope: 'both',
-        executableSync: false,
+        executableSync: true,
         supportsScheduledSync: false,
         defaultSyncIntervalMinutes: null,
         defaultLookbackDays: null,
+        notes: 'Revenue sync reads connection.config.revenueRecords baseline payload.',
     },
     {
         provider: 'rakuten',
         displayName: 'Rakuten Advertising',
         category: 'affiliate_network',
         scope: 'both',
-        executableSync: false,
+        executableSync: true,
         supportsScheduledSync: false,
         defaultSyncIntervalMinutes: null,
         defaultLookbackDays: null,
+        notes: 'Revenue sync reads connection.config.revenueRecords baseline payload.',
     },
     {
         provider: 'custom',
@@ -208,4 +214,8 @@ export function getIntegrationProviderDefinition(provider: string): IntegrationP
 
 export const EXECUTABLE_SYNC_PROVIDERS = INTEGRATION_PROVIDER_CATALOG
     .filter((provider) => provider.executableSync)
+    .map((provider) => provider.provider);
+
+export const SCHEDULED_SYNC_PROVIDERS = INTEGRATION_PROVIDER_CATALOG
+    .filter((provider) => provider.executableSync && provider.supportsScheduledSync)
     .map((provider) => provider.provider);

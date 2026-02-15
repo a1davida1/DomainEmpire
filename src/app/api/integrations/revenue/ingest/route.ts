@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { getRequestUser, requireRole } from '@/lib/auth';
 import {
@@ -9,6 +9,8 @@ import {
     integrationConnections,
     revenueSnapshots,
 } from '@/lib/db';
+import { assessRevenueVariance } from '@/lib/finance/reconciliation';
+import { createNotification } from '@/lib/notifications';
 import { createRateLimiter, getClientIp } from '@/lib/rate-limit';
 
 const revenueIngestLimiter = createRateLimiter('integration_revenue_ingest', {
@@ -44,6 +46,12 @@ type AggregatedSnapshotInput = {
     totalRevenue: number;
     clicks: number;
     impressions: number;
+};
+
+type DomainWindow = {
+    domainId: string;
+    minDate: Date;
+    maxDate: Date;
 };
 
 function normalizeSnapshotDate(value: string): Date {
@@ -167,6 +175,7 @@ export async function POST(request: NextRequest) {
         }
 
         const snapshotAggregates = new Map<string, AggregatedSnapshotInput>();
+        const domainWindows = new Map<string, DomainWindow>();
         for (const record of normalizedRecords) {
             const key = aggregateSnapshotKey(record.domainId, record.snapshotDate);
             if (!snapshotAggregates.has(key)) {
@@ -185,6 +194,22 @@ export async function POST(request: NextRequest) {
             addRevenueBySource(aggregate, record.sourceType, record.amount);
             aggregate.clicks += record.clicks;
             aggregate.impressions += record.impressions;
+
+            const existingWindow = domainWindows.get(record.domainId);
+            if (!existingWindow) {
+                domainWindows.set(record.domainId, {
+                    domainId: record.domainId,
+                    minDate: record.snapshotDate,
+                    maxDate: record.snapshotDate,
+                });
+            } else {
+                if (record.snapshotDate.getTime() < existingWindow.minDate.getTime()) {
+                    existingWindow.minDate = record.snapshotDate;
+                }
+                if (record.snapshotDate.getTime() > existingWindow.maxDate.getTime()) {
+                    existingWindow.maxDate = record.snapshotDate;
+                }
+            }
         }
 
         const now = new Date();
@@ -242,6 +267,76 @@ export async function POST(request: NextRequest) {
 
         const totalAmount = normalizedRecords
             .reduce((sum, record) => sum + record.amount, 0);
+
+        try {
+            const domainWindowValues = [...domainWindows.values()];
+            const domainNameRows = await db.select({
+                id: domains.id,
+                domain: domains.domain,
+            })
+                .from(domains)
+                .where(inArray(domains.id, [...domainIds]));
+            const domainNameById = new Map(domainNameRows.map((row) => [row.id, row.domain]));
+
+            for (const window of domainWindowValues) {
+                const [ledgerRollup, snapshotRollup] = await Promise.all([
+                    db.select({
+                        revenueTotal: sql<number>`sum(${domainFinanceLedgerEntries.amount})::float`,
+                    })
+                        .from(domainFinanceLedgerEntries)
+                        .where(and(
+                            eq(domainFinanceLedgerEntries.domainId, window.domainId),
+                            eq(domainFinanceLedgerEntries.impact, 'revenue'),
+                            gte(domainFinanceLedgerEntries.entryDate, window.minDate),
+                            lte(domainFinanceLedgerEntries.entryDate, window.maxDate),
+                        ))
+                        .limit(1),
+                    db.select({
+                        totalRevenue: sql<number>`sum(coalesce(${revenueSnapshots.totalRevenue}, 0))::float`,
+                    })
+                        .from(revenueSnapshots)
+                        .where(and(
+                            eq(revenueSnapshots.domainId, window.domainId),
+                            gte(revenueSnapshots.snapshotDate, window.minDate),
+                            lte(revenueSnapshots.snapshotDate, window.maxDate),
+                        ))
+                        .limit(1),
+                ]);
+
+                const ledgerRow = ledgerRollup?.[0];
+                const snapshotRow = snapshotRollup?.[0];
+
+                const assessment = assessRevenueVariance({
+                    ledgerTotal: Number(ledgerRow?.revenueTotal ?? 0),
+                    snapshotTotal: Number(snapshotRow?.totalRevenue ?? 0),
+                });
+                if (assessment.status === 'matched') {
+                    continue;
+                }
+
+                const severity = assessment.status === 'critical' ? 'critical' : 'warning';
+                const domainName = domainNameById.get(window.domainId) ?? window.domainId;
+                await createNotification({
+                    type: 'info',
+                    severity,
+                    domainId: window.domainId,
+                    title: `Revenue reconciliation ${assessment.status}: ${domainName}`,
+                    message: `Ledger ${assessment.ledgerTotal.toFixed(2)} vs snapshot ${assessment.snapshotTotal.toFixed(2)} (variance ${assessment.variance.toFixed(2)}) for ${window.minDate.toISOString().slice(0, 10)} to ${window.maxDate.toISOString().slice(0, 10)}.`,
+                    metadata: {
+                        source: 'integration_revenue_ingest',
+                        connectionId: connection.id,
+                        provider: connection.provider,
+                        variance: assessment.variance,
+                        variancePct: assessment.variancePct,
+                        toleranceAmount: assessment.toleranceAmount,
+                        windowStart: window.minDate.toISOString(),
+                        windowEnd: window.maxDate.toISOString(),
+                    },
+                });
+            }
+        } catch (reconciliationError) {
+            console.error('Failed to emit post-ingest reconciliation alerts:', reconciliationError);
+        }
 
         return NextResponse.json({
             success: true,

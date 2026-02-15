@@ -16,6 +16,24 @@ interface DeployStep {
     detail?: string;
 }
 
+const BATCH_SIZE = 50;
+
+type BulkDeployResponse = {
+    dryRun?: boolean;
+    requested?: number;
+    queueable?: number;
+    queued?: number;
+    blocked?: number;
+    blockedDomains?: Array<{
+        domain: string;
+        issues?: Array<{ message: string }>;
+    }>;
+    preflightWarnings?: Array<{
+        domain: string;
+        issues?: Array<{ message: string }>;
+    }>;
+};
+
 interface DeployJob {
     id: string;
     domain: string;
@@ -46,6 +64,51 @@ export default function DeployPage() {
     const [deploying, setDeploying] = useState(false);
     const [expandedJob, setExpandedJob] = useState<string | null>(null);
     const { toast } = useToast();
+
+    const runDeployBatch = useCallback(async (
+        batch: string[],
+        dryRun: boolean,
+    ): Promise<{
+        requested: number;
+        queueable: number;
+        queued: number;
+        blocked: number;
+        blockedDomains: string[];
+        warningDomains: string[];
+    }> => {
+        const res = await fetch('/api/domains/bulk-deploy', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                domainIds: batch,
+                triggerBuild: true,
+                dryRun,
+            }),
+        });
+
+        if (!res.ok) {
+            const errorBody = await res.json().catch(() => ({}));
+            throw new Error(
+                typeof errorBody?.error === 'string'
+                    ? errorBody.error
+                    : `Bulk deploy request failed with ${res.status}`
+            );
+        }
+
+        const data = await res.json() as BulkDeployResponse;
+        return {
+            requested: typeof data.requested === 'number' ? data.requested : batch.length,
+            queueable: typeof data.queueable === 'number' ? data.queueable : 0,
+            queued: typeof data.queued === 'number' ? data.queued : 0,
+            blocked: typeof data.blocked === 'number' ? data.blocked : 0,
+            blockedDomains: Array.isArray(data.blockedDomains)
+                ? data.blockedDomains.map((entry) => entry.domain).filter(Boolean)
+                : [],
+            warningDomains: Array.isArray(data.preflightWarnings)
+                ? data.preflightWarnings.map((entry) => entry.domain).filter(Boolean)
+                : [],
+        };
+    }, []);
 
     const fetchData = useCallback(async (signal?: AbortSignal) => {
         try {
@@ -90,25 +153,74 @@ export default function DeployPage() {
     }, [fetchData]);
 
     const handleDeployAll = async () => {
+        if (domains.length === 0) return;
+
+        const batches: string[][] = [];
+        const domainIds = domains.map((domain) => domain.id);
+        for (let index = 0; index < domainIds.length; index += BATCH_SIZE) {
+            batches.push(domainIds.slice(index, index + BATCH_SIZE));
+        }
+
         setDeploying(true);
+        let preflightRequested = 0;
+        let preflightQueueable = 0;
+        let preflightBlocked = 0;
+        const preflightBlockedDomains: string[] = [];
+        const preflightWarningDomains = new Set<string>();
+
         try {
-            const domainIds = domains.map(d => d.id);
-            const res = await fetch('/api/domains/bulk-deploy', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    domainIds,
-                    triggerBuild: true,
-                }),
-            });
+            for (const batch of batches) {
+                const result = await runDeployBatch(batch, true);
+                preflightRequested += result.requested;
+                preflightQueueable += result.queueable;
+                preflightBlocked += result.blocked;
+                preflightBlockedDomains.push(...result.blockedDomains);
+                for (const warningDomain of result.warningDomains) {
+                    preflightWarningDomains.add(warningDomain);
+                }
+            }
 
-            if (!res.ok) throw new Error('Failed to start deployment');
+            if (preflightQueueable === 0) {
+                const blockedPreview = preflightBlockedDomains.slice(0, 5).join(', ');
+                toast({
+                    title: "Deploy Preflight Blocked",
+                    description: `No deployable domains found. ${preflightBlocked} blocked.${blockedPreview ? ` Example: ${blockedPreview}${preflightBlockedDomains.length > 5 ? ', ...' : ''}` : ''}`,
+                    variant: "destructive",
+                });
+                return;
+            }
 
-            const data = await res.json();
-            const queued = typeof data?.queued === 'number' ? data.queued : 0;
+            const warningCount = preflightWarningDomains.size;
+            const proceed = window.confirm(
+                `Preflight summary:\n` +
+                `• Requested: ${preflightRequested}\n` +
+                `• Queueable: ${preflightQueueable}\n` +
+                `• Blocked: ${preflightBlocked}\n` +
+                `• Warnings: ${warningCount}\n\n` +
+                `Queue deployment jobs now?`
+            );
+            if (!proceed) return;
+
+            let queued = 0;
+            let blocked = 0;
+            const queueWarningDomains = new Set<string>();
+
+            for (const batch of batches) {
+                const result = await runDeployBatch(batch, false);
+                queued += result.queued;
+                blocked += result.blocked;
+                for (const warningDomain of result.warningDomains) {
+                    queueWarningDomains.add(warningDomain);
+                }
+            }
+
             toast({
                 title: "Deployment Started",
-                description: `Queued ${queued} sites for deployment.`,
+                description: [
+                    `Queued ${queued} sites for deployment.`,
+                    blocked > 0 ? `${blocked} blocked by preflight.` : '',
+                    queueWarningDomains.size > 0 ? `${queueWarningDomains.size} queued with warnings.` : '',
+                ].filter(Boolean).join(' '),
             });
             fetchData();
         } catch (error) {

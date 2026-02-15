@@ -25,6 +25,17 @@ interface GoDaddyErrorResponse {
     fields?: Array<{ path: string; code: string; message: string }>;
 }
 
+export type GoDaddyRegistrarSignals = {
+    renewalDate: Date | null;
+    autoRenewEnabled: boolean | null;
+    lockStatus: 'locked' | 'unlocked' | null;
+    dnssecStatus: 'enabled' | 'disabled' | null;
+    transferStatus: 'none' | 'pending' | 'failed' | null;
+    ownershipStatus: 'pending_transfer' | 'verified' | null;
+    ownerHandle: string | null;
+    statusTokens: string[];
+};
+
 function getConfig(): GoDaddyConfig {
     const apiKey = process.env.GODADDY_API_KEY;
     const apiSecret = process.env.GODADDY_API_SECRET;
@@ -61,6 +72,146 @@ async function parseError(response: Response, operation: string): Promise<string
     } catch {
         return `${operation}: ${text || 'Unknown error'} [HTTP ${response.status}]`;
     }
+}
+
+function normalizeStatusTokens(status: unknown): string[] {
+    if (Array.isArray(status)) {
+        return [...new Set(
+            status
+                .filter((value): value is string => typeof value === 'string')
+                .map((value) => value.trim().toLowerCase())
+                .filter(Boolean),
+        )];
+    }
+
+    if (typeof status === 'string') {
+        return [...new Set(
+            status
+                .split(/[,\s]+/)
+                .map((value) => value.trim().toLowerCase())
+                .filter(Boolean),
+        )];
+    }
+
+    return [];
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+        return value as Record<string, unknown>;
+    }
+    return null;
+}
+
+function toNullableDate(value: unknown): Date | null {
+    if (typeof value !== 'string' && typeof value !== 'number' && !(value instanceof Date)) {
+        return null;
+    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed;
+}
+
+function deriveOwnerHandle(payload: Record<string, unknown>): string | null {
+    const contactRegistrant = asRecord(payload.contactRegistrant);
+    const registrantContact = asRecord(payload.registrantContact);
+    const source = contactRegistrant ?? registrantContact;
+    if (!source) return null;
+
+    const organization = typeof source.organization === 'string' ? source.organization.trim() : '';
+    if (organization.length > 0) return organization;
+
+    const first = typeof source.nameFirst === 'string' ? source.nameFirst.trim() : '';
+    const last = typeof source.nameLast === 'string' ? source.nameLast.trim() : '';
+    const name = [first, last].filter(Boolean).join(' ').trim();
+    if (name.length > 0) return name;
+
+    const email = typeof source.email === 'string' ? source.email.trim() : '';
+    return email.length > 0 ? email : null;
+}
+
+export function deriveGoDaddyRegistrarSignals(payload: Record<string, unknown>): GoDaddyRegistrarSignals {
+    const statusTokens = normalizeStatusTokens(payload.status);
+
+    let lockStatus: GoDaddyRegistrarSignals['lockStatus'] = null;
+    if (typeof payload.locked === 'boolean') {
+        lockStatus = payload.locked ? 'locked' : 'unlocked';
+    } else if (
+        statusTokens.includes('clienttransferprohibited')
+        || statusTokens.includes('servertransferprohibited')
+        || statusTokens.includes('clientupdateprohibited')
+        || statusTokens.includes('serverupdateprohibited')
+    ) {
+        lockStatus = 'locked';
+    } else if (statusTokens.length > 0) {
+        lockStatus = 'unlocked';
+    }
+
+    let transferStatus: GoDaddyRegistrarSignals['transferStatus'] = null;
+    if (
+        statusTokens.includes('pendingtransfer')
+        || statusTokens.includes('transferpending')
+        || statusTokens.includes('pending_transfer')
+    ) {
+        transferStatus = 'pending';
+    } else if (
+        statusTokens.includes('transferfailed')
+        || statusTokens.includes('failedtransfer')
+        || statusTokens.includes('transfer_failed')
+    ) {
+        transferStatus = 'failed';
+    } else if (statusTokens.length > 0) {
+        transferStatus = 'none';
+    }
+
+    let dnssecStatus: GoDaddyRegistrarSignals['dnssecStatus'] = null;
+    const secureDns = asRecord(payload.secureDNS) ?? asRecord(payload.secureDns);
+    const dnssec = asRecord(payload.dnssec);
+    const delegationSignedRaw = secureDns?.delegationSigned;
+    const dnssecEnabledRaw = dnssec?.enabled;
+
+    if (typeof delegationSignedRaw === 'boolean') {
+        dnssecStatus = delegationSignedRaw ? 'enabled' : 'disabled';
+    } else if (typeof dnssecEnabledRaw === 'boolean') {
+        dnssecStatus = dnssecEnabledRaw ? 'enabled' : 'disabled';
+    } else if (statusTokens.includes('signeddelegation')) {
+        dnssecStatus = 'enabled';
+    } else if (statusTokens.includes('unsigneddelegation')) {
+        dnssecStatus = 'disabled';
+    }
+
+    const autoRenewEnabled = typeof payload.renewAuto === 'boolean'
+        ? payload.renewAuto
+        : null;
+    const renewalDate = toNullableDate(payload.expires);
+    const ownerHandle = deriveOwnerHandle(payload);
+    const ownershipStatus: GoDaddyRegistrarSignals['ownershipStatus'] = transferStatus === 'pending'
+        ? 'pending_transfer'
+        : ownerHandle
+            ? 'verified'
+            : null;
+
+    return {
+        renewalDate,
+        autoRenewEnabled,
+        lockStatus,
+        dnssecStatus,
+        transferStatus,
+        ownershipStatus,
+        ownerHandle,
+        statusTokens,
+    };
+}
+
+export async function getGoDaddyRegistrarSignals(domain: string): Promise<GoDaddyRegistrarSignals> {
+    const response = await gdFetch(`/domains/${encodeURIComponent(domain)}`);
+
+    if (!response.ok) {
+        throw new Error(await parseError(response, `Registrar profile read for ${domain}`));
+    }
+
+    const payload = await response.json() as Record<string, unknown>;
+    return deriveGoDaddyRegistrarSignals(payload);
 }
 
 /**

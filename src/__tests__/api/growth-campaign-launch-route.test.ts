@@ -5,6 +5,9 @@ const mockRequireAuth = vi.fn();
 const mockGetRequestUser = vi.fn();
 const mockIsFeatureEnabled = vi.fn();
 const mockEnqueueContentJob = vi.fn();
+const mockEvaluateGrowthLaunchFreeze = vi.fn();
+const mockEmitGrowthLaunchFreezeIncident = vi.fn();
+const mockShouldBlockGrowthLaunchForScope = vi.fn();
 
 const mockSelect = vi.fn();
 const mockFrom = vi.fn();
@@ -73,6 +76,12 @@ vi.mock('@/lib/feature-flags', () => ({
 
 vi.mock('@/lib/queue/content-queue', () => ({
     enqueueContentJob: mockEnqueueContentJob,
+}));
+
+vi.mock('@/lib/growth/launch-freeze', () => ({
+    evaluateGrowthLaunchFreeze: mockEvaluateGrowthLaunchFreeze,
+    emitGrowthLaunchFreezeIncident: mockEmitGrowthLaunchFreezeIncident,
+    shouldBlockGrowthLaunchForScope: mockShouldBlockGrowthLaunchForScope,
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -157,6 +166,20 @@ describe('growth campaign launch route', () => {
         mockGetRequestUser.mockReturnValue({ id: 'user-1', role: 'admin', name: 'User One' });
         mockIsFeatureEnabled.mockImplementation((flag: string) => flag !== 'preview_gate_v1');
         mockEnqueueContentJob.mockResolvedValue('queue-job-1');
+        mockEvaluateGrowthLaunchFreeze.mockResolvedValue({
+            active: false,
+            level: 'healthy',
+            reasonCodes: [],
+            windowSummaries: [],
+        });
+        mockEmitGrowthLaunchFreezeIncident.mockResolvedValue({
+            notificationId: null,
+            opsDelivered: false,
+            opsReason: null,
+        });
+        mockShouldBlockGrowthLaunchForScope.mockImplementation((input: { state?: { active?: boolean } }) => {
+            return input?.state?.active === true;
+        });
 
         campaignRows = [];
         queueRows = [];
@@ -287,5 +310,53 @@ describe('growth campaign launch route', () => {
         expect(body.error).toContain('review task');
         expect(body.reviewTaskId).toBe('review-task-1');
         expect(mockEnqueueContentJob).not.toHaveBeenCalled();
+    });
+
+    it('blocks launch when launch-freeze is active', async () => {
+        campaignRows = [{ id: 'campaign-1', status: 'draft', domainResearchId: null, channels: ['pinterest'] }];
+        mockEvaluateGrowthLaunchFreeze.mockResolvedValue({
+            active: true,
+            level: 'critical',
+            reasonCodes: ['publish_burn_critical_24h'],
+            windowSummaries: [{ windowHours: 24 }],
+        });
+
+        const response = await POST(
+            makeRequest({}),
+            { params: Promise.resolve({ id: '22222222-2222-4222-8222-222222222222' }) },
+        );
+
+        expect(response.status).toBe(409);
+        const body = await response.json();
+        expect(body.error).toContain('temporarily frozen');
+        expect(body.freeze?.level).toBe('critical');
+        expect(mockEmitGrowthLaunchFreezeIncident).toHaveBeenCalledTimes(1);
+        expect(mockEnqueueContentJob).not.toHaveBeenCalled();
+    });
+
+    it('allows launch when freeze is active but scope policy does not block this campaign', async () => {
+        campaignRows = [{ id: 'campaign-1', status: 'draft', domainResearchId: null, channels: ['pinterest'] }];
+        queueRows = [];
+        promotionJobRows = [{ id: 'promotion-job-1' }];
+        mockEvaluateGrowthLaunchFreeze.mockResolvedValue({
+            active: true,
+            rawActive: true,
+            recoveryHoldActive: false,
+            recoveryHealthyWindows: 0,
+            recoveryHealthyWindowsRequired: 2,
+            level: 'critical',
+            reasonCodes: ['publish_burn_critical_24h'],
+            windowSummaries: [{ windowHours: 24 }],
+        });
+        mockShouldBlockGrowthLaunchForScope.mockReturnValue(false);
+
+        const response = await POST(
+            makeRequest({}),
+            { params: Promise.resolve({ id: '22222222-2222-4222-8222-222222222222' }) },
+        );
+
+        expect(response.status).toBe(202);
+        expect(mockEmitGrowthLaunchFreezeIncident).not.toHaveBeenCalled();
+        expect(mockEnqueueContentJob).toHaveBeenCalled();
     });
 });

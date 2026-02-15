@@ -174,6 +174,8 @@ export default function DomainOwnershipOperationsConfig({ domainId }: Props) {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [syncing, setSyncing] = useState(false);
+    const [syncingRegistrar, setSyncingRegistrar] = useState(false);
+    const [switchingNameservers, setSwitchingNameservers] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [message, setMessage] = useState<string | null>(null);
 
@@ -288,6 +290,102 @@ export default function DomainOwnershipOperationsConfig({ domainId }: Props) {
             setError(syncError instanceof Error ? syncError.message : 'Failed to sync renewal data');
         } finally {
             setSyncing(false);
+        }
+    }
+
+    async function switchNameserversToCloudflare() {
+        if (!canEdit || payload?.domain.registrar !== 'godaddy') return;
+
+        setSwitchingNameservers(true);
+        setError(null);
+        setMessage(null);
+
+        try {
+            const preflightResponse = await fetch(`/api/domains/${domainId}/nameservers`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    dryRun: true,
+                    reason: form.reason.trim() || 'Manual nameserver cutover to Cloudflare from ownership panel',
+                }),
+            });
+            const preflightBody = await preflightResponse.json().catch(() => ({}));
+            if (!preflightResponse.ok) {
+                throw new Error(preflightBody.error || preflightBody.message || 'Failed nameserver preflight');
+            }
+
+            const plannedNameservers = Array.isArray(preflightBody.nameservers)
+                ? preflightBody.nameservers.join(', ')
+                : 'Cloudflare nameservers';
+            const previousNameservers = Array.isArray(preflightBody.previousNameservers)
+                ? preflightBody.previousNameservers.join(', ')
+                : 'unknown';
+            const confirmed = window.confirm(
+                `Switch ${payload.domain.domain} nameservers to Cloudflare now?\n\n` +
+                `Current: ${previousNameservers}\n` +
+                `Planned: ${plannedNameservers}\n\n` +
+                'This updates nameservers at GoDaddy and may affect live DNS after propagation.'
+            );
+            if (!confirmed) return;
+
+            const response = await fetch(`/api/domains/${domainId}/nameservers`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    reason: form.reason.trim() || 'Manual nameserver cutover to Cloudflare from ownership panel',
+                }),
+            });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(body.error || body.message || 'Failed to switch nameservers');
+            }
+
+            const nameserverList = Array.isArray(body.nameservers)
+                ? body.nameservers.join(', ')
+                : 'Cloudflare nameservers';
+            setMessage(`Nameservers switched: ${nameserverList}`);
+            await loadOwnership();
+        } catch (switchError) {
+            setError(switchError instanceof Error ? switchError.message : 'Failed to switch nameservers');
+        } finally {
+            setSwitchingNameservers(false);
+        }
+    }
+
+    async function syncRegistrarState() {
+        if (!canEdit) return;
+        setSyncingRegistrar(true);
+        setError(null);
+        setMessage(null);
+
+        try {
+            const response = await fetch(`/api/domains/${domainId}/ownership/sync`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    days: 90,
+                }),
+            });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(body.error || body.message || 'Failed to sync registrar state');
+            }
+
+            const runStatus = typeof body?.run?.status === 'string' ? body.run.status : 'success';
+            const providerSignalError = typeof body?.run?.details?.providerSignalError === 'string'
+                ? body.run.details.providerSignalError
+                : null;
+
+            if (runStatus === 'partial' && providerSignalError) {
+                setMessage(`Registrar sync completed with warnings: ${providerSignalError}`);
+            } else {
+                setMessage('Registrar state synced.');
+            }
+            await loadOwnership();
+        } catch (syncError) {
+            setError(syncError instanceof Error ? syncError.message : 'Failed to sync registrar state');
+        } finally {
+            setSyncingRegistrar(false);
         }
     }
 
@@ -514,12 +612,27 @@ export default function DomainOwnershipOperationsConfig({ domainId }: Props) {
                     <Button onClick={syncRenewalData} disabled={syncing}>
                         {syncing ? 'Syncing...' : 'Sync Renewal Data'}
                     </Button>
+                    <Button onClick={syncRegistrarState} disabled={!canEdit || syncingRegistrar} variant="secondary">
+                        {syncingRegistrar ? 'Syncing Registrar...' : 'Sync Registrar State'}
+                    </Button>
+                    <Button
+                        onClick={switchNameserversToCloudflare}
+                        disabled={!canEdit || switchingNameservers || payload.domain.registrar !== 'godaddy'}
+                        variant="secondary"
+                    >
+                        {switchingNameservers ? 'Switching DNS...' : 'Switch Nameservers to Cloudflare'}
+                    </Button>
                     <Button onClick={saveProfile} disabled={!canEdit || saving} variant="outline">
                         {saving ? 'Saving...' : 'Save Ownership Profile'}
                     </Button>
                     {!canEdit && (
                         <p className="self-center text-xs text-muted-foreground">
                             Current role ({payload.permissions?.role || 'unknown'}) cannot edit ownership state.
+                        </p>
+                    )}
+                    {payload.domain.registrar !== 'godaddy' && (
+                        <p className="self-center text-xs text-muted-foreground">
+                            Automated nameserver cutover is currently supported for GoDaddy domains only.
                         </p>
                     )}
                 </div>

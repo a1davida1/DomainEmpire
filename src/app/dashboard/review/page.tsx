@@ -4,6 +4,7 @@ import { eq, inArray, asc, and, isNull } from 'drizzle-orm';
 import Link from 'next/link';
 import { revalidatePath } from 'next/cache';
 import { getAuthUser } from '@/lib/auth';
+import { getCampaignLaunchReviewSlaSummary } from '@/lib/review/campaign-launch-sla';
 
 const YMYL_COLORS: Record<string, string> = {
     high: 'bg-red-100 text-red-800',
@@ -107,6 +108,13 @@ export default async function ReviewQueuePage() {
 
     // eslint-disable-next-line react-hooks/purity
     const now = Date.now(); // Server Component — runs once at render time
+    const launchReviewSummary = await getCampaignLaunchReviewSlaSummary({
+        limit: 250,
+        topIssueLimit: 3,
+    }).catch((error) => {
+        console.error('Failed to load campaign launch review summary:', error);
+        return null;
+    });
 
     return (
         <div className="space-y-6">
@@ -124,11 +132,31 @@ export default async function ReviewQueuePage() {
                     >
                         Domain Buy Queue
                     </Link>
+                    <Link
+                        href="/dashboard/review/campaign-launch"
+                        className="px-3 py-2 rounded-md border text-sm hover:bg-muted"
+                    >
+                        Campaign Launch Queue
+                    </Link>
                     <div className="text-sm text-muted-foreground">
                         Content gate
                     </div>
                 </div>
             </div>
+
+            {launchReviewSummary && launchReviewSummary.pendingCount > 0 ? (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
+                    <div className="flex flex-wrap items-center gap-3 text-xs text-amber-900">
+                        <span className="font-semibold">Campaign Launch Review SLO</span>
+                        <span>Pending {launchReviewSummary.pendingCount}</span>
+                        <span>SLA breached {launchReviewSummary.dueBreachedCount}</span>
+                        <span>Escalated {launchReviewSummary.escalatedCount}</span>
+                        <Link href="/dashboard/review/campaign-launch" className="underline">
+                            Open queue
+                        </Link>
+                    </div>
+                </div>
+            ) : null}
 
             {reviewArticles.length === 0 ? (
                 <div className="bg-card rounded-lg border p-8 text-center text-muted-foreground">

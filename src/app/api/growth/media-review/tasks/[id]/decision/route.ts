@@ -265,7 +265,7 @@ export async function POST(
                     approvedCount: existingApprovals.length,
                     requiredApprovals: approvalWorkflow.minApprovals,
                     mode: approvalWorkflow.mode,
-                    completed: payload.status !== 'pending',
+                    completed: true,
                     nextReviewerId: null,
                 },
             };

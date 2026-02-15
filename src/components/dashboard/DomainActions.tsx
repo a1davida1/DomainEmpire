@@ -19,6 +19,12 @@ interface DomainActionsProps {
     isDeployed: boolean;
 }
 
+type PreflightIssue = {
+    code: string;
+    message: string;
+    severity: 'blocking' | 'warning';
+};
+
 export function DomainActions({ domainId, domainName, isDeployed }: DomainActionsProps) {
     const router = useRouter();
     const [deploying, setDeploying] = useState(false);
@@ -27,10 +33,28 @@ export function DomainActions({ domainId, domainName, isDeployed }: DomainAction
     const handleDeploy = async () => {
         setDeploying(true);
         try {
-            const res = await fetch(`/api/domains/${domainId}/deploy`, { method: 'POST' });
+            const res = await fetch(`/api/domains/${domainId}/deploy`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    triggerBuild: true,
+                    addCustomDomain: true,
+                }),
+            });
+            const data = await res.json().catch(() => ({}));
             if (!res.ok) {
-                const data = await res.json();
                 throw new Error(data.error || 'Deploy failed');
+            }
+
+            const warnings = Array.isArray(data.preflightWarnings)
+                ? (data.preflightWarnings as PreflightIssue[]).filter((issue) => issue.severity === 'warning')
+                : [];
+            if (warnings.length > 0) {
+                const warningLines = warnings.slice(0, 3).map((warning) => `- ${warning.message}`).join('\n');
+                alert(
+                    `Deploy queued with warnings for ${domainName}:\n\n${warningLines}` +
+                    `${warnings.length > 3 ? '\n- ...' : ''}`
+                );
             }
             router.refresh();
         } catch (err) {

@@ -4,6 +4,11 @@ import { z } from 'zod';
 import { getRequestUser, requireAuth } from '@/lib/auth';
 import { db, contentQueue, promotionCampaigns, promotionJobs, reviewTasks } from '@/lib/db';
 import { isFeatureEnabled } from '@/lib/feature-flags';
+import {
+    emitGrowthLaunchFreezeIncident,
+    evaluateGrowthLaunchFreeze,
+    shouldBlockGrowthLaunchForScope,
+} from '@/lib/growth/launch-freeze';
 import { enqueueContentJob } from '@/lib/queue/content-queue';
 
 const launchBodySchema = z.object({
@@ -72,6 +77,47 @@ export async function POST(
             return NextResponse.json({
                 error: `Campaign is ${campaign.status} and cannot be launched`,
             }, { status: 409 });
+        }
+
+        if (!force) {
+            const campaignMetrics = campaign.metrics as Record<string, unknown> | null;
+            const campaignChannels = Array.isArray(campaign.channels)
+                ? campaign.channels
+                    .map((value) => (typeof value === 'string' ? value.trim().toLowerCase() : ''))
+                    .filter((value): value is 'pinterest' | 'youtube_shorts' => (
+                        value === 'pinterest' || value === 'youtube_shorts'
+                    ))
+                : [];
+            const campaignAction = typeof campaignMetrics?.action === 'string'
+                ? campaignMetrics.action
+                : null;
+            const launchFreeze = await evaluateGrowthLaunchFreeze();
+            if (shouldBlockGrowthLaunchForScope({
+                state: launchFreeze,
+                scope: {
+                    channels: campaignChannels,
+                    action: campaignAction,
+                },
+            })) {
+                await emitGrowthLaunchFreezeIncident({
+                    state: launchFreeze,
+                    actorUserId: user.id,
+                    context: 'campaign_launch_api',
+                    campaignId: id,
+                });
+                return NextResponse.json({
+                    error: 'Campaign launch is temporarily frozen due to SLO error-budget burn',
+                    freeze: {
+                        level: launchFreeze.level,
+                        rawActive: launchFreeze.rawActive,
+                        recoveryHoldActive: launchFreeze.recoveryHoldActive,
+                        recoveryHealthyWindows: launchFreeze.recoveryHealthyWindows,
+                        recoveryHealthyWindowsRequired: launchFreeze.recoveryHealthyWindowsRequired,
+                        reasonCodes: launchFreeze.reasonCodes,
+                        windowHours: launchFreeze.windowSummaries.map((summary) => summary.windowHours),
+                    },
+                }, { status: 409 });
+            }
         }
 
         const previewGateEnabled = isFeatureEnabled('preview_gate_v1', { userId: user.id });

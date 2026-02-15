@@ -1,5 +1,14 @@
 import { and, eq, inArray, sql } from 'drizzle-orm';
-import { db, acquisitionEvents, contentQueue, domainResearch, reviewTasks } from '@/lib/db';
+import {
+    db,
+    acquisitionEvents,
+    contentQueue,
+    domainResearch,
+    promotionCampaigns,
+    promotionJobs,
+    reviewTasks,
+} from '@/lib/db';
+import { advanceDomainLifecycleForAcquisition } from '@/lib/domain/lifecycle-sync';
 import { enqueueContentJob } from '@/lib/queue/content-queue';
 import { NotFoundError, ConflictError, ForbiddenError, ChecklistValidationError } from '@/lib/review/errors';
 
@@ -21,6 +30,7 @@ export type ReviewTaskDecisionResult = {
     taskId: string;
     status: ReviewTaskDecisionStatus;
     bidPlanQueued: boolean;
+    campaignLaunchQueued: boolean;
 };
 
 export const REQUIRED_DOMAIN_BUY_CHECKLIST_KEYS = [
@@ -68,6 +78,95 @@ async function queueBidPlanIfMissing(domainResearchId: string, domain: string, c
     return queued;
 }
 
+async function queueCampaignLaunchIfMissing(campaignId: string, createdBy: string, reviewTaskId: string): Promise<boolean> {
+    let queued = false;
+    await db.transaction(async (tx) => {
+        await tx.execute(
+            sql`SELECT pg_advisory_xact_lock(hashtext(${`campaign_launch:${campaignId}`}))`,
+        );
+
+        const [campaign] = await tx.select({
+            id: promotionCampaigns.id,
+            status: promotionCampaigns.status,
+        })
+            .from(promotionCampaigns)
+            .where(eq(promotionCampaigns.id, campaignId))
+            .limit(1);
+
+        if (!campaign) {
+            throw new NotFoundError(`Campaign not found for campaign_launch review task: ${campaignId}`);
+        }
+        if (campaign.status === 'cancelled' || campaign.status === 'completed') {
+            return;
+        }
+
+        const existing = await tx
+            .select({ id: contentQueue.id })
+            .from(contentQueue)
+            .where(and(
+                eq(contentQueue.jobType, 'create_promotion_plan'),
+                inArray(contentQueue.status, ['pending', 'processing']),
+                sql`${contentQueue.payload} ->> 'campaignId' = ${campaignId}`,
+            ))
+            .limit(1);
+
+        if (existing.length > 0) {
+            return;
+        }
+
+        const now = new Date();
+        const promotionJobPayload = {
+            launchedBy: createdBy,
+            force: false,
+            metadata: {
+                source: 'review_task_approval',
+                reviewTaskId,
+            },
+            requestedAt: now.toISOString(),
+        } as Record<string, unknown>;
+
+        const [promotionJob] = await tx.insert(promotionJobs).values({
+            campaignId,
+            jobType: 'create_promotion_plan',
+            status: 'pending',
+            payload: promotionJobPayload,
+        }).returning({
+            id: promotionJobs.id,
+        });
+
+        if (!promotionJob?.id) {
+            throw new Error(`Failed to create promotion job for campaign_launch task ${reviewTaskId}`);
+        }
+
+        const queueJobId = await enqueueContentJob({
+            jobType: 'create_promotion_plan',
+            status: 'pending',
+            priority: 3,
+            payload: {
+                campaignId,
+                promotionJobId: promotionJob.id,
+                launchedBy: createdBy,
+                force: false,
+                metadata: {
+                    source: 'review_task_approval',
+                    reviewTaskId,
+                },
+            },
+        }, tx);
+
+        await tx.update(promotionJobs).set({
+            payload: {
+                ...promotionJobPayload,
+                contentQueueJobId: queueJobId,
+            },
+        }).where(eq(promotionJobs.id, promotionJob.id));
+
+        queued = true;
+    });
+
+    return queued;
+}
+
 function isChecklistApproved(checklist: Record<string, unknown>): boolean {
     return REQUIRED_DOMAIN_BUY_CHECKLIST_KEYS.every((key) => checklist[key] === true);
 }
@@ -76,6 +175,8 @@ export async function decideReviewTask(input: ReviewTaskDecisionInput): Promise<
     let bidPlanQueued = false;
     let bidPlanQueueResearchId: string | null = null;
     let bidPlanQueueDomain: string | null = null;
+    let campaignLaunchQueued = false;
+    let campaignLaunchQueueCampaignId: string | null = null;
     let resolvedTaskId: string = '';
 
     await db.transaction(async (tx) => {
@@ -120,6 +221,7 @@ export async function decideReviewTask(input: ReviewTaskDecisionInput): Promise<
                 .select({
                     id: domainResearch.id,
                     domain: domainResearch.domain,
+                    domainId: domainResearch.domainId,
                     hardFailReason: domainResearch.hardFailReason,
                 })
                 .from(domainResearch)
@@ -145,6 +247,22 @@ export async function decideReviewTask(input: ReviewTaskDecisionInput): Promise<
                     decisionReason: input.reviewNotes,
                     hardFailReason: clearHardFail ? null : research.hardFailReason,
                 }).where(eq(domainResearch.id, research.id));
+
+                const lifecycleDomainId = task.domainId ?? research.domainId ?? null;
+                if (lifecycleDomainId) {
+                    await advanceDomainLifecycleForAcquisition({
+                        domainId: lifecycleDomainId,
+                        targetState: 'approved',
+                        actorId: input.actor.id,
+                        actorRole: input.actor.role,
+                        reason: input.reviewNotes,
+                        metadata: {
+                            source: 'review_task_decision',
+                            reviewTaskId: task.id,
+                            domainResearchId: research.id,
+                        },
+                    }, tx);
+                }
 
                 await tx.insert(acquisitionEvents).values({
                     domainResearchId: research.id,
@@ -192,6 +310,10 @@ export async function decideReviewTask(input: ReviewTaskDecisionInput): Promise<
                 });
             }
         }
+
+        if (task.taskType === 'campaign_launch' && input.status === 'approved') {
+            campaignLaunchQueueCampaignId = task.entityId;
+        }
     });
 
     if (bidPlanQueueResearchId && bidPlanQueueDomain) {
@@ -201,10 +323,18 @@ export async function decideReviewTask(input: ReviewTaskDecisionInput): Promise<
             input.actor.id,
         );
     }
+    if (campaignLaunchQueueCampaignId) {
+        campaignLaunchQueued = await queueCampaignLaunchIfMissing(
+            campaignLaunchQueueCampaignId,
+            input.actor.id,
+            resolvedTaskId || input.taskId,
+        );
+    }
 
     return {
         taskId: resolvedTaskId || input.taskId,
         status: input.status,
         bidPlanQueued,
+        campaignLaunchQueued,
     };
 }

@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { getRequestUser, requireRole } from '@/lib/auth';
 import { db, acquisitionEvents, contentQueue, domainResearch, reviewTasks } from '@/lib/db';
+import { advanceDomainLifecycleForAcquisition } from '@/lib/domain/lifecycle-sync';
 import { requeueContentJobIds } from '@/lib/queue/content-queue';
 
 const decisionSchema = z.object({
@@ -196,6 +197,20 @@ export async function POST(
                 recommendedMaxBid: typeof effectiveMaxBid === 'number' ? effectiveMaxBid : null,
                 hardFailReason: wantsClearHardFail ? null : research.hardFailReason,
             }).where(eq(domainResearch.id, research.id));
+
+            if (parsed.data.decision === 'buy' && research.domainId) {
+                await advanceDomainLifecycleForAcquisition({
+                    domainId: research.domainId,
+                    targetState: 'approved',
+                    actorId: user.id,
+                    actorRole: user.role,
+                    reason: parsed.data.decisionReason,
+                    metadata: {
+                        source: 'acquisition_candidates_decision',
+                        domainResearchId: research.id,
+                    },
+                }, tx);
+            }
 
             await tx.insert(acquisitionEvents).values({
                 domainResearchId: research.id,

@@ -8,6 +8,7 @@
 import { db } from '@/lib/db';
 import { domains, domainResearch, expenses } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
+import { advanceDomainLifecycleForAcquisition } from '@/lib/domain/lifecycle-sync';
 
 const GD_API = 'https://api.godaddy.com/v1';
 
@@ -168,9 +169,26 @@ export async function purchaseDomain(
                 status: 'parked', bucket: 'build',
             }).returning({ id: domains.id });
 
+            if (!newDomain?.id) {
+                throw new Error('Failed to create domain record during purchase');
+            }
+
             await tx.update(domainResearch)
                 .set({ decision: 'bought', domainId: newDomain.id })
                 .where(eq(domainResearch.domain, domain));
+
+            await advanceDomainLifecycleForAcquisition({
+                domainId: newDomain.id,
+                targetState: 'acquired',
+                actorId: null,
+                actorRole: 'admin',
+                reason: 'Auto-transition after successful domain purchase',
+                metadata: {
+                    source: 'purchase_domain',
+                    registrar: 'godaddy',
+                    purchasedDomain: domain,
+                },
+            }, tx);
 
             await tx.insert(expenses).values({
                 domainId: newDomain.id,

@@ -1,7 +1,7 @@
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { db, contentQueue, integrationConnections, integrationSyncRuns } from '@/lib/db';
 import { enqueueContentJob } from '@/lib/queue/content-queue';
-import { EXECUTABLE_SYNC_PROVIDERS, getIntegrationProviderDefinition } from '@/lib/integrations/catalog';
+import { SCHEDULED_SYNC_PROVIDERS, getIntegrationProviderDefinition } from '@/lib/integrations/catalog';
 
 const DEFAULT_SYNC_INTERVAL_MINUTES = 24 * 60;
 const DEFAULT_LOOKBACK_DAYS = 30;
@@ -167,6 +167,19 @@ export async function scheduleIntegrationConnectionSyncJobs(
 ): Promise<IntegrationSyncScheduleSummary> {
     const boundedLimit = Math.max(1, Math.min(Math.floor(limit), 1_000));
     const schedulableStatuses: ConnectionStatus[] = ['pending', 'connected', 'error'];
+    const scheduledProviders = SCHEDULED_SYNC_PROVIDERS as Array<typeof integrationConnections.$inferSelect.provider>;
+
+    if (SCHEDULED_SYNC_PROVIDERS.length === 0) {
+        return {
+            consideredConnections: 0,
+            queuedJobs: 0,
+            alreadyQueued: 0,
+            runningSyncs: 0,
+            skippedDisabled: 0,
+            skippedNotDue: 0,
+            skippedInvalidConfig: 0,
+        };
+    }
 
     const rows = await db
         .select({
@@ -180,7 +193,7 @@ export async function scheduleIntegrationConnectionSyncJobs(
         })
         .from(integrationConnections)
         .where(and(
-            inArray(integrationConnections.provider, EXECUTABLE_SYNC_PROVIDERS),
+            inArray(integrationConnections.provider, scheduledProviders),
             inArray(integrationConnections.status, schedulableStatuses),
         ))
         .limit(boundedLimit);

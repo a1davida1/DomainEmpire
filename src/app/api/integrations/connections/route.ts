@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { db, domains, integrationConnections } from '@/lib/db';
 import { getRequestUser, requireAuth } from '@/lib/auth';
@@ -107,12 +107,22 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: 'Forbidden: cannot query another user' }, { status: 403 });
     }
 
-    const targetUserId = actor.role === 'admin' && requestedUserId ? requestedUserId : actor.id;
-    const whereClauses = [eq(integrationConnections.userId, targetUserId)];
+    const providerFilter = provider
+        ? (provider as typeof integrationConnections.$inferSelect.provider)
+        : null;
+    const categoryFilter = category
+        ? (category as typeof integrationConnections.$inferSelect.category)
+        : null;
+    const statusFilter = status
+        ? (status as typeof integrationConnections.$inferSelect.status)
+        : null;
 
-    if (provider) whereClauses.push(eq(integrationConnections.provider, provider));
-    if (category) whereClauses.push(eq(integrationConnections.category, category));
-    if (status) whereClauses.push(eq(integrationConnections.status, status));
+    const targetUserId = actor.role === 'admin' && requestedUserId ? requestedUserId : actor.id;
+    const whereClauses: SQL[] = [eq(integrationConnections.userId, targetUserId)];
+
+    if (providerFilter) whereClauses.push(eq(integrationConnections.provider, providerFilter));
+    if (categoryFilter) whereClauses.push(eq(integrationConnections.category, categoryFilter));
+    if (statusFilter) whereClauses.push(eq(integrationConnections.status, statusFilter));
     if (rawDomainId === 'null') {
         whereClauses.push(isNull(integrationConnections.domainId));
     } else if (rawDomainId) {

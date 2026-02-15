@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, domains, NewDomain } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
-import { eq, ilike, and, sql, isNull } from 'drizzle-orm';
+import { eq, ilike, and, sql, isNull, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { checkIdempotencyKey, storeIdempotencyResult } from '@/lib/api/idempotency';
 import { DOMAIN_LIFECYCLE_STATES } from '@/lib/domain/lifecycle';
@@ -72,6 +72,13 @@ const createDomainSchema = z.object({
     contentConfig: contentConfigSchema.optional(),
 });
 
+function isMissingLifecycleStateColumn(error: unknown): boolean {
+    if (!error || typeof error !== 'object') return false;
+    const code = 'code' in error ? String(error.code) : '';
+    const message = 'message' in error ? String(error.message).toLowerCase() : '';
+    return code === '42703' && message.includes('lifecycle_state');
+}
+
 // GET /api/domains - List all domains with optional filters
 export async function GET(request: NextRequest) {
     const authError = await requireAuth(request);
@@ -96,7 +103,7 @@ export async function GET(request: NextRequest) {
         const offset = rawOffset;
 
         // Build conditions (always exclude soft-deleted)
-        const conditions: ReturnType<typeof eq>[] = [isNull(domains.deletedAt)];
+        const conditions: SQL[] = [isNull(domains.deletedAt)];
 
         if (status) {
             const validStatuses = ['parked', 'active', 'redirect', 'forsale', 'defensive'];
@@ -123,28 +130,123 @@ export async function GET(request: NextRequest) {
         // Query with conditions
         const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-        const results = await db
-            .select()
-            .from(domains)
-            .where(whereClause)
-            .orderBy(domains.createdAt)
-            .limit(limit)
-            .offset(offset);
+        try {
+            const results = await db
+                .select()
+                .from(domains)
+                .where(whereClause)
+                .orderBy(domains.createdAt)
+                .limit(limit)
+                .offset(offset);
 
-        // Get total count for pagination
-        const countResult = await db
-            .select({ count: sql<number>`count(*)::int` })
-            .from(domains)
-            .where(whereClause);
+            // Get total count for pagination
+            const countResult = await db
+                .select({ count: sql<number>`count(*)::int` })
+                .from(domains)
+                .where(whereClause);
 
-        return NextResponse.json({
-            domains: results,
-            pagination: {
-                total: countResult[0]?.count ?? 0,
-                limit,
-                offset,
-            },
-        });
+            return NextResponse.json({
+                domains: results,
+                pagination: {
+                    total: countResult[0]?.count ?? 0,
+                    limit,
+                    offset,
+                },
+            });
+        } catch (queryError) {
+            if (!isMissingLifecycleStateColumn(queryError)) {
+                throw queryError;
+            }
+
+            // Backward-compatible fallback for environments that have not yet added domains.lifecycle_state.
+            if (lifecycleState && lifecycleState !== 'sourced') {
+                return NextResponse.json({
+                    domains: [],
+                    pagination: {
+                        total: 0,
+                        limit,
+                        offset,
+                    },
+                });
+            }
+
+            const legacyConditions: SQL[] = [isNull(domains.deletedAt)];
+            if (status) {
+                const validStatuses = ['parked', 'active', 'redirect', 'forsale', 'defensive'];
+                if (validStatuses.includes(status)) {
+                    legacyConditions.push(eq(domains.status, status as typeof domains.status.enumValues[number]));
+                }
+            }
+            if (niche) legacyConditions.push(eq(domains.niche, niche));
+            if (vertical) legacyConditions.push(eq(domains.vertical, vertical));
+            if (tier) legacyConditions.push(eq(domains.tier, Number.parseInt(tier, 10)));
+            if (search) legacyConditions.push(ilike(domains.domain, `%${search}%`));
+
+            const legacyWhereClause = legacyConditions.length > 0 ? and(...legacyConditions) : undefined;
+            const legacyResults = await db
+                .select({
+                    id: domains.id,
+                    domain: domains.domain,
+                    tld: domains.tld,
+                    registrar: domains.registrar,
+                    purchaseDate: domains.purchaseDate,
+                    purchasePrice: domains.purchasePrice,
+                    renewalDate: domains.renewalDate,
+                    renewalPrice: domains.renewalPrice,
+                    status: domains.status,
+                    bucket: domains.bucket,
+                    tier: domains.tier,
+                    niche: domains.niche,
+                    subNiche: domains.subNiche,
+                    redirectTargetId: domains.redirectTargetId,
+                    githubRepo: domains.githubRepo,
+                    cloudflareProject: domains.cloudflareProject,
+                    isDeployed: domains.isDeployed,
+                    lastDeployedAt: domains.lastDeployedAt,
+                    siteTemplate: domains.siteTemplate,
+                    vertical: domains.vertical,
+                    cloudflareAccount: domains.cloudflareAccount,
+                    themeStyle: domains.themeStyle,
+                    monetizationModel: domains.monetizationModel,
+                    monetizationTier: domains.monetizationTier,
+                    estimatedRevenueAtMaturityLow: domains.estimatedRevenueAtMaturityLow,
+                    estimatedRevenueAtMaturityHigh: domains.estimatedRevenueAtMaturityHigh,
+                    estimatedFlipValueLow: domains.estimatedFlipValueLow,
+                    estimatedFlipValueHigh: domains.estimatedFlipValueHigh,
+                    estimatedMonthlyRevenueLow: domains.estimatedMonthlyRevenueLow,
+                    estimatedMonthlyRevenueHigh: domains.estimatedMonthlyRevenueHigh,
+                    healthScore: domains.healthScore,
+                    healthUpdatedAt: domains.healthUpdatedAt,
+                    notes: domains.notes,
+                    tags: domains.tags,
+                    contentConfig: domains.contentConfig,
+                    createdAt: domains.createdAt,
+                    updatedAt: domains.updatedAt,
+                    deletedAt: domains.deletedAt,
+                })
+                .from(domains)
+                .where(legacyWhereClause)
+                .orderBy(domains.createdAt)
+                .limit(limit)
+                .offset(offset);
+
+            const legacyCountResult = await db
+                .select({ count: sql<number>`count(*)::int` })
+                .from(domains)
+                .where(legacyWhereClause);
+
+            return NextResponse.json({
+                domains: legacyResults.map((domain) => ({
+                    ...domain,
+                    lifecycleState: 'sourced',
+                })),
+                pagination: {
+                    total: legacyCountResult[0]?.count ?? 0,
+                    limit,
+                    offset,
+                },
+            });
+        }
     } catch (error) {
         console.error('Failed to fetch domains:', error);
         return NextResponse.json(
@@ -239,7 +341,18 @@ export async function POST(request: NextRequest) {
             contentConfig: data.contentConfig,
         };
 
-        const inserted = await db.insert(domains).values(newDomain).returning();
+        const inserted = await (async () => {
+            try {
+                return await db.insert(domains).values(newDomain).returning();
+            } catch (insertError) {
+                if (!isMissingLifecycleStateColumn(insertError)) {
+                    throw insertError;
+                }
+
+                const { lifecycleState: _ignoredLifecycleState, ...legacyDomain } = newDomain;
+                return await db.insert(domains).values(legacyDomain).returning();
+            }
+        })();
 
         const response = NextResponse.json({ domain: inserted[0] }, { status: 201 });
         await storeIdempotencyResult(request, response);

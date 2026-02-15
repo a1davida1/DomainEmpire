@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { checkIdempotencyKey, storeIdempotencyResult } from '@/lib/api/idempotency';
 import { enqueueContentJob } from '@/lib/queue/content-queue';
+import { type DeployPreflightResult, runDeployPreflight } from '@/lib/deploy/preflight';
 
 const deploySchema = z.object({
     triggerBuild: z.boolean().default(true),
@@ -40,7 +41,11 @@ export async function POST(request: NextRequest, { params }: PageProps) {
         const options = deploySchema.parse(body);
 
         const domainResult = await db
-            .select()
+            .select({
+                id: domains.id,
+                domain: domains.domain,
+                registrar: domains.registrar,
+            })
             .from(domains)
             .where(and(eq(domains.id, id), isNull(domains.deletedAt)))
             .limit(1);
@@ -53,6 +58,42 @@ export async function POST(request: NextRequest, { params }: PageProps) {
 
         // Note: Ownership check not required for single-operator system
         // If multi-user support is added, verify domain ownership here
+
+        let preflight: DeployPreflightResult;
+        try {
+            preflight = await runDeployPreflight({
+                domain: domain.domain,
+                registrar: domain.registrar,
+                addCustomDomain: options.addCustomDomain,
+            });
+        } catch (preflightError) {
+            const message = preflightError instanceof Error ? preflightError.message : 'Unknown preflight error';
+            console.error('Deploy preflight failed:', {
+                domainId: id,
+                domain: domain.domain,
+                error: message,
+            });
+            preflight = {
+                ok: false,
+                zoneNameservers: null,
+                issues: [{
+                    code: 'deploy_preflight_unavailable',
+                    severity: 'blocking',
+                    message: `Preflight failed for ${domain.domain}: ${message}`,
+                }],
+            };
+        }
+
+        const blockingIssues = preflight.issues.filter((issue) => issue.severity === 'blocking');
+        if (blockingIssues.length > 0 || !preflight.ok) {
+            return NextResponse.json(
+                {
+                    error: 'Deployment preflight failed',
+                    issues: blockingIssues,
+                },
+                { status: 400 },
+            );
+        }
 
         const jobId = randomUUID();
         await enqueueContentJob({
@@ -75,6 +116,7 @@ export async function POST(request: NextRequest, { params }: PageProps) {
             jobId,
             domain: domain.domain,
             message: 'Deployment queued',
+            preflightWarnings: preflight.issues.filter((issue) => issue.severity === 'warning'),
         });
         await storeIdempotencyResult(request, response);
         return response;
@@ -99,7 +141,13 @@ export async function GET(request: NextRequest, { params }: PageProps) {
 
     try {
         const domainResult = await db
-            .select()
+            .select({
+                id: domains.id,
+                domain: domains.domain,
+                isDeployed: domains.isDeployed,
+                cloudflareProject: domains.cloudflareProject,
+                lastDeployedAt: domains.lastDeployedAt,
+            })
             .from(domains)
             .where(and(eq(domains.id, id), isNull(domains.deletedAt)))
             .limit(1);

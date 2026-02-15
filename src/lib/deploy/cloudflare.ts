@@ -25,14 +25,84 @@ interface DeploymentResult {
     error?: string;
 }
 
-function getConfig(): CloudflareConfig {
-    const apiToken = process.env.CLOUDFLARE_API_TOKEN;
-    const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+type ZoneCreateResult = {
+    success: boolean;
+    zoneId?: string;
+    zoneName?: string;
+    nameservers?: string[];
+    status?: string;
+    alreadyExists?: boolean;
+    error?: string;
+};
 
-    if (!apiToken || !accountId) {
-        throw new Error('CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID must be set');
+let cachedResolvedAccountId: string | null = null;
+let accountIdLookupInFlight: Promise<string> | null = null;
+
+async function resolveCloudflareAccountId(apiToken: string): Promise<string> {
+    const explicitAccountId = process.env.CLOUDFLARE_ACCOUNT_ID?.trim();
+    if (explicitAccountId) {
+        return explicitAccountId;
     }
 
+    if (cachedResolvedAccountId) {
+        return cachedResolvedAccountId;
+    }
+
+    if (accountIdLookupInFlight) {
+        return accountIdLookupInFlight;
+    }
+
+    accountIdLookupInFlight = (async () => {
+        const response = await fetch(`${CF_API}/accounts?page=1&per_page=20`, {
+            headers: {
+                'Authorization': `Bearer ${apiToken}`,
+                'Content-Type': 'application/json',
+            },
+        });
+
+        const data = await response.json() as {
+            success?: boolean;
+            result?: Array<{ id?: string; name?: string }>;
+            errors?: Array<{ message?: string }>;
+        };
+
+        if (!response.ok || !data.success || !Array.isArray(data.result) || data.result.length === 0) {
+            const message = data.errors?.[0]?.message || 'Cloudflare account auto-discovery failed';
+            throw new Error(`CLOUDFLARE_ACCOUNT_ID is not set and ${message}`);
+        }
+
+        const preferredAccountName = process.env.CLOUDFLARE_ACCOUNT_NAME?.trim().toLowerCase();
+        const namedMatch = preferredAccountName
+            ? data.result.find((candidate) => candidate.name?.toLowerCase() === preferredAccountName)
+            : undefined;
+
+        const selected = namedMatch ?? data.result[0];
+        if (!selected?.id) {
+            throw new Error('CLOUDFLARE_ACCOUNT_ID is not set and account auto-discovery returned no id');
+        }
+
+        if (!namedMatch && data.result.length > 1 && !preferredAccountName) {
+            console.warn('Multiple Cloudflare accounts detected; using first account. Set CLOUDFLARE_ACCOUNT_ID or CLOUDFLARE_ACCOUNT_NAME to pin one.');
+        }
+
+        cachedResolvedAccountId = selected.id;
+        return selected.id;
+    })();
+
+    try {
+        return await accountIdLookupInFlight;
+    } finally {
+        accountIdLookupInFlight = null;
+    }
+}
+
+async function getConfig(): Promise<CloudflareConfig> {
+    const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+    if (!apiToken) {
+        throw new Error('CLOUDFLARE_API_TOKEN must be set');
+    }
+
+    const accountId = await resolveCloudflareAccountId(apiToken);
     return { apiToken, accountId };
 }
 
@@ -40,7 +110,7 @@ async function cfFetch(
     endpoint: string,
     options: RequestInit = {}
 ): Promise<Response> {
-    const config = getConfig();
+    const config = await getConfig();
 
     return fetch(`${CF_API}${endpoint}`, {
         ...options,
@@ -50,6 +120,10 @@ async function cfFetch(
             ...options.headers,
         },
     });
+}
+
+function normalizeNameserver(value: string): string {
+    return value.trim().toLowerCase().replace(/\.+$/g, '');
 }
 
 /**
@@ -65,7 +139,7 @@ export async function getPagesProject(projectName: string): Promise<{
         status: string;
     };
 } | null> {
-    const config = getConfig();
+    const config = await getConfig();
 
     try {
         const response = await cfFetch(
@@ -100,7 +174,7 @@ export async function getDeploymentStatus(
     projectName: string,
     deploymentId: string
 ): Promise<DeploymentResult> {
-    const config = getConfig();
+    const config = await getConfig();
 
     try {
         const response = await cfFetch(
@@ -134,7 +208,7 @@ export async function addCustomDomain(
     projectName: string,
     domain: string
 ): Promise<{ success: boolean; error?: string }> {
-    const config = getConfig();
+    const config = await getConfig();
 
     try {
         const response = await cfFetch(
@@ -167,7 +241,7 @@ export async function addCustomDomain(
 export async function createDirectUploadProject(
     projectName: string,
 ): Promise<ProjectCreateResult> {
-    const config = getConfig();
+    const config = await getConfig();
 
     try {
         const response = await cfFetch(
@@ -220,7 +294,7 @@ export async function directUploadDeploy(
     projectName: string,
     files: Array<{ path: string; content: string | Buffer | Uint8Array }>,
 ): Promise<DeploymentResult> {
-    const config = getConfig();
+    const config = await getConfig();
 
     try {
         // Build multipart form data with manifest
@@ -290,7 +364,7 @@ export async function directUploadDeploy(
 export async function deletePagesProject(
     projectName: string
 ): Promise<{ success: boolean; error?: string }> {
-    const config = getConfig();
+    const config = await getConfig();
 
     try {
         const response = await cfFetch(
@@ -309,6 +383,152 @@ export async function deletePagesProject(
         return {
             success: false,
             error: error instanceof Error ? error.message : 'Unknown error',
+        };
+    }
+}
+
+/**
+ * Resolve authoritative Cloudflare nameservers for a zone.
+ * Returns null when the zone is not found or nameservers are unavailable.
+ */
+export async function getZoneNameservers(domain: string): Promise<{
+    zoneId: string;
+    zoneName: string;
+    nameservers: string[];
+} | null> {
+    const normalizedDomain = domain.trim().toLowerCase();
+
+    try {
+        const config = await getConfig();
+        const params = new URLSearchParams({
+            name: normalizedDomain,
+            match: 'all',
+            page: '1',
+            per_page: '1',
+            'account.id': config.accountId,
+        });
+
+        const response = await cfFetch(`/zones?${params.toString()}`);
+        if (!response.ok) return null;
+
+        const data = await response.json() as {
+            success?: boolean;
+            result?: Array<{
+                id?: string;
+                name?: string;
+                name_servers?: string[];
+            }>;
+        };
+
+        if (!data.success || !Array.isArray(data.result) || data.result.length === 0) {
+            return null;
+        }
+
+        const zone = data.result.find((candidate) => {
+            if (!candidate?.name) return false;
+            return candidate.name.toLowerCase() === normalizedDomain;
+        }) ?? data.result[0];
+
+        if (!zone?.id || !zone?.name) {
+            return null;
+        }
+
+        const nameservers = Array.isArray(zone.name_servers)
+            ? [...new Set(zone.name_servers
+                .map((value) => normalizeNameserver(value))
+                .filter((value) => value.endsWith('.cloudflare.com')))]
+            : [];
+
+        if (nameservers.length < 2) {
+            return null;
+        }
+
+        return {
+            zoneId: zone.id,
+            zoneName: zone.name,
+            nameservers,
+        };
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Create a Cloudflare zone for a domain.
+ * Returns existing zone details when the zone already exists under this account.
+ */
+export async function createZone(
+    domain: string,
+    options?: { jumpStart?: boolean },
+): Promise<ZoneCreateResult> {
+    const normalizedDomain = domain.trim().toLowerCase();
+
+    try {
+        const config = await getConfig();
+        const response = await cfFetch('/zones', {
+            method: 'POST',
+            body: JSON.stringify({
+                name: normalizedDomain,
+                account: { id: config.accountId },
+                type: 'full',
+                jump_start: options?.jumpStart ?? false,
+            }),
+        });
+
+        const data = await response.json() as {
+            success?: boolean;
+            errors?: Array<{ code?: number; message?: string }>;
+            result?: {
+                id?: string;
+                name?: string;
+                status?: string;
+                name_servers?: string[];
+            };
+        };
+
+        if (!response.ok || !data.success || !data.result?.id || !data.result?.name) {
+            const existing = await getZoneNameservers(normalizedDomain);
+            if (existing) {
+                return {
+                    success: true,
+                    alreadyExists: true,
+                    zoneId: existing.zoneId,
+                    zoneName: existing.zoneName,
+                    nameservers: existing.nameservers,
+                    status: 'existing',
+                };
+            }
+
+            return {
+                success: false,
+                error: data.errors?.[0]?.message || 'Failed to create Cloudflare zone',
+            };
+        }
+
+        let nameservers = Array.isArray(data.result.name_servers)
+            ? [...new Set(data.result.name_servers
+                .map((value) => normalizeNameserver(value))
+                .filter((value) => value.endsWith('.cloudflare.com')))]
+            : [];
+
+        if (nameservers.length < 2) {
+            const resolved = await getZoneNameservers(normalizedDomain);
+            if (resolved) {
+                nameservers = resolved.nameservers;
+            }
+        }
+
+        return {
+            success: true,
+            zoneId: data.result.id,
+            zoneName: data.result.name,
+            nameservers,
+            status: data.result.status,
+        };
+    } catch (error) {
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown Cloudflare zone create error',
         };
     }
 }
