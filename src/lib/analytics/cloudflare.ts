@@ -8,6 +8,8 @@
  */
 
 const CF_GRAPHQL = 'https://api.cloudflare.com/client/v4/graphql';
+const MAX_RETRIES = 3;
+const BASE_RETRY_DELAY_MS = 1_000;
 
 export interface AnalyticsData {
     views: number;
@@ -36,6 +38,16 @@ interface CFGraphQLResponse {
     errors?: Array<{ message: string }>;
 }
 
+export class CloudflareApiError extends Error {
+    status: number;
+
+    constructor(status: number, message: string) {
+        super(message);
+        this.name = 'CloudflareApiError';
+        this.status = status;
+    }
+}
+
 function getConfig() {
     const apiToken = process.env.CLOUDFLARE_API_TOKEN;
     const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
@@ -43,24 +55,69 @@ function getConfig() {
     return { apiToken, accountId };
 }
 
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
+}
+
+function parseRetryAfterMs(header: string | null): number | null {
+    if (!header) return null;
+
+    const seconds = Number.parseInt(header, 10);
+    if (Number.isFinite(seconds) && seconds >= 0) {
+        return Math.min(60_000, Math.max(250, seconds * 1000));
+    }
+
+    const dateMs = Date.parse(header);
+    if (!Number.isNaN(dateMs)) {
+        const delta = dateMs - Date.now();
+        if (delta > 0) {
+            return Math.min(60_000, Math.max(250, delta));
+        }
+    }
+
+    return null;
+}
+
 async function cfGraphQL(query: string, variables: Record<string, unknown>): Promise<CFGraphQLResponse> {
     const config = getConfig();
     if (!config) throw new Error('Cloudflare credentials not configured');
 
-    const response = await fetch(CF_GRAPHQL, {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${config.apiToken}`,
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ query, variables }),
-    });
+    let lastError: Error | null = null;
 
-    if (!response.ok) {
-        throw new Error(`Cloudflare API error: ${response.status} ${response.statusText}`);
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt += 1) {
+        const response = await fetch(CF_GRAPHQL, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${config.apiToken}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ query, variables }),
+        });
+
+        if (response.ok) {
+            return response.json() as Promise<CFGraphQLResponse>;
+        }
+
+        const bodyText = await response.text().catch(() => '');
+        const baseMessage = `Cloudflare API error: ${response.status} ${response.statusText}`;
+        const message = bodyText ? `${baseMessage} - ${bodyText}` : baseMessage;
+        const error = new CloudflareApiError(response.status, message);
+        lastError = error;
+
+        const retryable = response.status === 429 || response.status >= 500;
+        if (!retryable || attempt >= MAX_RETRIES) {
+            throw error;
+        }
+
+        const retryAfterMs = parseRetryAfterMs(response.headers.get('Retry-After'));
+        const jitterMs = Math.floor(Math.random() * 250);
+        const fallbackBackoff = BASE_RETRY_DELAY_MS * 2 ** (attempt - 1);
+        await sleep((retryAfterMs ?? fallbackBackoff) + jitterMs);
     }
 
-    return response.json() as Promise<CFGraphQLResponse>;
+    throw lastError ?? new Error('Unknown Cloudflare API error');
 }
 
 /**
@@ -71,7 +128,7 @@ export type AnalyticsResult =
     | { status: 'ok'; data: AnalyticsData[] }
     | { status: 'error'; message: string };
 
-export async function getDomainAnalytics(domain: string, days = 30): Promise<AnalyticsData[]> {
+async function fetchDomainAnalyticsRaw(domain: string, days = 30): Promise<AnalyticsData[]> {
     const config = getConfig();
     if (!config) return [];
 
@@ -101,29 +158,37 @@ export async function getDomainAnalytics(domain: string, days = 30): Promise<Ana
         }
     `;
 
+    const result = await cfGraphQL(query, {
+        accountId: config.accountId,
+        startDate,
+        endDate,
+        projectName,
+    });
+
+    if (result.errors?.length) {
+        throw new Error(`Cloudflare GraphQL error: ${result.errors.map((entry) => entry.message).join('; ')}`);
+    }
+
+    const groups = result.data?.viewer?.accounts?.[0]?.pagesProjectsAnalyticsAdaptiveGroups;
+    if (!groups) return [];
+
+    return groups.map((g) => ({
+        date: g.dimensions.date,
+        views: g.sum.pageviews,
+        visitors: g.sum.visits,
+    }));
+}
+
+export async function getDomainAnalytics(domain: string, days = 30): Promise<AnalyticsData[]> {
     try {
-        const result = await cfGraphQL(query, {
-            accountId: config.accountId,
-            startDate,
-            endDate,
-            projectName,
-        });
-
-        if (result.errors?.length) {
-            console.error('Cloudflare GraphQL errors:', result.errors);
-            return [];
-        }
-
-        const groups = result.data?.viewer?.accounts?.[0]?.pagesProjectsAnalyticsAdaptiveGroups;
-        if (!groups) return [];
-
-        return groups.map(g => ({
-            date: g.dimensions.date,
-            views: g.sum.pageviews,
-            visitors: g.sum.visits,
-        }));
+        return await fetchDomainAnalyticsRaw(domain, days);
     } catch (error) {
-        console.error('Failed to fetch Cloudflare analytics:', error);
+        const message = error instanceof Error ? error.message : 'Unknown Cloudflare analytics error';
+        if (error instanceof CloudflareApiError && error.status === 429) {
+            console.warn(`Cloudflare analytics rate-limited for ${domain}: ${message}`);
+        } else {
+            console.warn(`Failed to fetch Cloudflare analytics for ${domain}: ${message}`);
+        }
         return [];
     }
 }
@@ -180,7 +245,12 @@ export async function getTopPages(domain: string, days = 30, limit = 20): Promis
             visitors: g.sum.visits,
         }));
     } catch (error) {
-        console.error('Failed to fetch top pages:', error);
+        const message = error instanceof Error ? error.message : 'Unknown Cloudflare top-pages error';
+        if (error instanceof CloudflareApiError && error.status === 429) {
+            console.warn(`Cloudflare top-pages rate-limited for ${domain}: ${message}`);
+        } else {
+            console.warn(`Failed to fetch Cloudflare top pages for ${domain}: ${message}`);
+        }
         return [];
     }
 }
@@ -196,7 +266,7 @@ export async function getDomainAnalyticsTyped(domain: string, days = 30): Promis
     if (!config) return { status: 'not_configured' };
 
     try {
-        const data = await getDomainAnalytics(domain, days);
+        const data = await fetchDomainAnalyticsRaw(domain, days);
         return { status: 'ok', data };
     } catch (error) {
         return { status: 'error', message: error instanceof Error ? error.message : 'Unknown error' };

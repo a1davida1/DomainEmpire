@@ -79,10 +79,10 @@ function mergeContentConfig(currentValue: unknown, incomingValue: DomainContentC
 // Validation schema for updating a domain
 const updateDomainSchema = z.object({
     registrar: z.enum(['godaddy', 'namecheap', 'cloudflare', 'other']).optional(),
-    purchasePrice: z.number().optional().transform(val => val?.toString()),
+    purchasePrice: z.number().optional(),
     purchaseDate: z.string().optional().transform((val) => val ? new Date(val) : undefined),
     renewalDate: z.string().optional().transform((val) => val ? new Date(val) : undefined),
-    renewalPrice: z.number().optional().transform(val => val?.toString()),
+    renewalPrice: z.number().optional(),
     status: z.enum(['parked', 'active', 'redirect', 'forsale', 'defensive']).optional(),
     bucket: z.enum(['build', 'redirect', 'park', 'defensive']).optional(),
     tier: z.number().min(1).max(3).optional(),

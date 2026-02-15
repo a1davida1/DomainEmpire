@@ -52,7 +52,7 @@ const SESSION_COOKIE = 'de-session';
 // Public paths that don't require authentication
 const PUBLIC_PATHS = ['/login', '/api/auth/login', '/api/auth/logout'];
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
     const ip =
         (request as unknown as { ip?: string }).ip ||
         request.headers.get('cf-connecting-ip') ||
@@ -75,18 +75,16 @@ export async function middleware(request: NextRequest) {
                     },
                 });
             }
-        } else {
-            if (!checkMemoryRateLimit(ip)) {
-                return new NextResponse('Too Many Requests', {
-                    status: 429,
-                    headers: { 'Retry-After': '60' },
-                });
-            }
+        } else if (!checkMemoryRateLimit(ip)) {
+            return new NextResponse('Too Many Requests', {
+                status: 429,
+                headers: { 'Retry-After': '60' },
+            });
         }
     }
 
     // Session-based auth check for dashboard and non-public API routes
-    const isPublic = PUBLIC_PATHS.some(p => pathname === p || pathname.startsWith(p + '/'));
+    const isPublic = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
     const needsAuth = pathname.startsWith('/dashboard') || (pathname.startsWith('/api') && !isPublic);
 
     if (needsAuth) {
@@ -99,7 +97,7 @@ export async function middleware(request: NextRequest) {
             return NextResponse.redirect(new URL('/login', request.url));
         }
         // Note: Full session validation (DB lookup) happens in requireAuth() within route handlers.
-        // Middleware only checks cookie presence for fast rejection of unauthenticated requests.
+        // Proxy only checks cookie presence for fast rejection of unauthenticated requests.
     }
 
     const response = NextResponse.next();

@@ -59,7 +59,7 @@ describe('media-review escalation service', () => {
         mockWhere.mockImplementation(() => ({ orderBy: mockOrderBy }));
         mockFrom.mockImplementation(() => ({ where: mockWhere }));
 
-        mockWhereUpdate.mockImplementation(() => Promise.resolve([{ id: 'task-1' }]));
+        mockWhereUpdate.mockImplementation(() => ({ returning: async () => [{ id: 'task-1' }] }));
         mockSet.mockImplementation(() => ({ where: mockWhereUpdate }));
         mockUpdate.mockImplementation(() => ({ set: mockSet }));
         mockAppendMediaModerationEvent.mockResolvedValue({ id: 'event-1' });

@@ -1340,7 +1340,7 @@ export async function getLatestGrowthLaunchFreezeAuditSnapshot(): Promise<Growth
         reasonCodes: reasonCodesRaw
             .map((value) => (typeof value === 'string' ? value.trim() : ''))
             .filter((value) => value.length > 0),
-        recordedAt: row.createdAt.toISOString(),
+        recordedAt: row.createdAt?.toISOString() ?? new Date().toISOString(),
     };
 }
 

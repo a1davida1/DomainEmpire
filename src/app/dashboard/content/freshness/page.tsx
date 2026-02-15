@@ -47,7 +47,7 @@ async function getFreshnessStats(domainId?: string) {
     try {
         const [total, stale, avgScore] = await Promise.all([
             db.select({ count: count() }).from(articles).where(and(...conditions)),
-            db.select({ count: count() }).from(articles).where(and(...conditions, gte(articles.stalenessScore, '0.6'))),
+            db.select({ count: count() }).from(articles).where(and(...conditions, gte(articles.stalenessScore, 0.6))),
             db.select({ avg: sql<number>`COALESCE(AVG(${articles.stalenessScore}::numeric), 0)` }).from(articles).where(and(...conditions)),
         ]);
         return {

@@ -29,7 +29,7 @@ vi.mock('drizzle-orm', () => ({
     eq: vi.fn((...args: unknown[]) => ({ type: 'eq', args })),
     inArray: vi.fn((...args: unknown[]) => ({ type: 'inArray', args })),
     sql: Object.assign(
-        ((strings: TemplateStringsArray, ...values: unknown[]) => ({ type: 'sql', strings: [...strings], values })) as unknown,
+        ((...args: unknown[]) => ({ type: 'sql', args })) as any,
         { join: vi.fn((values: unknown[]) => ({ type: 'join', values })) },
     ),
 }));
@@ -48,7 +48,7 @@ vi.mock('@/lib/db', () => ({
             mockInsert(...args);
             return { values: mockValues };
         },
-        transaction: async (fn: (tx: { select: typeof mockSelect; update: typeof mockUpdate; insert: typeof mockInsert; execute: ReturnType<typeof vi.fn>; }) => Promise<void>) => {
+        transaction: async (fn: (tx: Record<string, unknown>) => Promise<void>) => {
             const tx = {
                 select: (...args: unknown[]) => {
                     mockSelect(...args);

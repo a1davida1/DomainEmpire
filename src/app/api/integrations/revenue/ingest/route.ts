@@ -70,6 +70,9 @@ function addRevenueBySource(aggregate: AggregatedSnapshotInput, sourceType: Reve
         aggregate.affiliateRevenue += amount;
     } else if (sourceType === 'lead_gen') {
         aggregate.leadGenRevenue += amount;
+    } else if (sourceType === 'parking') {
+        // Parking is intentionally folded into adRevenue until revenueSnapshots has a dedicated parking column.
+        aggregate.adRevenue += amount;
     } else {
         aggregate.adRevenue += amount;
     }

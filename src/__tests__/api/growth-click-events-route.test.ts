@@ -3,16 +3,32 @@ import type { NextRequest } from 'next/server';
 
 const mockInsert = vi.fn();
 const mockValues = vi.fn();
+const mockSelectFrom = vi.fn();
 const mockGetClientIp = vi.fn();
 const mockCreateRateLimiter = vi.fn();
+const mockEvaluateClickIntegrity = vi.fn();
+const mockCreateNotification = vi.fn();
 
 const mockClickEventsTable = {
     id: 'id',
     campaignId: 'campaign_id',
+    occurredAt: 'occurred_at',
+    ipHash: 'ip_hash',
+    visitorId: 'visitor_id',
 };
+
+const mockDomainResearchTable = { id: 'id', domain: 'domain', domainId: 'domain_id' };
+const mockPromotionCampaignsTable = { id: 'id', domainResearchId: 'domain_research_id' };
 
 let insertedRows: Array<Record<string, unknown>> = [];
 let limiterResponse: { allowed: boolean; headers: Record<string, string> } = { allowed: true, headers: {} };
+
+vi.mock('drizzle-orm', () => ({
+    and: vi.fn((...args: unknown[]) => ({ type: 'and', args })),
+    eq: vi.fn((...args: unknown[]) => ({ type: 'eq', args })),
+    gte: vi.fn((...args: unknown[]) => ({ type: 'gte', args })),
+    sql: vi.fn(() => 'sql'),
+}));
 
 vi.mock('@/lib/db', () => ({
     db: {
@@ -20,8 +36,23 @@ vi.mock('@/lib/db', () => ({
             mockInsert(...args);
             return { values: mockValues };
         },
+        select: () => ({
+            from: (...args: unknown[]) => {
+                mockSelectFrom(...args);
+                return {
+                    where: async () => [{ count: 0 }],
+                    innerJoin: () => ({
+                        where: () => ({
+                            limit: async () => [],
+                        }),
+                    }),
+                };
+            },
+        }),
     },
     clickEvents: mockClickEventsTable,
+    domainResearch: mockDomainResearchTable,
+    promotionCampaigns: mockPromotionCampaignsTable,
 }));
 
 vi.mock('@/lib/rate-limit', () => ({
@@ -29,8 +60,18 @@ vi.mock('@/lib/rate-limit', () => ({
     getClientIp: mockGetClientIp,
 }));
 
+vi.mock('@/lib/growth/click-integrity', () => ({
+    evaluateClickIntegrity: mockEvaluateClickIntegrity,
+}));
+
+vi.mock('@/lib/notifications', () => ({
+    createNotification: mockCreateNotification,
+}));
+
 mockCreateRateLimiter.mockImplementation(() => () => limiterResponse);
 mockGetClientIp.mockReturnValue('127.0.0.1');
+mockEvaluateClickIntegrity.mockReturnValue({ riskScore: 0, severity: 'low', signals: [] });
+mockCreateNotification.mockResolvedValue(undefined);
 
 const { POST } = await import('@/app/api/growth/click-events/route');
 
@@ -48,6 +89,8 @@ describe('growth click-events route', () => {
         insertedRows = [];
         mockCreateRateLimiter.mockImplementation(() => () => limiterResponse);
         mockGetClientIp.mockReturnValue('127.0.0.1');
+        mockEvaluateClickIntegrity.mockReturnValue({ riskScore: 0, severity: 'low', signals: [] });
+        mockCreateNotification.mockResolvedValue(undefined);
         mockValues.mockImplementation(() => ({
             returning: async () => insertedRows,
         }));

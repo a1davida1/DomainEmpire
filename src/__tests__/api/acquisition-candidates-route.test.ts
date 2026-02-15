@@ -42,7 +42,7 @@ vi.mock('drizzle-orm', () => ({
     eq: vi.fn((...args: unknown[]) => ({ type: 'eq', args })),
     inArray: vi.fn((...args: unknown[]) => ({ type: 'inArray', args })),
     sql: Object.assign(
-        ((strings: TemplateStringsArray, ...values: unknown[]) => ({ type: 'sql', strings: [...strings], values })) as unknown,
+        ((...args: unknown[]) => ({ type: 'sql', args })) as any,
         { join: vi.fn((values: unknown[]) => ({ type: 'join', values })) },
     ),
 }));

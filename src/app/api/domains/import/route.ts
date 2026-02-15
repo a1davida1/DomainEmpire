@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db, domains, NewDomain } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
 import { eq } from 'drizzle-orm';
+import { classifyAndUpdateDomain } from '@/lib/ai/classify-domain';
 
 interface CSVRow {
     domain: string;
@@ -118,10 +119,10 @@ async function processCSVRow(row: CSVRow, result: ImportResult): Promise<void> {
         domain: domainName,
         tld,
         registrar: parseRegistrar(row.registrar),
-        purchasePrice: Number.isFinite(purchasePriceParsed) ? purchasePriceParsed.toString() : undefined,
+        purchasePrice: Number.isFinite(purchasePriceParsed) ? purchasePriceParsed : undefined,
         purchaseDate: parsedPurchaseDate && Number.isFinite(parsedPurchaseDate.getTime()) ? parsedPurchaseDate : undefined,
         renewalDate: parsedRenewalDate && Number.isFinite(parsedRenewalDate.getTime()) ? parsedRenewalDate : undefined,
-        renewalPrice: Number.isFinite(renewalPriceParsed) ? renewalPriceParsed.toString() : undefined,
+        renewalPrice: Number.isFinite(renewalPriceParsed) ? renewalPriceParsed : undefined,
         status: parseStatus(row.status),
         bucket: parseBucket(row.bucket),
         tier: validTier,
@@ -177,6 +178,24 @@ export async function POST(request: NextRequest) {
                     error: err instanceof Error ? err.message : 'Unknown error'
                 });
             }
+        }
+
+        // Auto-classify imported domains that have no niche (sequential to avoid rate limits)
+        const unclassified = result.created.filter(
+            (c) => rows.find((r) => r.domain?.toLowerCase() === c.domain)?.niche == null
+        );
+        const classifyErrors: Array<{ domain: string; error: string }> = [];
+        for (const item of unclassified) {
+            try {
+                await classifyAndUpdateDomain(item.id);
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : 'Classification failed';
+                classifyErrors.push({ domain: item.domain, error: msg });
+                console.warn('Auto-classification failed for imported domain', item.domain, err);
+            }
+        }
+        if (classifyErrors.length > 0) {
+            (result as ImportResult & { classifyErrors?: typeof classifyErrors }).classifyErrors = classifyErrors;
         }
 
         return NextResponse.json(result);

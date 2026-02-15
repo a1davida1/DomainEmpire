@@ -14,7 +14,7 @@ import { z } from 'zod';
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
-    const authError = await requireAuth(request);
+    const authError = await requireRole(request, 'admin');
     if (authError) return authError;
 
     try {

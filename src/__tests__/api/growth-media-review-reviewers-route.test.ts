@@ -36,6 +36,7 @@ vi.mock('@/lib/feature-flags', () => ({
 vi.mock('drizzle-orm', () => ({
     and: vi.fn((...args: unknown[]) => ({ type: 'and', args })),
     asc: vi.fn((arg: unknown) => ({ type: 'asc', arg })),
+    count: vi.fn(() => ({ type: 'count' })),
     eq: vi.fn((...args: unknown[]) => ({ type: 'eq', args })),
     inArray: vi.fn((...args: unknown[]) => ({ type: 'inArray', args })),
 }));
@@ -86,11 +87,15 @@ describe('growth media-review/reviewers route', () => {
             }
             if (table === mockMediaModerationTasksTable) {
                 return {
-                    where: async () => pendingRows,
+                    where: () => ({
+                        groupBy: async () => pendingRows,
+                    }),
                 };
             }
             return {
-                where: async () => [],
+                where: () => ({
+                    groupBy: async () => [],
+                }),
             };
         });
     });
@@ -110,9 +115,8 @@ describe('growth media-review/reviewers route', () => {
         ];
 
         pendingRows = [
-            { reviewerId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
-            { reviewerId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
-            { reviewerId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' },
+            { reviewerId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', taskCount: 2 },
+            { reviewerId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', taskCount: 1 },
         ];
 
         const response = await GET(makeRequest('http://localhost/api/growth/media-review/reviewers?limit=20'));

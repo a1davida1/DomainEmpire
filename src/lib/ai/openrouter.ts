@@ -7,24 +7,41 @@
 import { withCircuitBreaker } from '@/lib/tpilot/core/circuit-breaker';
 import { withRetry } from '@/lib/tpilot/core/retry';
 
+function envModel(key: string, fallback: string): string {
+    const value = process.env[key];
+    if (typeof value !== 'string') return fallback;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : fallback;
+}
+
+const FAST_MODEL = envModel('OPENROUTER_MODEL_FAST', 'openrouter/auto');
+const SEO_MODEL = envModel('OPENROUTER_MODEL_SEO', 'openrouter/auto');
+const QUALITY_MODEL = envModel('OPENROUTER_MODEL_QUALITY', 'openrouter/auto');
+const REVIEW_MODEL = envModel('OPENROUTER_MODEL_REVIEW', 'anthropic/claude-opus-4.1');
+const RESEARCH_MODEL = envModel('OPENROUTER_MODEL_RESEARCH', 'openrouter/auto');
+const EMERGENCY_FALLBACK_MODEL = envModel('OPENROUTER_MODEL_FALLBACK', 'openrouter/auto');
+
 export const MODEL_CONFIG = {
-    // Fast, cheap operations
-    keywordResearch: 'x-ai/grok-3-fast',
-    domainClassify: 'x-ai/grok-3-fast',
-    seoOptimize: 'anthropic/claude-3-5-haiku-20241022',
-    titleGeneration: 'x-ai/grok-3-fast',
+    // Fast, low-latency operations
+    keywordResearch: FAST_MODEL,
+    domainClassify: FAST_MODEL,
+    seoOptimize: SEO_MODEL,
+    titleGeneration: FAST_MODEL,
 
     // High-quality drafts
-    outlineGeneration: 'anthropic/claude-sonnet-4-5-20250929',
-    draftGeneration: 'anthropic/claude-sonnet-4-5-20250929',
-    humanization: 'anthropic/claude-sonnet-4-5-20250929',
+    outlineGeneration: QUALITY_MODEL,
+    draftGeneration: QUALITY_MODEL,
+    humanization: QUALITY_MODEL,
 
     // Fallback for bulk operations
-    bulkOperations: 'x-ai/grok-3-fast',
-    voiceSeedGeneration: 'anthropic/claude-sonnet-4-5-20250929',
+    bulkOperations: FAST_MODEL,
+    voiceSeedGeneration: QUALITY_MODEL,
+
+    // AI Review (Opus-class)
+    aiReview: REVIEW_MODEL,
 
     // Deep Research (Online)
-    research: 'perplexity/sonar-reasoning',
+    research: RESEARCH_MODEL,
 } as const;
 
 export type AIModelTask = keyof typeof MODEL_CONFIG;
@@ -47,6 +64,7 @@ const MODEL_ROUTING_REGISTRY: Record<AIModelTask, RoutingProfile> = {
     humanization: { fallbackTasks: ['draftGeneration', 'seoOptimize'], promptVersion: 'humanize.v2' },
     bulkOperations: { fallbackTasks: ['keywordResearch', 'seoOptimize'], promptVersion: 'bulk.v1' },
     voiceSeedGeneration: { fallbackTasks: ['draftGeneration', 'seoOptimize'], promptVersion: 'voice-seed.v1' },
+    aiReview: { fallbackTasks: ['humanization', 'seoOptimize'], promptVersion: 'ai-review.v1' },
     research: { fallbackTasks: ['seoOptimize'], promptVersion: 'research.v1' },
 };
 
@@ -138,6 +156,7 @@ export class OpenRouterClient {
         const configuredModels = [
             options.model || MODEL_CONFIG[task],
             ...routingProfile.fallbackTasks.map((fallbackTask) => MODEL_CONFIG[fallbackTask]),
+            EMERGENCY_FALLBACK_MODEL,
         ];
         const modelsToTry = configuredModels.filter((model, idx) => configuredModels.indexOf(model) === idx);
 

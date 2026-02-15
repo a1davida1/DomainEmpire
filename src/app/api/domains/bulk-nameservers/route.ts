@@ -6,7 +6,7 @@ import { db, domainOwnershipEvents, domainRegistrarProfiles, domains } from '@/l
 import { notDeleted } from '@/lib/db/soft-delete';
 import { createRateLimiter, getClientIp } from '@/lib/rate-limit';
 import { updateNameservers } from '@/lib/deploy/godaddy';
-import { getZoneNameservers } from '@/lib/deploy/cloudflare';
+import { getZoneNameserverMap } from '@/lib/deploy/cloudflare';
 
 const bulkNameserverMutationLimiter = createRateLimiter('domain_bulk_nameserver_mutation', {
     maxRequests: 8,
@@ -37,6 +37,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function normalizeNameserver(value: string): string {
     return value.trim().toLowerCase().replace(/\.+$/g, '');
+}
+
+function normalizeDomain(value: string): string {
+    return value.trim().toLowerCase();
 }
 
 function isValidNameserver(value: string): boolean {
@@ -168,6 +172,26 @@ export async function POST(request: NextRequest) {
     const skipped: Array<{ domainId: string; domain: string; reason: string }> = [];
     const reason = parsed.data.reason ?? 'Manual bulk nameserver cutover to Cloudflare';
 
+    let zoneLookup: Map<string, {
+        zoneId: string;
+        zoneName: string;
+        nameservers: string[];
+    }> | null = null;
+    if (!providedNameservers) {
+        try {
+            zoneLookup = await getZoneNameserverMap(rows.map((row) => normalizeDomain(row.domain)));
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Unknown Cloudflare zone lookup error';
+            return NextResponse.json(
+                {
+                    error: 'Cloudflare zone lookup failed. Please retry shortly.',
+                    details: message,
+                },
+                { status: 503 },
+            );
+        }
+    }
+
     for (const row of rows) {
         if (row.registrar !== 'godaddy') {
             skipped.push({
@@ -188,7 +212,7 @@ export async function POST(request: NextRequest) {
                 nameservers = providedNameservers;
                 nameserverSource = 'request';
             } else {
-                const zone = await getZoneNameservers(row.domain);
+                const zone = zoneLookup?.get(normalizeDomain(row.domain));
                 if (!zone) {
                     failures.push({
                         domainId: row.id,

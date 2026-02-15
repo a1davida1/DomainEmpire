@@ -127,22 +127,18 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ error: 'Invalid decision filter' }, { status: 400 });
         }
 
-        let query = db
+        const baseQuery = db
             .select()
-            .from(domainResearch)
-            .orderBy(desc(domainResearch.createdAt))
-            .limit(limit);
+            .from(domainResearch);
 
-        if (decision?.success) {
-            query = db
-                .select()
-                .from(domainResearch)
+        const candidates = decision?.success
+            ? await baseQuery
                 .where(eq(domainResearch.decision, decision.data))
                 .orderBy(desc(domainResearch.createdAt))
+                .limit(limit)
+            : await baseQuery
+                .orderBy(desc(domainResearch.createdAt))
                 .limit(limit);
-        }
-
-        const candidates = await query;
         if (candidates.length === 0) {
             return NextResponse.json({ candidates: [] });
         }

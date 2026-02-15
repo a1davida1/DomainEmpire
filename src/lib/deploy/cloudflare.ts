@@ -35,6 +35,12 @@ type ZoneCreateResult = {
     error?: string;
 };
 
+type ZoneNameserverLookup = {
+    zoneId: string;
+    zoneName: string;
+    nameservers: string[];
+};
+
 let cachedResolvedAccountId: string | null = null;
 let accountIdLookupInFlight: Promise<string> | null = null;
 
@@ -124,6 +130,10 @@ async function cfFetch(
 
 function normalizeNameserver(value: string): string {
     return value.trim().toLowerCase().replace(/\.+$/g, '');
+}
+
+function normalizeDomain(value: string): string {
+    return value.trim().toLowerCase();
 }
 
 /**
@@ -396,7 +406,7 @@ export async function getZoneNameservers(domain: string): Promise<{
     zoneName: string;
     nameservers: string[];
 } | null> {
-    const normalizedDomain = domain.trim().toLowerCase();
+    const normalizedDomain = normalizeDomain(domain);
 
     try {
         const config = await getConfig();
@@ -451,6 +461,75 @@ export async function getZoneNameservers(domain: string): Promise<{
     } catch {
         return null;
     }
+}
+
+/**
+ * Resolve Cloudflare nameservers for many domains with a single zone listing sweep.
+ * Throws on Cloudflare API errors so callers can distinguish API outages from missing zones.
+ */
+export async function getZoneNameserverMap(domains: string[]): Promise<Map<string, ZoneNameserverLookup>> {
+    const normalized = [...new Set(domains.map((value) => normalizeDomain(value)).filter(Boolean))];
+    const remaining = new Set(normalized);
+    const lookup = new Map<string, ZoneNameserverLookup>();
+    if (remaining.size === 0) {
+        return lookup;
+    }
+
+    const config = await getConfig();
+    let page = 1;
+    let totalPages = 1;
+
+    while (page <= totalPages && remaining.size > 0) {
+        const params = new URLSearchParams({
+            'account.id': config.accountId,
+            page: String(page),
+            per_page: '50',
+        });
+
+        const response = await cfFetch(`/zones?${params.toString()}`);
+        const data = await response.json() as {
+            success?: boolean;
+            errors?: Array<{ message?: string }>;
+            result?: Array<{
+                id?: string;
+                name?: string;
+                name_servers?: string[];
+            }>;
+            result_info?: {
+                total_pages?: number;
+            };
+        };
+
+        if (!response.ok || !data.success || !Array.isArray(data.result)) {
+            throw new Error(data.errors?.[0]?.message || 'Failed to list Cloudflare zones');
+        }
+
+        for (const zone of data.result) {
+            if (!zone?.id || !zone?.name) continue;
+            const domainName = normalizeDomain(zone.name);
+            if (!remaining.has(domainName)) continue;
+
+            const nameservers = Array.isArray(zone.name_servers)
+                ? [...new Set(zone.name_servers
+                    .map((value) => normalizeNameserver(value))
+                    .filter((value) => value.endsWith('.cloudflare.com')))]
+                : [];
+
+            if (nameservers.length < 2) continue;
+
+            lookup.set(domainName, {
+                zoneId: zone.id,
+                zoneName: zone.name,
+                nameservers,
+            });
+            remaining.delete(domainName);
+        }
+
+        totalPages = Math.max(1, data.result_info?.total_pages ?? 1);
+        page += 1;
+    }
+
+    return lookup;
 }
 
 /**

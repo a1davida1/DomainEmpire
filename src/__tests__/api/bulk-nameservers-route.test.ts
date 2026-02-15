@@ -4,7 +4,7 @@ import type { NextRequest } from 'next/server';
 const mockRequireRole = vi.fn();
 const mockGetRequestUser = vi.fn();
 const mockUpdateNameservers = vi.fn();
-const mockGetZoneNameservers = vi.fn();
+const mockGetZoneNameserverMap = vi.fn();
 const mockSelectWhere = vi.fn();
 const mockCreateRateLimiter = vi.fn();
 
@@ -28,7 +28,7 @@ vi.mock('@/lib/deploy/godaddy', () => ({
 }));
 
 vi.mock('@/lib/deploy/cloudflare', () => ({
-    getZoneNameservers: mockGetZoneNameservers,
+    getZoneNameserverMap: mockGetZoneNameserverMap,
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -80,11 +80,13 @@ describe('bulk nameserver route', () => {
                 profileMetadata: {},
             },
         ]);
-        mockGetZoneNameservers.mockResolvedValue({
-            zoneId: 'zone-1',
-            zoneName: 'example.com',
-            nameservers: ['art.ns.cloudflare.com', 'zelda.ns.cloudflare.com'],
-        });
+        mockGetZoneNameserverMap.mockResolvedValue(new Map([
+            ['example.com', {
+                zoneId: 'zone-1',
+                zoneName: 'example.com',
+                nameservers: ['art.ns.cloudflare.com', 'zelda.ns.cloudflare.com'],
+            }],
+        ]));
         mockUpdateNameservers.mockResolvedValue(undefined);
     });
 
@@ -102,5 +104,17 @@ describe('bulk nameserver route', () => {
         expect(body.skippedCount).toBe(0);
         expect(mockUpdateNameservers).not.toHaveBeenCalled();
     });
-});
 
+    it('returns 503 when Cloudflare zone lookup fails', async () => {
+        mockGetZoneNameserverMap.mockRejectedValueOnce(new Error('Please wait and consider throttling your request speed'));
+
+        const response = await POST(makeJsonRequest('http://localhost/api/domains/bulk-nameservers', {
+            domainIds: ['00000000-0000-4000-8000-000000000001'],
+            dryRun: true,
+        }));
+
+        expect(response.status).toBe(503);
+        const body = await response.json();
+        expect(body.error).toContain('Cloudflare zone lookup failed');
+    });
+});

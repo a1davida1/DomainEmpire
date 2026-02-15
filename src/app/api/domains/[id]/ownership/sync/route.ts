@@ -120,8 +120,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         return NextResponse.json(
             {
                 error: `No connected ${registrarProvider} integration found for this domain. Add a registrar connection first.`,
+                code: 'registrar_integration_missing',
+                provider: registrarProvider,
+                action: '/dashboard/integrations',
             },
-            { status: 404 },
+            { status: 409 },
         );
     }
 

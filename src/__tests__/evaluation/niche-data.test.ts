@@ -14,6 +14,7 @@ describe('detectNiche', () => {
 
     it('detects health niche', () => {
         expect(detectNiche('healthwellness.com')).toBe('health');
+        // single 'therapy' keyword no longer reaches portfolio threshold; falls to generic 'health'
         expect(detectNiche('mental-health-therapy.com')).toBe('health');
     });
 
@@ -39,6 +40,7 @@ describe('detectNiche', () => {
         expect(claimResult).not.toBe('tech'); // "ai" is inside "claim"
 
         const aiResult = detectNiche('ai-tools.com');
+        // Single 'ai' keyword below portfolio threshold; falls to generic 'tech'
         expect(aiResult).toBe('tech');
     });
 

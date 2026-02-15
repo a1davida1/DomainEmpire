@@ -11,9 +11,9 @@ export const domains = pgTable('domains', {
     tld: text('tld').notNull(),
     registrar: text('registrar').default('godaddy'),
     purchaseDate: timestamp('purchase_date', { mode: 'date' }),
-    purchasePrice: numeric('purchase_price', { precision: 12, scale: 2 }),
+    purchasePrice: numeric('purchase_price', { precision: 12, scale: 2, mode: 'number' }),
     renewalDate: timestamp('renewal_date', { mode: 'date' }),
-    renewalPrice: numeric('renewal_price', { precision: 12, scale: 2 }),
+    renewalPrice: numeric('renewal_price', { precision: 12, scale: 2, mode: 'number' }),
 
     // Classification
     status: text('status', {
@@ -237,7 +237,7 @@ export const keywords = pgTable('keywords', {
 
     // Search metrics
     monthlyVolume: integer('monthly_volume'),
-    cpc: numeric('cpc', { precision: 12, scale: 2 }),
+    cpc: numeric('cpc', { precision: 12, scale: 2, mode: 'number' }),
     difficulty: integer('difficulty'),
     serpPosition: integer('serp_position'),
 
@@ -319,12 +319,12 @@ export const articles = pgTable('articles', {
     pageviews30d: integer('pageviews_30d').default(0),
     uniqueVisitors30d: integer('unique_visitors_30d').default(0),
     avgTimeOnPage: integer('avg_time_on_page'),
-    bounceRate: numeric('bounce_rate', { precision: 5, scale: 2 }),
-    revenue30d: numeric('revenue_30d', { precision: 12, scale: 2 }).default('0'),
+    bounceRate: numeric('bounce_rate', { precision: 5, scale: 2, mode: 'number' }),
+    revenue30d: numeric('revenue_30d', { precision: 12, scale: 2, mode: 'number' }).default(0),
 
     // Content freshness
     lastRefreshedAt: timestamp('last_refreshed_at'),
-    stalenessScore: numeric('staleness_score', { precision: 5, scale: 2 }),
+    stalenessScore: numeric('staleness_score', { precision: 5, scale: 2, mode: 'number' }),
 
     // YMYL & Review
     ymylLevel: text('ymyl_level', {
@@ -592,8 +592,8 @@ export const domainResearch = pgTable('domain_research', {
 
     // Scoring
     keywordVolume: integer('keyword_volume'),
-    keywordCpc: numeric('keyword_cpc', { precision: 12, scale: 2 }),
-    estimatedRevenuePotential: numeric('estimated_revenue_potential', { precision: 12, scale: 2 }),
+    keywordCpc: numeric('keyword_cpc', { precision: 12, scale: 2, mode: 'number' }),
+    estimatedRevenuePotential: numeric('estimated_revenue_potential', { precision: 12, scale: 2, mode: 'number' }),
     domainScore: numeric('domain_score', { precision: 5, scale: 2, mode: 'number' }),
     demandScore: real('demand_score'),
     compsScore: real('comps_score'),
@@ -1112,7 +1112,7 @@ export const apiCallLogs = pgTable('api_call_logs', {
     domainId: uuid('domain_id').references(() => domains.id, { onDelete: 'set null' }),
 
     stage: text('stage', {
-        enum: ['keyword_research', 'outline', 'draft', 'humanize', 'seo', 'meta', 'classify', 'research', 'evaluate']
+        enum: ['keyword_research', 'outline', 'draft', 'humanize', 'seo', 'meta', 'classify', 'research', 'evaluate', 'aiReview']
     }).notNull(),
     modelKey: text('model_key').notNull().default('legacy'),
     model: text('model').notNull(),
@@ -1124,7 +1124,7 @@ export const apiCallLogs = pgTable('api_call_logs', {
     fallbackUsed: boolean('fallback_used').notNull().default(false),
     inputTokens: integer('input_tokens').notNull(),
     outputTokens: integer('output_tokens').notNull(),
-    cost: numeric('cost', { precision: 12, scale: 4 }).notNull(),
+    cost: numeric('cost', { precision: 12, scale: 4, mode: 'number' }).notNull(),
     durationMs: integer('duration_ms'),
 
     createdAt: timestamp('created_at').defaultNow(),

@@ -58,6 +58,62 @@ interface KeywordOpportunity {
     opportunityScore: number;
 }
 
+type AcquisitionStageJobType = 'ingest_listings' | 'enrich_candidate' | 'score_candidate' | 'create_bid_plan';
+type AcquisitionDecision = 'buy' | 'watchlist' | 'pass';
+type AcquisitionStageState = 'done' | 'pending' | 'waiting' | 'skipped';
+
+interface AcquisitionEvent {
+    id: string;
+    eventType: string;
+    createdAt: string | null;
+}
+
+interface AcquisitionCandidate {
+    id: string;
+    domain: string;
+    domainScore: number | null;
+    decision: string | null;
+    decisionReason: string | null;
+    isAvailable: boolean | null;
+    registrationPrice: number | null;
+    evaluatedAt: string | null;
+    createdAt: string | null;
+    confidenceScore: number | null;
+    listingSource: string | null;
+    recommendedMaxBid: number | null;
+    hardFailReason: string | null;
+    pendingStages?: string[];
+    events?: AcquisitionEvent[];
+}
+
+const ACQUISITION_STAGE_ORDER: AcquisitionStageJobType[] = [
+    'ingest_listings',
+    'enrich_candidate',
+    'score_candidate',
+    'create_bid_plan',
+];
+
+const ACQUISITION_STAGE_LABEL: Record<AcquisitionStageJobType, string> = {
+    ingest_listings: 'Ingest',
+    enrich_candidate: 'Enrich',
+    score_candidate: 'Score',
+    create_bid_plan: 'Bid Plan',
+};
+
+const ACQUISITION_STAGE_STATE_CLASS: Record<AcquisitionStageState, string> = {
+    done: 'bg-emerald-100 text-emerald-800',
+    pending: 'bg-blue-100 text-blue-800',
+    waiting: 'bg-slate-100 text-slate-700',
+    skipped: 'bg-amber-100 text-amber-900',
+};
+
+const ACQUISITION_QUEUE_JOB_TYPES: AcquisitionStageJobType[] = [
+    'ingest_listings',
+    'enrich_candidate',
+    'score_candidate',
+    'create_bid_plan',
+];
+
 const recColors: Record<string, string> = {
     strong_buy: 'bg-emerald-600 text-white',
     buy: 'bg-green-100 text-green-800',
@@ -86,6 +142,60 @@ function ScoreBar({ label, score, max = 100 }: { label: string; score: number; m
     );
 }
 
+function hasAcquisitionEvent(candidate: AcquisitionCandidate, types: string[]): boolean {
+    const events = candidate.events || [];
+    if (events.length === 0) return false;
+    const wanted = new Set(types);
+    return events.some((event) => wanted.has(event.eventType));
+}
+
+function getStageState(candidate: AcquisitionCandidate, stage: AcquisitionStageJobType): AcquisitionStageState {
+    const pending = new Set((candidate.pendingStages || []) as string[]);
+    if (pending.has(stage)) {
+        return 'pending';
+    }
+
+    if (stage === 'ingest_listings') {
+        return 'done';
+    }
+
+    if (stage === 'enrich_candidate') {
+        if (
+            hasAcquisitionEvent(candidate, ['enriched', 'hard_fail', 'scored', 'watchlist', 'approved', 'passed', 'bought'])
+            || candidate.evaluatedAt !== null
+        ) {
+            return 'done';
+        }
+        return 'waiting';
+    }
+
+    if (stage === 'score_candidate') {
+        if (
+            hasAcquisitionEvent(candidate, ['scored', 'hard_fail', 'watchlist', 'approved', 'passed', 'bought'])
+            || candidate.domainScore !== null
+            || candidate.confidenceScore !== null
+            || candidate.hardFailReason !== null
+        ) {
+            return 'done';
+        }
+        return 'waiting';
+    }
+
+    if (candidate.hardFailReason) {
+        return 'skipped';
+    }
+    if (hasAcquisitionEvent(candidate, ['watchlist', 'approved', 'passed', 'bought'])) {
+        return 'done';
+    }
+    return 'waiting';
+}
+
+function getLatestEvent(candidate: AcquisitionCandidate): AcquisitionEvent | null {
+    const events = candidate.events || [];
+    if (events.length === 0) return null;
+    return events[0] || null;
+}
+
 export default function ResearchPage() {
     const [domainInput, setDomainInput] = useState('');
     const [tld, setTld] = useState('com');
@@ -96,9 +206,19 @@ export default function ResearchPage() {
     const [keywords, setKeywords] = useState<KeywordOpportunity[]>([]);
     const [loadingKeywords, setLoadingKeywords] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [candidates, setCandidates] = useState<AcquisitionCandidate[]>([]);
+    const [loadingCandidates, setLoadingCandidates] = useState(false);
+    const [pipelineSubmitting, setPipelineSubmitting] = useState(false);
+    const [pipelineProcessing, setPipelineProcessing] = useState(false);
+    const [candidateDecisionUpdatingId, setCandidateDecisionUpdatingId] = useState<string | null>(null);
+    const [candidateRequeueingId, setCandidateRequeueingId] = useState<string | null>(null);
+    const [pipelineMessage, setPipelineMessage] = useState<string | null>(null);
+    const [suggesting, setSuggesting] = useState(false);
+    const [suggestions, setSuggestions] = useState<string[]>([]);
 
     useEffect(() => {
         loadKeywordOpportunities();
+        loadCandidates();
     }, []);
 
     async function researchDomain() {
@@ -124,10 +244,12 @@ export default function ResearchPage() {
         }
     }
 
-    async function runFullEvaluation(quick = false) {
-        const domain = result
-            ? `${result.domain}.${result.tld}`
-            : `${domainInput.trim()}.${tld}`;
+    async function runFullEvaluation(quick = false, overrideDomain?: string) {
+        const domain = overrideDomain
+            ? overrideDomain
+            : result
+                ? `${result.domain}.${result.tld}`
+                : `${domainInput.trim()}.${tld}`;
         // Stronger validation: ensure it has content and doesn't start with a dot
         if (!domain || !domain.trim() || domain.trim().startsWith('.')) return;
 
@@ -147,6 +269,192 @@ export default function ResearchPage() {
             setError(err instanceof Error ? err.message : 'Evaluation failed');
         } finally {
             setEvaluating(false);
+        }
+    }
+
+    async function loadCandidates() {
+        setLoadingCandidates(true);
+        try {
+            const res = await fetch('/api/acquisition/candidates?limit=40&includeQueue=true&includeEvents=true');
+            if (res.ok) {
+                const data = await res.json();
+                setCandidates(Array.isArray(data?.candidates) ? data.candidates : []);
+            }
+        } catch (err) {
+            console.error('Failed to load candidates:', err);
+        } finally {
+            setLoadingCandidates(false);
+        }
+    }
+
+    async function submitToPipeline() {
+        const domain = evalResult?.domain || (result ? `${result.domain}.${result.tld}` : null);
+        if (!domain) return;
+
+        setPipelineSubmitting(true);
+        setPipelineMessage(null);
+        try {
+            const res = await fetch('/api/acquisition/candidates', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    domain,
+                    source: 'manual_research',
+                    quickMode: false,
+                }),
+            });
+            const data = await res.json();
+            if (res.ok) {
+                setPipelineMessage(`Added to pipeline (Job: ${data.jobId})`);
+                loadCandidates();
+            } else {
+                setPipelineMessage(`Error: ${data.error || 'Failed'}`);
+            }
+        } catch (err) {
+            setPipelineMessage(`Error: ${err instanceof Error ? err.message : 'Failed'}`);
+        } finally {
+            setPipelineSubmitting(false);
+        }
+    }
+
+    async function processAcquisitionPipelineNow() {
+        setPipelineProcessing(true);
+        setPipelineMessage(null);
+        try {
+            const response = await fetch('/api/queue/process', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    maxJobs: 25,
+                    jobTypes: ACQUISITION_QUEUE_JOB_TYPES,
+                }),
+            });
+            const body = await response.json().catch(() => ({})) as {
+                processed?: number;
+                failed?: number;
+                staleLocksCleaned?: number;
+                error?: string;
+            };
+            if (!response.ok) {
+                throw new Error(body.error || `Failed to process acquisition pipeline (${response.status})`);
+            }
+            const processed = typeof body.processed === 'number' ? body.processed : 0;
+            const failed = typeof body.failed === 'number' ? body.failed : 0;
+            const staleLocks = typeof body.staleLocksCleaned === 'number' ? body.staleLocksCleaned : 0;
+            setPipelineMessage(`Pipeline run complete: processed ${processed}, failed ${failed}, stale locks ${staleLocks}.`);
+            await loadCandidates();
+        } catch (runError) {
+            setPipelineMessage(`Error: ${runError instanceof Error ? runError.message : 'Failed to process pipeline'}`);
+        } finally {
+            setPipelineProcessing(false);
+        }
+    }
+
+    async function requeueCandidatePipeline(candidate: AcquisitionCandidate) {
+        setCandidateRequeueingId(candidate.id);
+        setPipelineMessage(null);
+        try {
+            const response = await fetch('/api/acquisition/candidates', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    domain: candidate.domain,
+                    source: 'manual_requeue',
+                    quickMode: false,
+                    forceRefresh: true,
+                }),
+            });
+            const body = await response.json().catch(() => ({})) as { jobId?: string; error?: string };
+            if (!response.ok) {
+                throw new Error(body.error || `Failed to requeue ${candidate.domain}`);
+            }
+            setPipelineMessage(`Requeued ${candidate.domain} (job ${body.jobId || 'created'}).`);
+            await loadCandidates();
+        } catch (requeueError) {
+            setPipelineMessage(`Error: ${requeueError instanceof Error ? requeueError.message : 'Failed to requeue candidate'}`);
+        } finally {
+            setCandidateRequeueingId(null);
+        }
+    }
+
+    async function applyCandidateDecision(candidate: AcquisitionCandidate, decision: AcquisitionDecision) {
+        const reasonPrompt = window.prompt(
+            `Enter reason for ${decision.toUpperCase()} decision on ${candidate.domain}:`,
+            candidate.decisionReason || '',
+        );
+        if (!reasonPrompt || reasonPrompt.trim().length < 8) {
+            setPipelineMessage('Error: decision reason must be at least 8 characters.');
+            return;
+        }
+
+        let recommendedMaxBid: number | undefined;
+        if (decision === 'buy') {
+            if (typeof candidate.recommendedMaxBid === 'number' && candidate.recommendedMaxBid > 0) {
+                recommendedMaxBid = candidate.recommendedMaxBid;
+            } else {
+                const bidPrompt = window.prompt(
+                    `Recommended max bid for ${candidate.domain} (required for BUY):`,
+                    '',
+                );
+                const parsed = Number.parseFloat((bidPrompt || '').trim());
+                if (!Number.isFinite(parsed) || parsed <= 0) {
+                    setPipelineMessage('Error: buy decision requires a positive recommended max bid.');
+                    return;
+                }
+                recommendedMaxBid = parsed;
+            }
+        }
+
+        setCandidateDecisionUpdatingId(candidate.id);
+        setPipelineMessage(null);
+        try {
+            const response = await fetch(`/api/acquisition/candidates/${candidate.id}/decision`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    decision,
+                    decisionReason: reasonPrompt.trim(),
+                    ...(typeof recommendedMaxBid === 'number' ? { recommendedMaxBid } : {}),
+                }),
+            });
+            const body = await response.json().catch(() => ({})) as {
+                success?: boolean;
+                decision?: string;
+                bidPlanQueued?: boolean;
+                error?: string;
+            };
+            if (!response.ok) {
+                throw new Error(body.error || `Failed to set decision for ${candidate.domain}`);
+            }
+            const bidPlanNote = body.bidPlanQueued ? ' Bid plan queued.' : '';
+            setPipelineMessage(`Decision set to ${body.decision || decision} for ${candidate.domain}.${bidPlanNote}`);
+            await loadCandidates();
+        } catch (decisionError) {
+            setPipelineMessage(`Error: ${decisionError instanceof Error ? decisionError.message : 'Failed to set decision'}`);
+        } finally {
+            setCandidateDecisionUpdatingId(null);
+        }
+    }
+
+    async function suggestDomains() {
+        setSuggesting(true);
+        setSuggestions([]);
+        try {
+            const res = await fetch('/api/research/suggest', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ count: 10 }),
+            });
+            const data = await res.json();
+            if (res.ok && Array.isArray(data?.suggestions)) {
+                setSuggestions(data.suggestions);
+            } else {
+                setError(data.error || 'Failed to get suggestions');
+            }
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Suggestion failed');
+        } finally {
+            setSuggesting(false);
         }
     }
 
@@ -191,6 +499,7 @@ export default function ResearchPage() {
                             value={tld}
                             onChange={e => setTld(e.target.value)}
                             className="px-3 py-2 border rounded-lg bg-background"
+                            title="Top-level domain"
                         >
                             {['com', 'net', 'org', 'io', 'co', 'ai', 'dev'].map(t => (
                                 <option key={t} value={t}>.{t}</option>
@@ -576,6 +885,168 @@ export default function ResearchPage() {
                     </div>
                 </>
             )}
+
+            {/* Pipeline Actions (shown after eval or research) */}
+            {(evalResult || result) && (
+                <Card>
+                    <CardContent className="p-4">
+                        <div className="flex items-center gap-3 flex-wrap">
+                            <Button
+                                onClick={submitToPipeline}
+                                disabled={pipelineSubmitting}
+                            >
+                                {pipelineSubmitting ? 'Submitting...' : 'Add to Acquisition Pipeline'}
+                            </Button>
+                            {pipelineMessage && (
+                                <span className={`text-sm ${pipelineMessage.startsWith('Error') ? 'text-destructive' : 'text-green-600'}`}>
+                                    {pipelineMessage}
+                                </span>
+                            )}
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
+
+            {/* AI Domain Suggestions */}
+            <Card>
+                <CardHeader className="flex flex-row items-center justify-between">
+                    <div>
+                        <CardTitle>AI Domain Suggestions</CardTitle>
+                        <CardDescription>AI-powered domain recommendations based on portfolio gaps and niche expansion opportunities</CardDescription>
+                    </div>
+                    <Button variant="outline" onClick={suggestDomains} disabled={suggesting}>
+                        {suggesting ? 'Thinking...' : 'Suggest Domains'}
+                    </Button>
+                </CardHeader>
+                <CardContent>
+                    {suggestions.length === 0 ? (
+                        <p className="text-muted-foreground text-center py-6">
+                            Click &quot;Suggest Domains&quot; to get AI-powered acquisition targets based on your portfolio.
+                        </p>
+                    ) : (
+                        <div className="space-y-2">
+                            {suggestions.map((s, i) => (
+                                <div key={i} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
+                                    <span className="font-medium font-mono">{s}</span>
+                                    <div className="flex gap-2">
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => {
+                                                const parts = s.split('.');
+                                                const t = parts.pop() || 'com';
+                                                setDomainInput(parts.join('.'));
+                                                setTld(t);
+                                            }}
+                                        >
+                                            Research
+                                        </Button>
+                                        <Button
+                                            size="sm"
+                                            onClick={() => {
+                                                const parts = s.split('.');
+                                                const t = parts.pop() || 'com';
+                                                setDomainInput(parts.join('.'));
+                                                setTld(t);
+                                                runFullEvaluation(true, s);
+                                            }}
+                                        >
+                                            Quick Eval
+                                        </Button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
+
+            {/* Acquisition Pipeline Candidates */}
+            <Card>
+                <CardHeader className="flex flex-row items-center justify-between">
+                    <div>
+                        <CardTitle>Acquisition Pipeline</CardTitle>
+                        <CardDescription>Domains being evaluated for purchase ({candidates.length} candidates)</CardDescription>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <Button variant="secondary" onClick={processAcquisitionPipelineNow} disabled={pipelineProcessing}>
+                            {pipelineProcessing ? 'Running...' : 'Process Pipeline Jobs'}
+                        </Button>
+                        <Button variant="outline" onClick={loadCandidates} disabled={loadingCandidates}>
+                            {loadingCandidates ? 'Loading...' : 'Refresh'}
+                        </Button>
+                    </div>
+                </CardHeader>
+                <CardContent>
+                    {pipelineMessage && (
+                        <div className={`mb-3 rounded border px-3 py-2 text-sm ${pipelineMessage.startsWith('Error:') ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
+                            {pipelineMessage}
+                        </div>
+                    )}
+                    {candidates.length === 0 ? (
+                        <p className="text-muted-foreground text-center py-8">
+                            No acquisition candidates yet. Evaluate a domain and add it to the pipeline.
+                        </p>
+                    ) : (
+                        <div className="space-y-2">
+                            {candidates.map(c => (
+                                <div
+                                    key={c.id}
+                                    className="flex items-center justify-between p-3 bg-muted/30 rounded-lg"
+                                >
+                                    <div className="flex items-center gap-3">
+                                        <span className="font-medium font-mono">{c.domain}</span>
+                                        {c.decision && (
+                                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                                c.decision === 'buy' ? 'bg-green-100 text-green-800' :
+                                                c.decision === 'watchlist' ? 'bg-yellow-100 text-yellow-800' :
+                                                c.decision === 'pass' ? 'bg-red-100 text-red-800' :
+                                                'bg-blue-100 text-blue-800'
+                                            }`}>
+                                                {c.decision}
+                                            </span>
+                                        )}
+                                        {c.listingSource && (
+                                            <span className="text-xs text-muted-foreground">{c.listingSource}</span>
+                                        )}
+                                    </div>
+                                    <div className="flex items-center gap-4 text-sm">
+                                        {c.domainScore != null && (
+                                            <span className={`font-bold ${
+                                                c.domainScore >= 65 ? 'text-green-600' :
+                                                c.domainScore >= 45 ? 'text-yellow-600' : 'text-red-500'
+                                            }`}>
+                                                {c.domainScore}/100
+                                            </span>
+                                        )}
+                                        {c.isAvailable != null && (
+                                            <span className={c.isAvailable ? 'text-green-600' : 'text-red-500'}>
+                                                {c.isAvailable ? 'Available' : 'Taken'}
+                                            </span>
+                                        )}
+                                        {c.registrationPrice != null && (
+                                            <span className="text-muted-foreground">${c.registrationPrice}</span>
+                                        )}
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => {
+                                                const parts = c.domain.split('.');
+                                                const t = parts.pop() || 'com';
+                                                setDomainInput(parts.join('.'));
+                                                setTld(t);
+                                                runFullEvaluation(false, c.domain);
+                                            }}
+                                        >
+                                            Re-eval
+                                        </Button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
 
             {/* Keyword Opportunities */}
             <Card>

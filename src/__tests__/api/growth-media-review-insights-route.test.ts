@@ -21,6 +21,28 @@ const mockMediaModerationEventsTable = {
     eventType: 'event_type',
 };
 
+const mockMediaReviewPolicyDailySnapshotsTable = {
+    snapshotDate: 'snapshot_date',
+    userId: 'user_id',
+    assignments: 'assignments',
+    overrides: 'overrides',
+    alertEvents: 'alert_events',
+};
+
+const mockMediaReviewPolicyAlertCodeDailySnapshotsTable = {
+    snapshotDate: 'snapshot_date',
+    userId: 'user_id',
+    alertCode: 'alert_code',
+    count: 'count',
+};
+
+const mockMediaReviewPolicyPlaybookDailySnapshotsTable = {
+    snapshotDate: 'snapshot_date',
+    userId: 'user_id',
+    playbookId: 'playbook_id',
+    count: 'count',
+};
+
 let pendingRows: Array<Record<string, unknown>> = [];
 let assignmentRows: Array<Record<string, unknown>> = [];
 
@@ -37,6 +59,7 @@ vi.mock('drizzle-orm', () => ({
     and: vi.fn((...args: unknown[]) => ({ type: 'and', args })),
     eq: vi.fn((...args: unknown[]) => ({ type: 'eq', args })),
     gte: vi.fn((...args: unknown[]) => ({ type: 'gte', args })),
+    lte: vi.fn((...args: unknown[]) => ({ type: 'lte', args })),
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -48,6 +71,9 @@ vi.mock('@/lib/db', () => ({
     },
     mediaModerationTasks: mockMediaModerationTasksTable,
     mediaModerationEvents: mockMediaModerationEventsTable,
+    mediaReviewPolicyDailySnapshots: mockMediaReviewPolicyDailySnapshotsTable,
+    mediaReviewPolicyAlertCodeDailySnapshots: mockMediaReviewPolicyAlertCodeDailySnapshotsTable,
+    mediaReviewPolicyPlaybookDailySnapshots: mockMediaReviewPolicyPlaybookDailySnapshotsTable,
 }));
 
 const { GET } = await import('@/app/api/growth/media-review/insights/route');
@@ -88,10 +114,12 @@ describe('growth media-review/insights route', () => {
                     }),
                 };
             }
+            // Snapshot tables don't chain .limit(); .where() must be thenable
+            const emptyThenable = Object.assign(Promise.resolve([]), {
+                limit: async () => [],
+            });
             return {
-                where: () => ({
-                    limit: async () => [],
-                }),
+                where: () => emptyThenable,
             };
         });
     });

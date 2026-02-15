@@ -263,6 +263,159 @@ export const NICHE_PROFILES: Record<string, NicheProfile> = {
         bestModels: ['display', 'affiliate'],
         trend: 'stable',
     },
+
+    // ─── Portfolio-specific niches (from spreadsheet bucket summary) ───
+
+    'health/pharma': {
+        label: 'Health / Pharma (GLP-1, Generics)',
+        rpmRange: [15, 45],
+        avgCpc: [3, 25],
+        affiliateCommission: [10, 100],
+        leadGenValue: [5, 50],
+        articlesForAuthority: [60, 120],
+        monthsToRank: [10, 24],
+        ymyl: true,
+        seasonality: 0.1,
+        regulatoryRisk: 0.7,
+        expertiseRequired: 4,
+        bestModels: ['affiliate', 'display', 'leadgen'],
+        trend: 'growing',
+    },
+    'medical procedures': {
+        label: 'Medical Procedures (IVF, LASIK, Therapy)',
+        rpmRange: [25, 60],
+        avgCpc: [8, 40],
+        affiliateCommission: [20, 200],
+        leadGenValue: [20, 150],
+        articlesForAuthority: [40, 80],
+        monthsToRank: [10, 20],
+        ymyl: true,
+        seasonality: 0.1,
+        regulatoryRisk: 0.8,
+        expertiseRequired: 5,
+        bestModels: ['leadgen', 'display'],
+        trend: 'growing',
+    },
+    'home services': {
+        label: 'Home Services (Remodel, Repair, Cost)',
+        rpmRange: [20, 50],
+        avgCpc: [12, 45],
+        affiliateCommission: [15, 150],
+        leadGenValue: [20, 50],
+        articlesForAuthority: [30, 60],
+        monthsToRank: [4, 10],
+        ymyl: false,
+        seasonality: 0.35,
+        regulatoryRisk: 0.1,
+        expertiseRequired: 2,
+        bestModels: ['leadgen', 'affiliate', 'display'],
+        trend: 'stable',
+    },
+    'tax/creator': {
+        label: 'Tax / Creator Economy',
+        rpmRange: [15, 40],
+        avgCpc: [4, 18],
+        affiliateCommission: [20, 150],
+        leadGenValue: [10, 80],
+        articlesForAuthority: [40, 80],
+        monthsToRank: [6, 14],
+        ymyl: true,
+        seasonality: 0.7,
+        regulatoryRisk: 0.5,
+        expertiseRequired: 3,
+        bestModels: ['affiliate', 'display'],
+        trend: 'growing',
+    },
+    'consumer tools': {
+        label: 'Consumer Tools (Cancel, Compare, Check)',
+        rpmRange: [8, 22],
+        avgCpc: [2, 10],
+        affiliateCommission: [5, 60],
+        leadGenValue: [3, 20],
+        articlesForAuthority: [25, 50],
+        monthsToRank: [4, 10],
+        ymyl: false,
+        seasonality: 0.1,
+        regulatoryRisk: 0.05,
+        expertiseRequired: 1,
+        bestModels: ['affiliate', 'display'],
+        trend: 'growing',
+    },
+    'of funnel': {
+        label: 'OF Funnel / Creator Promotion',
+        rpmRange: [5, 15],
+        avgCpc: [2, 8],
+        affiliateCommission: [5, 40],
+        leadGenValue: [2, 15],
+        articlesForAuthority: [20, 40],
+        monthsToRank: [3, 8],
+        ymyl: false,
+        seasonality: 0.05,
+        regulatoryRisk: 0.3,
+        expertiseRequired: 1,
+        bestModels: ['affiliate', 'display'],
+        trend: 'growing',
+    },
+    'collectibles': {
+        label: 'Collectibles (Cards, Sneakers, Pokemon)',
+        rpmRange: [8, 20],
+        avgCpc: [2, 8],
+        affiliateCommission: [5, 60],
+        leadGenValue: [3, 15],
+        articlesForAuthority: [30, 60],
+        monthsToRank: [5, 12],
+        ymyl: false,
+        seasonality: 0.2,
+        regulatoryRisk: 0.05,
+        expertiseRequired: 2,
+        bestModels: ['affiliate', 'display', 'ecommerce'],
+        trend: 'stable',
+    },
+    'content/viral': {
+        label: 'Content / Viral (Debate, Facts, Receipts)',
+        rpmRange: [3, 10],
+        avgCpc: [1, 3],
+        affiliateCommission: [2, 20],
+        leadGenValue: [1, 5],
+        articlesForAuthority: [50, 100],
+        monthsToRank: [4, 10],
+        ymyl: false,
+        seasonality: 0.1,
+        regulatoryRisk: 0.05,
+        expertiseRequired: 1,
+        bestModels: ['display'],
+        trend: 'stable',
+    },
+    'real estate': {
+        label: 'Real Estate (Home Value, FSBO)',
+        rpmRange: [15, 40],
+        avgCpc: [10, 25],
+        affiliateCommission: [20, 200],
+        leadGenValue: [15, 100],
+        articlesForAuthority: [40, 80],
+        monthsToRank: [8, 16],
+        ymyl: false,
+        seasonality: 0.3,
+        regulatoryRisk: 0.3,
+        expertiseRequired: 3,
+        bestModels: ['leadgen', 'affiliate', 'display'],
+        trend: 'stable',
+    },
+    'ai/tech': {
+        label: 'AI / Technology',
+        rpmRange: [10, 30],
+        avgCpc: [2, 15],
+        affiliateCommission: [10, 100],
+        leadGenValue: [5, 50],
+        articlesForAuthority: [30, 60],
+        monthsToRank: [4, 12],
+        ymyl: false,
+        seasonality: 0.1,
+        regulatoryRisk: 0.2,
+        expertiseRequired: 3,
+        bestModels: ['affiliate', 'display', 'saas'],
+        trend: 'growing',
+    },
 };
 
 /**
@@ -274,14 +427,40 @@ export function detectNiche(domainName: string): string {
     const rawName = domainName.toLowerCase().replaceAll(/\.[^.]+$/g, '');
     const cleanName = rawName.replaceAll('-', '');
 
+    // Portfolio-specific niches checked FIRST (more specific = higher priority)
+    const portfolioKeywords: Record<string, string[]> = {
+        'health/pharma': ['ozempic', 'mounjaro', 'semaglutide', 'wegovy', 'glp', 'pharma', 'generic', 'eliquis', 'weightloss'],
+        'medical procedures': ['ivf', 'lasik', 'braces', 'therapy', 'ketamine', 'rhinoplasty', 'procedure', 'surgery', 'dental'],
+        'home services': ['remodel', 'kitchen', 'roof', 'plumb', 'hvac', 'contractor', 'repair', 'renovation', 'bathroom', 'flooring'],
+        'tax/creator': ['tax', 'deduction', 'freelance', 'creatortax', 'write-off', 'self-employed', 'quarterly', 'filing'],
+        'consumer tools': ['cancel', 'subscription', 'afford', 'worth', 'refurbish', 'warranty', 'scam', 'negotiate', 'compare', 'fixitorbuyit', 'shouldi'],
+        'of funnel': ['onlyfans', 'fansly', 'shadowban', 'creator', 'promo', 'fanvue', 'thottopilot'],
+        'collectibles': ['card', 'grading', 'pokemon', 'sneaker', 'valuation', 'appraisal', 'collectible'],
+        'content/viral': ['debate', 'versus', 'settled', 'facts', 'receipt', 'proof', 'nocap'],
+        'ai/tech': ['finetun', 'aimylegal', 'aicheck', 'aitools'],
+        'real estate': ['homevalue', 'realtor', 'fsbo', 'mortgage', 'realty'],
+    };
+
+    // Check portfolio-specific niches first
+    for (const [niche, keywords] of Object.entries(portfolioKeywords)) {
+        let score = 0;
+        for (const kw of keywords) {
+            const isMatch = kw.length <= 3
+                ? (cleanName === kw || cleanName.startsWith(kw) || cleanName.endsWith(kw)
+                    || rawName.includes(`-${kw}`) || rawName.startsWith(`${kw}-`))
+                : cleanName.includes(kw);
+            if (isMatch) score += 1;
+        }
+        if (score >= 2) return niche;
+    }
+
+    // Fall back to generic niches
     const nicheKeywords: Record<string, string[]> = {
-        legal: ['law', 'legal', 'attorney', 'lawyer', 'injury', 'claim', 'lawsuit', 'court', 'justice', 'litigation'],
-        insurance: ['insure', 'insurance', 'policy', 'coverage', 'premium', 'underwrite'],
-        health: ['health', 'medical', 'doctor', 'clinic', 'wellness', 'therapy', 'treatment', 'symptom', 'diagnosis', 'pharma', 'dental'],
-        finance: ['finance', 'loan', 'credit', 'invest', 'mortgage', 'bank', 'money', 'wealth', 'tax', 'crypto', 'stock', 'trading'],
-        tech: ['tech', 'software', 'app', 'digital', 'cyber', 'cloud', 'data', 'code', 'saas', 'startup', 'ai'],
+        legal: ['law', 'legal', 'attorney', 'lawyer', 'injury', 'claim', 'lawsuit', 'court', 'justice', 'litigation', 'prenup', 'llc'],
+        insurance: ['insure', 'insurance', 'policy', 'coverage', 'premium', 'underwrite', 'medicare', 'switchmy'],
+        finance: ['finance', 'loan', 'credit', 'invest', 'mortgage', 'bank', 'money', 'wealth', 'refinance', 'payoff', 'debt', '401k', 'roth', 'stock', 'trading'],
         home: ['home', 'house', 'roof', 'plumb', 'hvac', 'repair', 'remodel', 'kitchen', 'bath', 'garden', 'lawn', 'decor'],
-        auto: ['auto', 'car', 'vehicle', 'truck', 'mechanic', 'tire', 'brake', 'engine', 'motor', 'drive'],
+        auto: ['auto', 'car', 'vehicle', 'truck', 'mechanic', 'tire', 'brake', 'engine', 'motor', 'drive', 'tradein', 'totalloss'],
         travel: ['travel', 'hotel', 'flight', 'vacation', 'trip', 'tour', 'resort', 'cruise', 'adventure', 'destination'],
         education: ['learn', 'study', 'course', 'tutor', 'school', 'college', 'degree', 'training', 'teach', 'educate'],
         food: ['food', 'recipe', 'cook', 'meal', 'diet', 'nutrition', 'restaurant', 'bake', 'grill', 'vegan'],
@@ -289,6 +468,8 @@ export function detectNiche(domainName: string): string {
         fitness: ['fitness', 'gym', 'workout', 'exercise', 'muscle', 'yoga', 'crossfit', 'run', 'weight'],
         beauty: ['beauty', 'skin', 'makeup', 'hair', 'cosmetic', 'nail', 'skincare', 'glow'],
         gaming: ['game', 'gaming', 'esport', 'console', 'pc', 'playstation', 'xbox', 'twitch'],
+        health: ['health', 'medical', 'doctor', 'clinic', 'wellness', 'therapy', 'treatment', 'symptom', 'diagnosis'],
+        tech: ['tech', 'software', 'app', 'digital', 'cyber', 'cloud', 'data', 'code', 'saas', 'startup', 'ai'],
     };
 
     let bestMatch = 'general';

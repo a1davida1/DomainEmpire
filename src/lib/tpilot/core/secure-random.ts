@@ -164,7 +164,7 @@ export function secureRandomFloat(): number {
   // Use 64-bit randomness, keep the top 53 bits.
   const buf = crypto.randomBytes(8);
   const value64 = buf.readBigUInt64BE(0);
-  const value53 = value64 >> 11n; // 64 - 53 = 11
+  const value53 = value64 >> BigInt(11); // 64 - 53 = 11
   return Number(value53) / 2 ** 53;
 }
 

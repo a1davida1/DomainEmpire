@@ -50,6 +50,13 @@ function clampInteger(value: number | undefined, min: number, max: number, fallb
     return normalized;
 }
 
+function isMissingLifecycleStateColumn(error: unknown): boolean {
+    if (!error || typeof error !== 'object') return false;
+    const code = 'code' in error ? String(error.code) : '';
+    const message = 'message' in error ? String(error.message).toLowerCase() : '';
+    return code === '42703' && message.includes('lifecycle_state');
+}
+
 export async function getDomainRoiPriorities(
     options?: DomainRoiPriorityOptions,
 ): Promise<DomainRoiPrioritySnapshot> {
@@ -57,16 +64,32 @@ export async function getDomainRoiPriorities(
     const windowDays = clampInteger(options?.windowDays, 7, 120, 30);
     const windowStart = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
 
-    const domainRows = await db.select({
-        id: domains.id,
-        domain: domains.domain,
-        lifecycleState: domains.lifecycleState,
-        status: domains.status,
-        updatedAt: domains.updatedAt,
-    })
-        .from(domains)
-        .where(notDeleted(domains))
-        .limit(5000);
+    const domainRows = await (async () => {
+        try {
+            return await db.select({
+                id: domains.id,
+                domain: domains.domain,
+                lifecycleState: domains.lifecycleState,
+                status: domains.status,
+                updatedAt: domains.updatedAt,
+            })
+                .from(domains)
+                .where(notDeleted(domains))
+                .limit(5000);
+        } catch (queryError) {
+            if (!isMissingLifecycleStateColumn(queryError)) throw queryError;
+            const rows = await db.select({
+                id: domains.id,
+                domain: domains.domain,
+                status: domains.status,
+                updatedAt: domains.updatedAt,
+            })
+                .from(domains)
+                .where(notDeleted(domains))
+                .limit(5000);
+            return rows.map((row) => ({ ...row, lifecycleState: 'sourced' as const }));
+        }
+    })();
 
     const ledgerRollups = await db.select({
         domainId: domainFinanceLedgerEntries.domainId,

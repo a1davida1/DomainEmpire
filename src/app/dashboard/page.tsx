@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
     Globe, DollarSign, FileText, Cpu, TrendingUp, AlertTriangle,
-    Plus, Rocket, Activity, Clock, Mail, Megaphone
+    Plus, Rocket, Activity, Clock, Mail, Megaphone, PlayCircle
 } from 'lucide-react';
 import Link from 'next/link';
 import { db, domains, articles, monetizationProfiles, contentQueue, subscribers } from '@/lib/db';
@@ -291,6 +291,12 @@ export default async function DashboardPage() {
                     </p>
                 </div>
                 <div className="flex gap-2">
+                    <Link href="/dashboard/workflow">
+                        <Button>
+                            <PlayCircle className="mr-2 h-4 w-4" />
+                            Start Here
+                        </Button>
+                    </Link>
                     <Link href="/dashboard/growth">
                         <Button variant="outline">
                             <Megaphone className="mr-2 h-4 w-4" />
@@ -304,13 +310,33 @@ export default async function DashboardPage() {
                         </Button>
                     </Link>
                     <Link href="/dashboard/domains/new">
-                        <Button>
+                        <Button variant="outline">
                             <Plus className="mr-2 h-4 w-4" />
                             Add Domain
                         </Button>
                     </Link>
                 </div>
             </div>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle>Execution Workflow</CardTitle>
+                    <CardDescription>
+                        Use one queue for what to do next, what is blocked, and what needs setup.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="flex flex-wrap gap-2">
+                    <Link href="/dashboard/workflow">
+                        <Button>Open Workflow</Button>
+                    </Link>
+                    <Link href="/dashboard/queue">
+                        <Button variant="outline">Open Queue</Button>
+                    </Link>
+                    <Link href="/dashboard/integrations">
+                        <Button variant="outline">Open Integrations</Button>
+                    </Link>
+                </CardContent>
+            </Card>
 
             {/* Metrics Grid */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">

@@ -2,7 +2,7 @@ import * as dotenv from 'dotenv';
 import path from 'node:path';
 import { and, eq, isNull } from 'drizzle-orm';
 import { db, domains } from '@/lib/db';
-import { createZone, getZoneNameservers } from '@/lib/deploy/cloudflare';
+import { createZone } from '@/lib/deploy/cloudflare';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
 
@@ -11,19 +11,13 @@ type DomainRow = {
     domain: string;
 };
 
-type ZoneCheckResult = {
-    row: DomainRow;
-    hasZone: boolean;
-    nameservers: string[];
-};
-
 type CreateResult = {
     row: DomainRow;
     created: boolean;
     existing: boolean;
     failed: boolean;
+    skipped?: boolean;
     error?: string;
-    nameservers?: string[];
 };
 
 function parseIntegerArg(args: string[], key: string, fallback: number): number {
@@ -45,49 +39,155 @@ function parseIdsArg(args: string[]): Set<string> | null {
     return values.length > 0 ? new Set(values) : null;
 }
 
-async function mapLimit<T, R>(
-    items: T[],
-    limit: number,
-    worker: (item: T, index: number) => Promise<R>,
-): Promise<R[]> {
-    if (items.length === 0) return [];
-
-    const output = new Array<R>(items.length);
-    let cursor = 0;
-
-    async function runWorker() {
-        while (true) {
-            const index = cursor;
-            cursor += 1;
-            if (index >= items.length) return;
-            output[index] = await worker(items[index], index);
-        }
-    }
-
-    const workers = Array.from({ length: Math.min(limit, items.length) }, () => runWorker());
-    await Promise.all(workers);
-    return output;
+function normalizeDomain(value: string): string {
+    return value.trim().toLowerCase();
 }
 
-async function checkZone(row: DomainRow): Promise<ZoneCheckResult> {
-    const zone = await getZoneNameservers(row.domain);
+function sleep(ms: number) {
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
+}
+
+function resolveCloudflareConfigFromEnv() {
+    const apiToken = process.env.CLOUDFLARE_API_TOKEN?.trim();
+    if (!apiToken) {
+        throw new Error('CLOUDFLARE_API_TOKEN is required');
+    }
+
     return {
-        row,
-        hasZone: Boolean(zone && zone.nameservers.length >= 2),
-        nameservers: zone?.nameservers ?? [],
+        apiToken,
+        accountId: process.env.CLOUDFLARE_ACCOUNT_ID?.trim() || null,
+        accountName: process.env.CLOUDFLARE_ACCOUNT_NAME?.trim().toLowerCase() || null,
     };
+}
+
+async function resolveAccountId(apiToken: string, explicitId: string | null, preferredName: string | null): Promise<string> {
+    if (explicitId) {
+        return explicitId;
+    }
+
+    const response = await fetch('https://api.cloudflare.com/client/v4/accounts?page=1&per_page=50', {
+        headers: {
+            Authorization: `Bearer ${apiToken}`,
+            'Content-Type': 'application/json',
+        },
+    });
+
+    const body = await response.json() as {
+        success?: boolean;
+        result?: Array<{ id?: string; name?: string }>;
+        errors?: Array<{ message?: string }>;
+    };
+
+    if (!response.ok || !body.success || !Array.isArray(body.result) || body.result.length === 0) {
+        throw new Error(body.errors?.[0]?.message || 'Unable to resolve Cloudflare account id');
+    }
+
+    const named = preferredName
+        ? body.result.find((entry) => entry.name?.toLowerCase() === preferredName)
+        : undefined;
+    const selected = named ?? body.result[0];
+    if (!selected?.id) {
+        throw new Error('Cloudflare account auto-discovery returned no account id');
+    }
+
+    return selected.id;
+}
+
+type CloudflareZone = {
+    name: string;
+    status: string | null;
+    nameservers: string[];
+};
+
+async function listZones(accountId: string, apiToken: string): Promise<Map<string, CloudflareZone>> {
+    const zoneMap = new Map<string, CloudflareZone>();
+    let page = 1;
+    let totalPages = 1;
+
+    while (page <= totalPages) {
+        const params = new URLSearchParams({
+            'account.id': accountId,
+            page: String(page),
+            per_page: '50',
+        });
+        const response = await fetch(`https://api.cloudflare.com/client/v4/zones?${params.toString()}`, {
+            headers: {
+                Authorization: `Bearer ${apiToken}`,
+                'Content-Type': 'application/json',
+            },
+        });
+
+        const body = await response.json() as {
+            success?: boolean;
+            result?: Array<{ name?: string; status?: string; name_servers?: string[] }>;
+            errors?: Array<{ message?: string }>;
+            result_info?: { total_pages?: number };
+        };
+
+        if (!response.ok || !body.success || !Array.isArray(body.result)) {
+            throw new Error(body.errors?.[0]?.message || 'Failed to list Cloudflare zones');
+        }
+
+        for (const row of body.result) {
+            const name = row.name ? normalizeDomain(row.name) : '';
+            if (!name) continue;
+            const nameservers = Array.isArray(row.name_servers)
+                ? row.name_servers.map((value) => value.trim().toLowerCase()).filter(Boolean)
+                : [];
+            zoneMap.set(name, {
+                name,
+                status: row.status ?? null,
+                nameservers,
+            });
+        }
+
+        totalPages = Math.max(1, body.result_info?.total_pages ?? 1);
+        page += 1;
+    }
+
+    return zoneMap;
+}
+
+function isPreflightReady(zone: CloudflareZone | undefined): boolean {
+    if (!zone) return false;
+    return zone.nameservers.length >= 2;
+}
+
+function classifyCreateError(message: string): 'throttle' | 'activation_cap' | 'other' {
+    const lowered = message.toLowerCase();
+    if (
+        lowered.includes('throttle')
+        || lowered.includes('rate limit')
+        || lowered.includes('please wait')
+        || lowered.includes('too many requests')
+    ) {
+        return 'throttle';
+    }
+
+    if (
+        lowered.includes('activate some zones')
+        || lowered.includes('exceeded the limit for adding zones')
+    ) {
+        return 'activation_cap';
+    }
+
+    return 'other';
 }
 
 async function main() {
     const args = process.argv.slice(2);
     const apply = args.includes('--apply');
     const jumpStart = args.includes('--jump-start');
-    const concurrency = parseIntegerArg(args, '--concurrency', 6);
+    const delayMs = parseIntegerArg(args, '--delay-ms', 1000);
+    const retryMax = parseIntegerArg(args, '--retry-max', 5);
     const limit = parseIntegerArg(args, '--limit', 0);
     const idsFilter = parseIdsArg(args);
 
     console.log(`Mode: ${apply ? 'apply' : 'dry-run'}`);
-    console.log(`Concurrency: ${concurrency}`);
+    console.log(`Create delay (ms): ${delayMs}`);
+    console.log(`Retry max: ${retryMax}`);
     if (jumpStart) console.log('Jump start: enabled');
 
     const rows = await db
@@ -115,40 +215,87 @@ async function main() {
         return;
     }
 
-    const beforeChecks = await mapLimit(candidates, concurrency, async (row) => checkZone(row));
-    const missingBefore = beforeChecks.filter((item) => !item.hasZone).map((item) => item.row);
-    const readyBefore = beforeChecks.length - missingBefore.length;
+    const config = resolveCloudflareConfigFromEnv();
+    const accountId = await resolveAccountId(config.apiToken, config.accountId, config.accountName);
+    console.log(`Using Cloudflare account: ${accountId}`);
+
+    const zonesBefore = await listZones(accountId, config.apiToken);
+    const missingBefore = candidates.filter((row) => !isPreflightReady(zonesBefore.get(normalizeDomain(row.domain))));
+    const readyBefore = candidates.length - missingBefore.length;
 
     console.log(`Preflight before creation -> ready: ${readyBefore}, missing zone: ${missingBefore.length}`);
 
-    let createResults: CreateResult[] = [];
+    const createResults: CreateResult[] = [];
     if (apply && missingBefore.length > 0) {
-        createResults = await mapLimit(missingBefore, concurrency, async (row) => {
-            const created = await createZone(row.domain, { jumpStart });
-            if (!created.success) {
-                return {
+        let stopDueToActivationCap = false;
+        for (const row of missingBefore) {
+            if (stopDueToActivationCap) {
+                createResults.push({
+                    row,
+                    created: false,
+                    existing: false,
+                    failed: false,
+                    skipped: true,
+                    error: 'Skipped after activation-cap error on earlier domain',
+                });
+                continue;
+            }
+
+            let resultForRow: CreateResult | null = null;
+            let attempt = 0;
+            while (attempt < retryMax) {
+                attempt += 1;
+                const created = await createZone(row.domain, { jumpStart });
+                if (created.success) {
+                    resultForRow = {
+                        row,
+                        created: !created.alreadyExists,
+                        existing: Boolean(created.alreadyExists),
+                        failed: false,
+                    };
+                    break;
+                }
+
+                const message = created.error ?? 'Unknown Cloudflare zone create error';
+                const classification = classifyCreateError(message);
+                if (classification === 'throttle' && attempt < retryMax) {
+                    const waitMs = Math.min(30000, delayMs * attempt * 2);
+                    console.log(`Throttle on ${row.domain}; retrying in ${waitMs}ms (attempt ${attempt}/${retryMax})`);
+                    await sleep(waitMs);
+                    continue;
+                }
+
+                resultForRow = {
                     row,
                     created: false,
                     existing: false,
                     failed: true,
-                    error: created.error ?? 'Unknown Cloudflare zone create error',
+                    error: message,
                 };
+
+                if (classification === 'activation_cap') {
+                    stopDueToActivationCap = true;
+                }
+                break;
             }
 
-            return {
+            createResults.push(resultForRow ?? {
                 row,
-                created: !created.alreadyExists,
-                existing: Boolean(created.alreadyExists),
-                failed: false,
-                nameservers: created.nameservers ?? [],
-            };
-        });
+                created: false,
+                existing: false,
+                failed: true,
+                error: 'Unknown Cloudflare zone create error',
+            });
+
+            await sleep(delayMs);
+        }
 
         const createdCount = createResults.filter((item) => item.created).length;
         const existingCount = createResults.filter((item) => item.existing).length;
         const failedCount = createResults.filter((item) => item.failed).length;
+        const skippedCount = createResults.filter((item) => item.skipped).length;
 
-        console.log(`Zone creation -> created: ${createdCount}, existing: ${existingCount}, failed: ${failedCount}`);
+        console.log(`Zone creation -> created: ${createdCount}, existing: ${existingCount}, failed: ${failedCount}, skipped: ${skippedCount}`);
 
         const failedPreview = createResults
             .filter((item) => item.failed)
@@ -162,9 +309,11 @@ async function main() {
         }
     }
 
-    const afterChecks = await mapLimit(candidates, concurrency, async (row) => checkZone(row));
-    const missingAfter = afterChecks.filter((item) => !item.hasZone).map((item) => item.row.domain);
-    const readyAfter = afterChecks.length - missingAfter.length;
+    const zonesAfter = await listZones(accountId, config.apiToken);
+    const missingAfter = candidates
+        .filter((item) => !isPreflightReady(zonesAfter.get(normalizeDomain(item.domain))))
+        .map((item) => item.domain);
+    const readyAfter = candidates.length - missingAfter.length;
 
     console.log(`Preflight after creation -> ready: ${readyAfter}, missing zone: ${missingAfter.length}`);
 

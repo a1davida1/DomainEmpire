@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import {
     LayoutDashboard,
+    PlayCircle,
     Globe,
     FileText,
     Search,
@@ -22,10 +23,17 @@ import {
     Swords,
     Megaphone,
     PlugZap,
+    ClipboardCheck,
+    ShieldCheck,
+    Gauge,
+    Rocket,
+    Activity,
+    Mail,
 } from 'lucide-react';
 
 const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+    { name: 'Workflow', href: '/dashboard/workflow', icon: PlayCircle },
     { name: 'Domains', href: '/dashboard/domains', icon: Globe },
     { name: 'Content', href: '/dashboard/content', icon: FileText },
     { name: 'Keywords', href: '/dashboard/keywords', icon: Search },
@@ -35,6 +43,12 @@ const navigation = [
     { name: 'Competitors', href: '/dashboard/competitors', icon: Swords },
     { name: 'Growth', href: '/dashboard/growth', icon: Megaphone },
     { name: 'Integrations', href: '/dashboard/integrations', icon: PlugZap },
+    { name: 'Review', href: '/dashboard/review', icon: ClipboardCheck },
+    { name: 'Compliance', href: '/dashboard/compliance', icon: ShieldCheck },
+    { name: 'KPIs', href: '/dashboard/kpis', icon: Gauge },
+    { name: 'Deploy', href: '/dashboard/deploy', icon: Rocket },
+    { name: 'Monitoring', href: '/dashboard/monitoring', icon: Activity },
+    { name: 'Subscribers', href: '/dashboard/subscribers', icon: Mail },
     { name: 'Queue', href: '/dashboard/queue', icon: ListTodo },
     { name: 'Research', href: '/dashboard/research', icon: Beaker },
     { name: 'Settings', href: '/dashboard/settings', icon: Settings },
@@ -62,7 +76,9 @@ export function MobileNav() {
                         <nav className="flex flex-col gap-2">
                             {navigation.map((item) => {
                                 const Icon = item.icon;
-                                const isActive = pathname === item.href;
+                                const isActive = item.href === '/dashboard'
+                                    ? pathname === item.href
+                                    : (pathname === item.href || pathname.startsWith(item.href + '/'));
                                 return (
                                     <Link
                                         key={item.name}

@@ -2,7 +2,8 @@ import { notFound } from 'next/navigation';
 import { db, domains, monetizationProfiles } from '@/lib/db';
 import { eq } from 'drizzle-orm';
 import { AffiliateManager } from '@/components/monetization/AffiliateManager';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { AdNetworkConfig } from '@/components/monetization/AdNetworkConfig';
+import { MonetizationSettings } from '@/components/monetization/MonetizationSettings';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 interface PageProps {
@@ -25,6 +26,7 @@ export default async function MonetizationPage({ params }: PageProps) {
     });
 
     const affiliates = (profile?.affiliates as { provider: string; programId: string; linkTemplate: string; commissionType: string; commissionValue: number }[]) || [];
+    const adPlacements = (profile?.adPlacements as { position: string; type: string }[]) || [];
 
     return (
         <div className="space-y-6">
@@ -47,27 +49,22 @@ export default async function MonetizationPage({ params }: PageProps) {
                 </TabsContent>
 
                 <TabsContent value="ads">
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Ad Network Configuration</CardTitle>
-                            <CardDescription>Configure Ezoic, Mediavine, or AdSense settings.</CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            <p className="text-muted-foreground">Ad network configuration coming soon.</p>
-                        </CardContent>
-                    </Card>
+                    <AdNetworkConfig
+                        domainId={id}
+                        initialNetwork={profile?.adNetwork || 'none'}
+                        initialNetworkId={profile?.adNetworkId || null}
+                        initialPlacements={adPlacements}
+                    />
                 </TabsContent>
 
                 <TabsContent value="settings">
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Global Monetization Settings</CardTitle>
-                            <CardDescription>General settings for this domain.</CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            <p className="text-muted-foreground">Settings coming soon.</p>
-                        </CardContent>
-                    </Card>
+                    <MonetizationSettings
+                        domainId={id}
+                        initialLeadGenEnabled={profile?.leadGenEnabled || false}
+                        initialLeadGenFormType={profile?.leadGenFormType || null}
+                        initialLeadGenEndpoint={profile?.leadGenEndpoint || null}
+                        initialLeadGenValue={profile?.leadGenValue ?? null}
+                    />
                 </TabsContent>
             </Tabs>
         </div>

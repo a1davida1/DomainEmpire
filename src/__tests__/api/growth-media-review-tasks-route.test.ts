@@ -161,9 +161,10 @@ describe('growth media-review/tasks route', () => {
                 from: () => ({
                     where: () => ({
                         orderBy: () => ({
-                            limit: () => ({
-                                for: async () => pendingTaskRows,
-                            }),
+                            limit: () => Object.assign(
+                                Promise.resolve(pendingTaskRows),
+                                { for: async () => pendingTaskRows },
+                            ),
                         }),
                     }),
                 }),

@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { getRequestUser, requireAuth } from '@/lib/auth';
 import { db, mediaAssets } from '@/lib/db';
 import { isFeatureEnabled } from '@/lib/feature-flags';
-import { storeGrowthMedia } from '@/lib/growth/media-storage';
+import { storeGrowthMedia, deleteGrowthMedia } from '@/lib/growth/media-storage';
 
 export const runtime = 'nodejs';
 
@@ -202,7 +202,11 @@ export async function POST(request: NextRequest) {
 
                 if (!existing) {
                     // Conflict on a URL we cannot find — clean up orphaned upload
-                    // TODO: add deleteGrowthMedia(storageResult) when storage deletion is implemented
+                    try {
+                        await deleteGrowthMedia({ key: storageResult.key, provider: storageResult.provider });
+                    } catch (cleanupErr) {
+                        console.error('[media-upload] Failed to clean up orphaned file:', storageResult.key, cleanupErr);
+                    }
                     return { created: false, asset: null as typeof existing | null, orphaned: true };
                 }
 

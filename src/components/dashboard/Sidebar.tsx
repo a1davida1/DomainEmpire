@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import {
     LayoutDashboard,
+    PlayCircle,
     Globe,
     FileText,
     Search,
@@ -23,12 +24,16 @@ import {
     Gauge,
     Megaphone,
     PlugZap,
+    Rocket,
+    Activity,
+    Mail,
 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 
 const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+    { name: 'Workflow', href: '/dashboard/workflow', icon: PlayCircle },
     { name: 'Domains', href: '/dashboard/domains', icon: Globe },
     { name: 'Content', href: '/dashboard/content', icon: FileText },
     { name: 'Keywords', href: '/dashboard/keywords', icon: Search },
@@ -41,6 +46,9 @@ const navigation = [
     { name: 'Review', href: '/dashboard/review', icon: ClipboardCheck },
     { name: 'Compliance', href: '/dashboard/compliance', icon: ShieldCheck },
     { name: 'KPIs', href: '/dashboard/kpis', icon: Gauge },
+    { name: 'Deploy', href: '/dashboard/deploy', icon: Rocket },
+    { name: 'Monitoring', href: '/dashboard/monitoring', icon: Activity },
+    { name: 'Subscribers', href: '/dashboard/subscribers', icon: Mail },
     { name: 'Queue', href: '/dashboard/queue', icon: ListTodo },
     { name: 'Research', href: '/dashboard/research', icon: Beaker },
     { name: 'Settings', href: '/dashboard/settings', icon: Settings },

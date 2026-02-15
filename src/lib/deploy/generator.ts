@@ -241,7 +241,7 @@ function buildPageShell(
       <aside class="sidebar">
         <div class="sidebar-section">
             <h3>Recent</h3>
-            <ul>${recentItems || '<li>Coming soon</li>'}</ul>
+            <ul>${recentItems || '<li>No articles yet</li>'}</ul>
         </div>
         <div class="sidebar-section">
             <h3>About</h3>
@@ -270,7 +270,7 @@ function buildPageShell(
                 footerContent = `<footer>
   <div class="footer-newsletter">
     <h3>Stay Updated</h3>
-    <p>Newsletter coming soon.</p>
+    <p>Subscribe to get notified when new content is published.</p>
   </div>
   <div class="footer-bottom">${footerLinksHtml}<p>&copy; ${new Date().getFullYear()} ${escapeHtml(config.title)}</p></div>
 </footer>`;

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, domains } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
-import { inArray } from 'drizzle-orm';
+import { and, inArray, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { enqueueContentJobs, requeueContentJobIds } from '@/lib/queue/content-queue';
@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
         const existingDomains = await db
             .select({ id: domains.id, domain: domains.domain, registrar: domains.registrar })
             .from(domains)
-            .where(inArray(domains.id, uniqueDomainIds));
+            .where(and(inArray(domains.id, uniqueDomainIds), isNull(domains.deletedAt)));
 
         if (existingDomains.length !== uniqueDomainIds.length) {
             return NextResponse.json({ error: 'Some domains not found' }, { status: 404 });

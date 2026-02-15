@@ -23,21 +23,23 @@ import { DomainActions } from '@/components/dashboard/DomainActions';
 import { getDomainRoiPriorities } from '@/lib/domain/roi-priority-service';
 import { RoiCampaignAutoplanButton } from '@/components/dashboard/RoiCampaignAutoplanButton';
 import { getCampaignLaunchReviewSlaSummary } from '@/lib/review/campaign-launch-sla';
+import { ClassifyDomainsButton } from '@/components/dashboard/ClassifyDomainsButton';
 
 export const dynamic = 'force-dynamic';
 
-const statusColors: Record<string, string> = {
-    parked: 'bg-gray-500',
-    active: 'bg-green-500',
-    redirect: 'bg-blue-500',
-    forsale: 'bg-orange-500',
-    defensive: 'bg-purple-500',
+const statusConfig: Record<string, { color: string; label: string }> = {
+    parked: { color: 'bg-gray-500', label: 'Parked' },
+    active: { color: 'bg-emerald-600', label: 'Building' },
+    redirect: { color: 'bg-blue-500', label: 'Redirect' },
+    forsale: { color: 'bg-amber-500', label: 'For Sale' },
+    defensive: { color: 'bg-purple-500', label: 'Defensive' },
 };
 
-const tierLabels: Record<number, string> = {
-    1: 'Priority',
-    2: 'Secondary',
-    3: 'Hold',
+const tierConfig: Record<number, { label: string; color: string }> = {
+    1: { label: 'High Value', color: 'border-emerald-500 text-emerald-700' },
+    2: { label: 'Growth', color: 'border-blue-500 text-blue-700' },
+    3: { label: 'Incubate', color: 'border-gray-400 text-gray-600' },
+    4: { label: 'Brand/Hold', color: 'border-purple-400 text-purple-600' },
 };
 
 const roiActionBadgeClasses: Record<string, string> = {
@@ -144,6 +146,7 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                     </p>
                 </div>
                 <div className="flex gap-2">
+                    <ClassifyDomainsButton mode="all" />
                     <DeployAllButton domainIds={allDomains.filter(d => !d.isDeployed).map(d => d.id)} />
                     <BulkNameserverCutoverButton domainIds={allDomains.filter(d => d.registrar === 'godaddy').map(d => d.id)} />
                     <Link href="/dashboard/domains/import">
@@ -162,20 +165,44 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
 
             {/* Status Summary Cards */}
             <div className="grid gap-4 md:grid-cols-5">
-                {['active', 'parked', 'redirect', 'forsale', 'defensive'].map((status) => (
-                    <Card key={status}>
-                        <CardContent className="p-4">
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <p className="text-sm font-medium capitalize text-muted-foreground">{status}</p>
-                                    <p className="text-2xl font-bold">{statusCounts[status] || 0}</p>
+                {['active', 'parked', 'redirect', 'forsale', 'defensive'].map((status) => {
+                    const cfg = statusConfig[status] || { color: 'bg-gray-500', label: status };
+                    return (
+                        <Card key={status}>
+                            <CardContent className="p-4">
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <p className="text-sm font-medium text-muted-foreground">{cfg.label}</p>
+                                        <p className="text-2xl font-bold">{statusCounts[status] || 0}</p>
+                                    </div>
+                                    <div className={`h-3 w-3 rounded-full ${cfg.color}`} />
                                 </div>
-                                <div className={`h-3 w-3 rounded-full ${statusColors[status]}`} />
+                            </CardContent>
+                        </Card>
+                    );
+                })}
+            </div>
+
+            {/* Uncategorized Warning */}
+            {(() => {
+                const uncategorized = allDomains.filter(d => !d.niche);
+                if (uncategorized.length === 0) return null;
+                return (
+                    <Card className="border-amber-200 bg-amber-50">
+                        <CardContent className="flex items-center justify-between p-4">
+                            <div>
+                                <p className="font-medium text-amber-900">
+                                    {uncategorized.length} domain{uncategorized.length === 1 ? '' : 's'} need classification
+                                </p>
+                                <p className="text-sm text-amber-800/80">
+                                    These domains have no niche, tier, or site template assigned. Use AI to classify them automatically.
+                                </p>
                             </div>
+                            <ClassifyDomainsButton mode="all" label={`Classify ${uncategorized.length} Domains`} />
                         </CardContent>
                     </Card>
-                ))}
-            </div>
+                );
+            })()}
 
             {/* Search and Filter */}
             <Suspense>
@@ -325,6 +352,12 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                                             >
                                                 {domain.domain}
                                             </Link>
+                                            <Link
+                                                href={`/dashboard/queue?domainId=${domain.id}`}
+                                                className="ml-2 text-xs text-blue-600 hover:underline"
+                                            >
+                                                Queue
+                                            </Link>
                                             {domain.isDeployed && (
                                                 <a
                                                     href={`https://${domain.domain}`}
@@ -338,27 +371,48 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                                             )}
                                         </TableCell>
                                         <TableCell>
-                                            <Badge
-                                                variant="secondary"
-                                                className={cn(statusColors[domain.status] || 'bg-gray-500', 'text-white')}
-                                            >
-                                                {domain.status}
-                                            </Badge>
+                                            {(() => {
+                                                const cfg = statusConfig[domain.status] || { color: 'bg-gray-500', label: domain.status };
+                                                return (
+                                                    <Badge
+                                                        variant="secondary"
+                                                        className={cn(cfg.color, 'text-white')}
+                                                    >
+                                                        {cfg.label}
+                                                    </Badge>
+                                                );
+                                            })()}
                                         </TableCell>
                                         <TableCell>
-                                            <Badge variant="outline">
-                                                T{domain.tier} - {tierLabels[domain.tier || 3]}
-                                            </Badge>
+                                            {(() => {
+                                                const t = domain.tier || 3;
+                                                const cfg = tierConfig[t] || tierConfig[3];
+                                                return (
+                                                    <Badge variant="outline" className={cfg.color}>
+                                                        T{t} {cfg.label}
+                                                    </Badge>
+                                                );
+                                            })()}
                                         </TableCell>
                                         <TableCell>
-                                            <span className="text-muted-foreground">
-                                                {domain.niche || '—'}
-                                            </span>
+                                            {domain.niche ? (
+                                                <span className="font-medium text-foreground">{domain.niche}</span>
+                                            ) : (
+                                                <span className="italic text-amber-500">Unclassified</span>
+                                            )}
                                         </TableCell>
                                         <TableCell>
-                                            <span className="capitalize text-muted-foreground">
-                                                {domain.siteTemplate || '—'}
-                                            </span>
+                                            {domain.siteTemplate && domain.siteTemplate !== 'authority' ? (
+                                                <Badge variant="outline" className="capitalize">
+                                                    {domain.siteTemplate.replaceAll('_', ' ')}
+                                                </Badge>
+                                            ) : !domain.niche ? (
+                                                <span className="italic text-amber-500">—</span>
+                                            ) : (
+                                                <Badge variant="outline" className="capitalize">
+                                                    {domain.siteTemplate?.replaceAll('_', ' ') || 'authority'}
+                                                </Badge>
+                                            )}
                                         </TableCell>
                                         <TableCell>
                                             {domain.isDeployed ? (

@@ -9,6 +9,7 @@ import {
     reviewTasks,
 } from '@/lib/db';
 import { advanceDomainLifecycleForAcquisition } from '@/lib/domain/lifecycle-sync';
+import { evaluateGrowthLaunchFreeze, shouldBlockGrowthLaunchForScope } from '@/lib/growth/launch-freeze';
 import { enqueueContentJob } from '@/lib/queue/content-queue';
 import { NotFoundError, ConflictError, ForbiddenError, ChecklistValidationError } from '@/lib/review/errors';
 
@@ -311,7 +312,7 @@ export async function decideReviewTask(input: ReviewTaskDecisionInput): Promise<
             }
         }
 
-        if (task.taskType === 'campaign_launch' && input.status === 'approved') {
+        if (task.taskType === 'campaign_launch' && input.status === 'approved' && task.entityId) {
             campaignLaunchQueueCampaignId = task.entityId;
         }
     });
@@ -324,11 +325,21 @@ export async function decideReviewTask(input: ReviewTaskDecisionInput): Promise<
         );
     }
     if (campaignLaunchQueueCampaignId) {
-        campaignLaunchQueued = await queueCampaignLaunchIfMissing(
-            campaignLaunchQueueCampaignId,
-            input.actor.id,
-            resolvedTaskId || input.taskId,
-        );
+        const launchFreeze = await evaluateGrowthLaunchFreeze();
+        if (shouldBlockGrowthLaunchForScope({ state: launchFreeze })) {
+            console.warn('Campaign launch queue skipped due to active launch-freeze', {
+                campaignId: campaignLaunchQueueCampaignId,
+                reviewTaskId: resolvedTaskId || input.taskId,
+                freezeLevel: launchFreeze.level,
+                reasonCodes: launchFreeze.reasonCodes,
+            });
+        } else {
+            campaignLaunchQueued = await queueCampaignLaunchIfMissing(
+                campaignLaunchQueueCampaignId,
+                input.actor.id,
+                resolvedTaskId || input.taskId,
+            );
+        }
     }
 
     return {

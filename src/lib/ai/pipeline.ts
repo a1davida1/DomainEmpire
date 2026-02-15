@@ -36,8 +36,8 @@ function slugify(text: string) {
         .replaceAll(/\s+/g, '-')           // Replace spaces with -
         .replaceAll(/[^\w-]+/g, '')        // Remove all non-word chars
         .replaceAll(/-+/g, '-')            // Replace multiple - with single -
-        .replaceAll(/^-+/, '')             // Trim - from start of text
-        .replaceAll(/-+$/, '');            // Trim - from end of text
+        .replace(/^-+/, '')                // Trim - from start of text
+        .replace(/-+$/, '');               // Trim - from end of text
 }
 
 type AiReviewerVerdict = 'approve' | 'reject';
@@ -141,7 +141,7 @@ async function logApiCallWithPrompt(args: {
         fallbackUsed: args.usage.fallbackUsed,
         inputTokens: args.usage.inputTokens,
         outputTokens: args.usage.outputTokens,
-        cost: args.usage.cost.toFixed(4),
+        cost: Number(args.usage.cost.toFixed(4)),
         durationMs: args.usage.durationMs,
         domainId: args.domainId ?? null,
     });
@@ -1232,6 +1232,13 @@ export async function processKeywordResearchJob(jobId: string): Promise<void> {
             difficulty: kw.difficulty,
             intent,
             status: 'queued',
+        }).onConflictDoUpdate({
+            target: [keywords.domainId, keywords.keyword],
+            set: {
+                monthlyVolume: kw.searchVolume,
+                difficulty: kw.difficulty,
+                intent,
+            },
         });
     }
 
@@ -1250,19 +1257,34 @@ export async function processKeywordResearchJob(jobId: string): Promise<void> {
         });
         const bestKeyword = sortedKeywords[0];
 
-        const newArticle = await db.insert(articles).values({
-            domainId: job.domainId!,
-            targetKeyword: bestKeyword.keyword,
-            secondaryKeywords: bestKeyword.variations,
-            title: bestKeyword.keyword,
-            slug: slugify(bestKeyword.keyword),
-            status: 'draft',
-        }).returning({ id: articles.id });
+        const baseSlug = slugify(bestKeyword.keyword) || `article-${job.id.slice(0, 8)}`;
+        let newArticleId: string | null = null;
+
+        for (let attempt = 0; attempt < 25; attempt += 1) {
+            const slug = attempt === 0 ? baseSlug : `${baseSlug}-${attempt + 1}`;
+            const created = await db.insert(articles).values({
+                domainId: job.domainId!,
+                targetKeyword: bestKeyword.keyword,
+                secondaryKeywords: bestKeyword.variations,
+                title: bestKeyword.keyword,
+                slug,
+                status: 'draft',
+            }).onConflictDoNothing().returning({ id: articles.id });
+
+            if (created[0]?.id) {
+                newArticleId = created[0].id;
+                break;
+            }
+        }
+
+        if (!newArticleId) {
+            throw new Error(`Unable to create unique draft article slug for domain ${job.domainId}`);
+        }
 
         await enqueueContentJob({
             jobType: 'research', // Now using proper Research stage
             domainId: job.domainId!,
-            articleId: newArticle[0].id,
+            articleId: newArticleId,
             payload: {
                 targetKeyword: bestKeyword.keyword,
                 domainName: payload.domain,

@@ -24,8 +24,8 @@ async function queueBidPlanIfMissing(
 ): Promise<string | null> {
     // Advisory lock scoped to transaction prevents TOCTOU race where
     // concurrent callers both see no existing job and enqueue duplicates.
-    // TODO: Add partial unique index on content_queue(job_type, (payload->>'domainResearchId'))
-    // WHERE status IN ('pending','processing') for belt-and-suspenders protection.
+    // Belt-and-suspenders: partial unique index uq_queue_active_bid_plan
+    // added in migration 0031 catches any remaining edge cases.
     await tx.execute(
         sql`SELECT pg_advisory_xact_lock(hashtext(${`bid_plan:${domainResearchId}`}))`,
     );

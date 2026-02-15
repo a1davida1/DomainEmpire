@@ -5,6 +5,11 @@ import { eq, ilike, and, sql, isNull, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { checkIdempotencyKey, storeIdempotencyResult } from '@/lib/api/idempotency';
 import { DOMAIN_LIFECYCLE_STATES } from '@/lib/domain/lifecycle';
+import { classifyAndUpdateDomain } from '@/lib/ai/classify-domain';
+
+function escapeIlikePattern(value: string): string {
+    return value.replace(/[%_\\]/g, (ch) => '\\' + ch);
+}
 
 const SITE_TEMPLATE_VALUES = [
     'authority', 'comparison', 'calculator', 'review', 'tool', 'hub',
@@ -124,7 +129,7 @@ export async function GET(request: NextRequest) {
             conditions.push(eq(domains.tier, Number.parseInt(tier, 10)));
         }
         if (search) {
-            conditions.push(ilike(domains.domain, `%${search}%`));
+            conditions.push(ilike(domains.domain, `%${escapeIlikePattern(search)}%`));
         }
 
         // Query with conditions
@@ -180,7 +185,7 @@ export async function GET(request: NextRequest) {
             if (niche) legacyConditions.push(eq(domains.niche, niche));
             if (vertical) legacyConditions.push(eq(domains.vertical, vertical));
             if (tier) legacyConditions.push(eq(domains.tier, Number.parseInt(tier, 10)));
-            if (search) legacyConditions.push(ilike(domains.domain, `%${search}%`));
+            if (search) legacyConditions.push(ilike(domains.domain, `%${escapeIlikePattern(search)}%`));
 
             const legacyWhereClause = legacyConditions.length > 0 ? and(...legacyConditions) : undefined;
             const legacyResults = await db
@@ -265,7 +270,15 @@ export async function POST(request: NextRequest) {
     if (authError) return authError;
 
     try {
-        const body = await request.json();
+        let body: unknown;
+        try {
+            body = await request.json();
+        } catch {
+            return NextResponse.json(
+                { error: 'Bad Request', message: 'Invalid JSON in request body' },
+                { status: 400 },
+            );
+        }
         const validationResult = createDomainSchema.safeParse(body);
 
         if (!validationResult.success) {
@@ -317,10 +330,10 @@ export async function POST(request: NextRequest) {
             domain: data.domain.toLowerCase(),
             tld,
             registrar: data.registrar,
-            purchasePrice: data.purchasePrice?.toString(),
+            purchasePrice: data.purchasePrice,
             purchaseDate: data.purchaseDate,
             renewalDate: data.renewalDate,
-            renewalPrice: data.renewalPrice?.toString(),
+            renewalPrice: data.renewalPrice,
             status: data.status,
             lifecycleState: data.lifecycleState,
             bucket: data.bucket,
@@ -354,7 +367,22 @@ export async function POST(request: NextRequest) {
             }
         })();
 
-        const response = NextResponse.json({ domain: inserted[0] }, { status: 201 });
+        const created = inserted[0];
+        if (!created) {
+            return NextResponse.json(
+                { error: 'Internal Server Error', message: 'Domain insert returned no rows' },
+                { status: 500 },
+            );
+        }
+
+        // Auto-classify with AI if no niche was provided
+        if (!created.niche) {
+            classifyAndUpdateDomain(created.id).catch((err) => {
+                console.warn('Auto-classification failed for domain', created.domain, err);
+            });
+        }
+
+        const response = NextResponse.json({ domain: created }, { status: 201 });
         await storeIdempotencyResult(request, response);
         return response;
     } catch (error) {

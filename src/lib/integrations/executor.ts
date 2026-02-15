@@ -17,7 +17,7 @@ import {
     isRegistrarOwnershipStatus,
     isRegistrarTransferStatus,
 } from '@/lib/domain/registrar-operations';
-import { getDomainAnalytics } from '@/lib/analytics/cloudflare';
+import { getDomainAnalyticsTyped } from '@/lib/analytics/cloudflare';
 import { getDomainGSCSummary } from '@/lib/analytics/search-console';
 import { getGoDaddyRegistrarSignals } from '@/lib/deploy/godaddy';
 
@@ -746,7 +746,26 @@ async function executeCloudflareAnalyticsSync(
         };
     }
 
-    const analytics = await getDomainAnalytics(connection.domainName, days);
+    const analyticsResult = await getDomainAnalyticsTyped(connection.domainName, days);
+    if (analyticsResult.status === 'error') {
+        const rateLimited = analyticsResult.message.includes('429');
+        return {
+            status: 'partial',
+            recordsProcessed: 0,
+            recordsUpserted: 0,
+            recordsFailed: 1,
+            errorMessage: rateLimited
+                ? 'Cloudflare analytics rate-limited; retry shortly.'
+                : analyticsResult.message,
+            details: {
+                domain: connection.domainName,
+                days,
+                reason: rateLimited ? 'rate_limited' : 'api_error',
+            },
+        };
+    }
+
+    const analytics = analyticsResult.status === 'ok' ? analyticsResult.data : [];
     if (analytics.length === 0) {
         return {
             status: 'failed',

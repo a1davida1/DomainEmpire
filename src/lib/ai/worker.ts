@@ -2013,6 +2013,8 @@ async function recoverStaleLocks(): Promise<number> {
 async function acquireJobs(limit: number, jobTypes?: string[]) {
     const now = new Date();
     const lockUntil = new Date(now.getTime() + LOCK_DURATION_MS);
+    const nowIso = now.toISOString();
+    const lockUntilIso = lockUntil.toISOString();
 
     // Use a single atomic UPDATE...WHERE id IN (SELECT ... FOR UPDATE SKIP LOCKED)
     // This prevents race conditions between multiple workers entirely.
@@ -2020,25 +2022,39 @@ async function acquireJobs(limit: number, jobTypes?: string[]) {
         ? sql`AND ${contentQueue.jobType} IN (${sql.join(jobTypes.map(t => sql`${t}`), sql`, `)})`
         : sql``;
 
-    const lockedJobs = await db.execute<typeof contentQueue.$inferSelect>(sql`
+    const lockedJobs = await db.execute<{ id: string }>(sql`
         UPDATE ${contentQueue}
         SET status = 'processing',
-            locked_until = ${lockUntil},
-            started_at = ${now}
+            locked_until = ${lockUntilIso}::timestamp,
+            started_at = ${nowIso}::timestamp
         WHERE id IN (
             SELECT id FROM ${contentQueue}
             WHERE status = 'pending'
-              AND (scheduled_for IS NULL OR scheduled_for <= ${now})
-              AND (locked_until IS NULL OR locked_until <= ${now})
+              AND (scheduled_for IS NULL OR scheduled_for <= ${nowIso}::timestamp)
+              AND (locked_until IS NULL OR locked_until <= ${nowIso}::timestamp)
               ${jobTypeFilter}
             ORDER BY priority DESC, created_at ASC
             LIMIT ${limit}
             FOR UPDATE SKIP LOCKED
         )
-        RETURNING *
+        RETURNING id
     `);
+    const lockedRows = Array.isArray(lockedJobs)
+        ? lockedJobs
+        : (lockedJobs as unknown as { rows: Array<{ id: string }> }).rows ?? [];
+    const lockedIds = lockedRows
+        .map((row) => row?.id)
+        .filter((value): value is string => typeof value === 'string' && value.length > 0);
 
-    return Array.isArray(lockedJobs) ? lockedJobs : (lockedJobs as unknown as { rows: typeof contentQueue.$inferSelect[] }).rows ?? [];
+    if (lockedIds.length === 0) {
+        return [];
+    }
+
+    return db
+        .select()
+        .from(contentQueue)
+        .where(inArray(contentQueue.id, lockedIds))
+        .orderBy(desc(contentQueue.priority), asc(contentQueue.createdAt));
 }
 
 /**
@@ -2051,32 +2067,48 @@ async function acquireJobsByIds(ids: string[], limit: number, jobTypes?: string[
 
     const now = new Date();
     const lockUntil = new Date(now.getTime() + LOCK_DURATION_MS);
+    const nowIso = now.toISOString();
+    const lockUntilIso = lockUntil.toISOString();
     const dedupedIds = [...new Set(ids)];
     const idList = sql.join(dedupedIds.map((id) => sql`${id}`), sql`, `);
     const jobTypeFilter = jobTypes?.length
         ? sql`AND ${contentQueue.jobType} IN (${sql.join(jobTypes.map(t => sql`${t}`), sql`, `)})`
         : sql``;
 
-    const lockedJobs = await db.execute<typeof contentQueue.$inferSelect>(sql`
+    const lockedJobs = await db.execute<{ id: string }>(sql`
         UPDATE ${contentQueue}
         SET status = 'processing',
-            locked_until = ${lockUntil},
-            started_at = ${now}
+            locked_until = ${lockUntilIso}::timestamp,
+            started_at = ${nowIso}::timestamp
         WHERE id IN (
             SELECT id FROM ${contentQueue}
             WHERE id IN (${idList})
               AND status = 'pending'
-              AND (scheduled_for IS NULL OR scheduled_for <= ${now})
-              AND (locked_until IS NULL OR locked_until <= ${now})
+              AND (scheduled_for IS NULL OR scheduled_for <= ${nowIso}::timestamp)
+              AND (locked_until IS NULL OR locked_until <= ${nowIso}::timestamp)
               ${jobTypeFilter}
             ORDER BY priority DESC, created_at ASC
             LIMIT ${limit}
             FOR UPDATE SKIP LOCKED
         )
-        RETURNING *
+        RETURNING id
     `);
+    const lockedRows = Array.isArray(lockedJobs)
+        ? lockedJobs
+        : (lockedJobs as unknown as { rows: Array<{ id: string }> }).rows ?? [];
+    const lockedIds = lockedRows
+        .map((row) => row?.id)
+        .filter((value): value is string => typeof value === 'string' && value.length > 0);
 
-    return Array.isArray(lockedJobs) ? lockedJobs : (lockedJobs as unknown as { rows: typeof contentQueue.$inferSelect[] }).rows ?? [];
+    if (lockedIds.length === 0) {
+        return [];
+    }
+
+    return db
+        .select()
+        .from(contentQueue)
+        .where(inArray(contentQueue.id, lockedIds))
+        .orderBy(desc(contentQueue.priority), asc(contentQueue.createdAt));
 }
 
 /**
@@ -2567,8 +2599,8 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
                 underwritingVersion: UNDERWRITING_VERSION,
                 domainScore: evaluation.compositeScore,
                 keywordVolume: evaluation.signals.keyword?.volume ?? null,
-                keywordCpc: keywordCpc === null ? null : keywordCpc.toString(),
-                estimatedRevenuePotential: estimatedRevenuePotential.toString(),
+                keywordCpc: keywordCpc ?? null,
+                estimatedRevenuePotential: estimatedRevenuePotential,
                 evaluationResult: evaluation as unknown as Record<string, unknown>,
                 evaluatedAt,
                 decision: decision.decision,

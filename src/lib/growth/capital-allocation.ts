@@ -138,7 +138,7 @@ export function evaluateCapitalAllocation(input: CapitalAllocationEvaluationInpu
             };
         }
 
-        if (cacLtvRatio <= 1.2 && (paybackDays > 60 && paybackDays <= 120)) {
+        if (cacLtvRatio <= 1.2) {
             reasons.push('Marginal efficiency; optimize and reduce exposure');
             return {
                 band: 'optimize',
