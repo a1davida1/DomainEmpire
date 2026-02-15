@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { and, asc, count, desc, eq, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, isNull, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { getRequestUser, requireAuth } from '@/lib/auth';
 import { db, mediaAssets } from '@/lib/db';
@@ -57,7 +57,7 @@ export async function GET(request: NextRequest) {
         const sortRaw = url.searchParams.get('sort');
         const sort = sortEnum.safeParse(sortRaw).success ? sortEnum.parse(sortRaw) : 'newest';
 
-        const conditions: SQL[] = [eq(mediaAssets.userId, user.id)];
+        const conditions: SQL[] = [eq(mediaAssets.userId, user.id), isNull(mediaAssets.deletedAt)];
         if (typeRaw) {
             const parsedType = assetTypeEnum.safeParse(typeRaw);
             if (!parsedType.success) {
@@ -179,7 +179,10 @@ export async function POST(request: NextRequest) {
             const result = await db.transaction(async (tx) => {
                 const [inserted] = await tx.insert(mediaAssets)
                     .values(insertValues)
-                    .onConflictDoNothing({ target: mediaAssets.url })
+                    .onConflictDoNothing({
+                        target: mediaAssets.url,
+                        where: sql`${mediaAssets.deletedAt} IS NULL`,
+                    })
                     .returning();
 
                 if (inserted) {
@@ -189,7 +192,7 @@ export async function POST(request: NextRequest) {
                 // URL unique constraint is global (not per-user), so lookup must match
                 const [existing] = await tx.select()
                     .from(mediaAssets)
-                    .where(eq(mediaAssets.url, payload.url))
+                    .where(and(eq(mediaAssets.url, payload.url), isNull(mediaAssets.deletedAt)))
                     .limit(1);
                 return { created: false, asset: existing ?? null };
             });

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { db, domains, integrationConnections } from '@/lib/db';
 import { getRequestUser, requireAuth } from '@/lib/auth';
@@ -39,6 +39,24 @@ const upsertSchema = z.object({
     credential: z.string().optional().nullable(),
     config: z.record(z.string(), z.unknown()).optional(),
 });
+
+const connectionReturning = {
+    id: integrationConnections.id,
+    userId: integrationConnections.userId,
+    domainId: integrationConnections.domainId,
+    provider: integrationConnections.provider,
+    category: integrationConnections.category,
+    displayName: integrationConnections.displayName,
+    status: integrationConnections.status,
+    config: integrationConnections.config,
+    encryptedCredential: integrationConnections.encryptedCredential,
+    lastSyncAt: integrationConnections.lastSyncAt,
+    lastSyncStatus: integrationConnections.lastSyncStatus,
+    lastSyncError: integrationConnections.lastSyncError,
+    createdBy: integrationConnections.createdBy,
+    createdAt: integrationConnections.createdAt,
+    updatedAt: integrationConnections.updatedAt,
+} as const;
 
 function normalizeOptionalText(value?: string | null): string | null {
     if (value === undefined || value === null) return null;
@@ -216,23 +234,7 @@ export async function POST(request: NextRequest) {
                 .update(integrationConnections)
                 .set(updateSet)
                 .where(eq(integrationConnections.id, data.id))
-                .returning({
-                    id: integrationConnections.id,
-                    userId: integrationConnections.userId,
-                    domainId: integrationConnections.domainId,
-                    provider: integrationConnections.provider,
-                    category: integrationConnections.category,
-                    displayName: integrationConnections.displayName,
-                    status: integrationConnections.status,
-                    config: integrationConnections.config,
-                    encryptedCredential: integrationConnections.encryptedCredential,
-                    lastSyncAt: integrationConnections.lastSyncAt,
-                    lastSyncStatus: integrationConnections.lastSyncStatus,
-                    lastSyncError: integrationConnections.lastSyncError,
-                    createdBy: integrationConnections.createdBy,
-                    createdAt: integrationConnections.createdAt,
-                    updatedAt: integrationConnections.updatedAt,
-                });
+                .returning(connectionReturning);
 
             const updated = updatedRows[0];
             return NextResponse.json({
@@ -243,19 +245,30 @@ export async function POST(request: NextRequest) {
             });
         }
 
-        const lookupConditions = [
-            eq(integrationConnections.userId, targetUserId),
-            eq(integrationConnections.provider, data.provider),
-            data.domainId ? eq(integrationConnections.domainId, data.domainId) : isNull(integrationConnections.domainId),
-        ];
+        const upserted = await db.transaction(async (tx) => {
+            const txWithExecute = tx as typeof tx & {
+                execute?: (query: ReturnType<typeof sql>) => Promise<unknown>;
+            };
 
-        const existing = await db
-            .select({ id: integrationConnections.id })
-            .from(integrationConnections)
-            .where(and(...lookupConditions))
-            .limit(1);
+            if (typeof txWithExecute.execute === 'function') {
+                const lockKey = `integration_connection:${targetUserId}:${data.provider}:${data.domainId ?? 'null'}`;
+                await txWithExecute.execute(
+                    sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`,
+                );
+            }
 
-        if (existing.length > 0) {
+            const lookupConditions = [
+                eq(integrationConnections.userId, targetUserId),
+                eq(integrationConnections.provider, data.provider),
+                data.domainId ? eq(integrationConnections.domainId, data.domainId) : isNull(integrationConnections.domainId),
+            ];
+
+            const existing = await tx
+                .select({ id: integrationConnections.id })
+                .from(integrationConnections)
+                .where(and(...lookupConditions))
+                .limit(1);
+
             const updateSet: Record<string, unknown> = {
                 category: data.category,
                 updatedAt: new Date(),
@@ -265,76 +278,47 @@ export async function POST(request: NextRequest) {
             if (data.displayName !== undefined) updateSet.displayName = normalizedDisplayName;
             if (encryptedCredential !== undefined) updateSet.encryptedCredential = encryptedCredential;
 
-            const updatedRows = await db
-                .update(integrationConnections)
-                .set(updateSet)
-                .where(eq(integrationConnections.id, existing[0].id))
-                .returning({
-                    id: integrationConnections.id,
-                    userId: integrationConnections.userId,
-                    domainId: integrationConnections.domainId,
-                    provider: integrationConnections.provider,
-                    category: integrationConnections.category,
-                    displayName: integrationConnections.displayName,
-                    status: integrationConnections.status,
-                    config: integrationConnections.config,
-                    encryptedCredential: integrationConnections.encryptedCredential,
-                    lastSyncAt: integrationConnections.lastSyncAt,
-                    lastSyncStatus: integrationConnections.lastSyncStatus,
-                    lastSyncError: integrationConnections.lastSyncError,
-                    createdBy: integrationConnections.createdBy,
-                    createdAt: integrationConnections.createdAt,
-                    updatedAt: integrationConnections.updatedAt,
-                });
+            if (existing.length > 0) {
+                const updatedRows = await tx
+                    .update(integrationConnections)
+                    .set(updateSet)
+                    .where(eq(integrationConnections.id, existing[0].id))
+                    .returning(connectionReturning);
 
-            const updated = updatedRows[0];
-            return NextResponse.json({
-                connection: {
-                    ...updated,
-                    hasCredential: Boolean(updated.encryptedCredential),
-                },
-            });
-        }
+                return {
+                    created: false,
+                    connection: updatedRows[0],
+                };
+            }
 
-        const insertedRows = await db
-            .insert(integrationConnections)
-            .values({
-                userId: targetUserId,
-                domainId: data.domainId ?? null,
-                provider: data.provider,
-                category: data.category,
-                displayName: normalizedDisplayName,
-                status: data.status ?? 'pending',
-                encryptedCredential: encryptedCredential ?? null,
-                config: data.config ?? {},
-                createdBy: actor.id,
-                updatedAt: new Date(),
-            })
-            .returning({
-                id: integrationConnections.id,
-                userId: integrationConnections.userId,
-                domainId: integrationConnections.domainId,
-                provider: integrationConnections.provider,
-                category: integrationConnections.category,
-                displayName: integrationConnections.displayName,
-                status: integrationConnections.status,
-                config: integrationConnections.config,
-                encryptedCredential: integrationConnections.encryptedCredential,
-                lastSyncAt: integrationConnections.lastSyncAt,
-                lastSyncStatus: integrationConnections.lastSyncStatus,
-                lastSyncError: integrationConnections.lastSyncError,
-                createdBy: integrationConnections.createdBy,
-                createdAt: integrationConnections.createdAt,
-                updatedAt: integrationConnections.updatedAt,
-            });
+            const insertedRows = await tx
+                .insert(integrationConnections)
+                .values({
+                    userId: targetUserId,
+                    domainId: data.domainId ?? null,
+                    provider: data.provider,
+                    category: data.category,
+                    displayName: normalizedDisplayName,
+                    status: data.status ?? 'pending',
+                    encryptedCredential: encryptedCredential ?? null,
+                    config: data.config ?? {},
+                    createdBy: actor.id,
+                    updatedAt: new Date(),
+                })
+                .returning(connectionReturning);
 
-        const inserted = insertedRows[0];
+            return {
+                created: true,
+                connection: insertedRows[0],
+            };
+        });
+
         return NextResponse.json({
             connection: {
-                ...inserted,
-                hasCredential: Boolean(inserted.encryptedCredential),
+                ...upserted.connection,
+                hasCredential: Boolean(upserted.connection.encryptedCredential),
             },
-        }, { status: 201 });
+        }, { status: upserted.created ? 201 : 200 });
     } catch (error) {
         console.error('Failed to upsert integration connection:', error);
         return NextResponse.json({ error: 'Failed to upsert integration connection' }, { status: 500 });

@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Loader2, CheckCircle2, XCircle, AlertTriangle, ArrowLeft, ShieldAlert } from 'lucide-react';
 import Link from 'next/link';
 
@@ -24,6 +26,9 @@ type QaData = {
         allPassed: boolean;
         results: Record<string, { checked: boolean; notes?: string }>;
         completedAt: string;
+        unitTestPassId?: string | null;
+        calculationConfigHash?: string | null;
+        calculationHarnessVersion?: string | null;
     } | null;
 };
 
@@ -33,6 +38,7 @@ type ArticleInfo = {
     status: string;
     ymylLevel: string;
     domainId: string;
+    contentType: string;
 };
 
 type UserInfo = {
@@ -68,6 +74,31 @@ export default function ArticleReviewPage() {
         setCheckedItems(prev => ({ ...prev, [id]: !prev[id] }));
     };
     const [rationale, setRationale] = useState('');
+    const [unitTestPassId, setUnitTestPassId] = useState('');
+    const [evidenceQuality, setEvidenceQuality] = useState<'strong' | 'moderate' | 'weak'>('moderate');
+    const [riskLevel, setRiskLevel] = useState<'low' | 'medium' | 'high'>('medium');
+    const [confidenceScore, setConfidenceScore] = useState(70);
+    const [issueCodesInput, setIssueCodesInput] = useState('');
+    const [citationsChecked, setCitationsChecked] = useState(false);
+    const [disclosureChecked, setDisclosureChecked] = useState(false);
+    const [factualityAssessment, setFactualityAssessment] = useState<'verified' | 'partially_verified' | 'unclear'>('verified');
+    const [structureQuality, setStructureQuality] = useState<'strong' | 'adequate' | 'weak'>('adequate');
+    const [methodologyCheck, setMethodologyCheck] = useState<'passed' | 'needs_changes' | 'missing'>('passed');
+    const [formulaCoverage, setFormulaCoverage] = useState<'full' | 'partial' | 'none'>('full');
+    const [edgeCasesTested, setEdgeCasesTested] = useState(false);
+    const [unitsVerified, setUnitsVerified] = useState(false);
+    const [criteriaCoverage, setCriteriaCoverage] = useState<'complete' | 'partial' | 'insufficient'>('complete');
+    const [sourceDiversity, setSourceDiversity] = useState<'single' | 'multiple'>('multiple');
+    const [affiliateDisclosureChecked, setAffiliateDisclosureChecked] = useState(false);
+    const [offerAccuracyChecked, setOfferAccuracyChecked] = useState(false);
+    const [formConsentChecked, setFormConsentChecked] = useState(false);
+    const [disclosurePlacement, setDisclosurePlacement] = useState<'above_fold' | 'in_form' | 'both' | 'missing'>('both');
+    const [medicalSafetyReview, setMedicalSafetyReview] = useState<'complete' | 'partial' | 'missing'>('complete');
+    const [harmRisk, setHarmRisk] = useState<'low' | 'medium' | 'high'>('low');
+    const [professionalCareCtaPresent, setProfessionalCareCtaPresent] = useState(true);
+    const [branchingLogicValidated, setBranchingLogicValidated] = useState(false);
+    const [eligibilityCopyClear, setEligibilityCopyClear] = useState(false);
+    const [fallbackPathTested, setFallbackPathTested] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [actionError, setActionError] = useState('');
 
@@ -95,6 +126,7 @@ export default function ArticleReviewPage() {
                     status: articleResponse.status || 'draft',
                     ymylLevel: articleResponse.ymylLevel || 'none',
                     domainId: articleResponse.domainId,
+                    contentType: articleResponse.contentType || 'article',
                 });
                 if (meResponse) {
                     setUserInfo({ role: meResponse.role, name: meResponse.name });
@@ -108,6 +140,9 @@ export default function ArticleReviewPage() {
                     }
                     setCheckedItems(pre);
                 }
+                if (typeof qaResponse.latestResult?.unitTestPassId === 'string') {
+                    setUnitTestPassId(qaResponse.latestResult.unitTestPassId);
+                }
             } catch (err: unknown) {
                 console.error('Failed to load review data:', err);
                 setActionError(err instanceof Error ? err.message : 'Failed to load page data');
@@ -118,6 +153,84 @@ export default function ArticleReviewPage() {
 
         fetchData();
     }, [articleId]);
+
+    function parseIssueCodes(): string[] {
+        return issueCodesInput
+            .split(',')
+            .map((value) => value.trim())
+            .filter((value) => value.length > 0);
+    }
+
+    function buildStructuredRationale() {
+        const contentType = articleInfo?.contentType || 'article';
+        const base = {
+            summary: rationale.trim(),
+            evidenceQuality,
+            riskLevel,
+            confidenceScore,
+            issueCodes: parseIssueCodes(),
+            citationsChecked,
+            disclosureChecked,
+        };
+
+        if (contentType === 'calculator') {
+            return {
+                ...base,
+                methodologyCheck,
+                formulaCoverage,
+                edgeCasesTested,
+                unitsVerified,
+            };
+        }
+
+        if (contentType === 'comparison' || contentType === 'review') {
+            return {
+                ...base,
+                criteriaCoverage,
+                sourceDiversity,
+                affiliateDisclosureChecked,
+            };
+        }
+
+        if (contentType === 'lead_capture') {
+            return {
+                ...base,
+                offerAccuracyChecked,
+                formConsentChecked,
+                disclosurePlacement,
+            };
+        }
+
+        if (contentType === 'health_decision') {
+            return {
+                ...base,
+                medicalSafetyReview,
+                harmRisk,
+                professionalCareCtaPresent,
+            };
+        }
+
+        if (
+            contentType === 'wizard'
+            || contentType === 'configurator'
+            || contentType === 'quiz'
+            || contentType === 'survey'
+            || contentType === 'assessment'
+        ) {
+            return {
+                ...base,
+                branchingLogicValidated,
+                eligibilityCopyClear,
+                fallbackPathTested,
+            };
+        }
+
+        return {
+            ...base,
+            factualityAssessment,
+            structureQuality,
+        };
+    }
 
     async function submitQa() {
         if (!qaData) return;
@@ -130,7 +243,11 @@ export default function ArticleReviewPage() {
         await fetch(`/api/articles/${articleId}/qa`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ results, templateId: qaData.checklist.id }),
+            body: JSON.stringify({
+                results,
+                templateId: qaData.checklist.id,
+                unitTestPassId: unitTestPassId.trim() || null,
+            }),
         });
 
         const res = await fetch(`/api/articles/${articleId}/qa`);
@@ -145,7 +262,11 @@ export default function ArticleReviewPage() {
         const res = await fetch(`/api/articles/${articleId}/status`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: newStatus, rationale }),
+            body: JSON.stringify({
+                status: newStatus,
+                rationale,
+                rationaleDetails: buildStructuredRationale(),
+            }),
         });
 
         const data = await res.json();
@@ -206,7 +327,11 @@ export default function ArticleReviewPage() {
         const publishRes = await fetch(`/api/articles/${articleId}/status`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: 'published', rationale }),
+            body: JSON.stringify({
+                status: 'published',
+                rationale,
+                rationaleDetails: buildStructuredRationale(),
+            }),
         });
 
         const publishData = await publishRes.json();
@@ -229,6 +354,7 @@ export default function ArticleReviewPage() {
     const allRequiredChecked = items
         .filter(i => i.required)
         .every(i => checkedItems[i.id]);
+    const hasCalcIntegrityItem = items.some((item) => item.id === 'calc_tested');
 
     const userLevel = ROLE_HIERARCHY[userInfo?.role || 'editor'] || 1;
     const canApprove = userLevel >= ROLE_HIERARCHY.reviewer;
@@ -281,6 +407,12 @@ export default function ArticleReviewPage() {
                     </div>
                 )}
 
+                {qaData?.latestResult?.unitTestPassId && (
+                    <p className="mb-4 text-xs text-muted-foreground">
+                        Last deterministic calculator test pass: <span className="font-mono">{qaData.latestResult.unitTestPassId}</span>
+                    </p>
+                )}
+
                 <div className="space-y-2">
                     {items.map(item => (
                         <label
@@ -303,6 +435,18 @@ export default function ArticleReviewPage() {
                         </label>
                     ))}
                 </div>
+
+                {hasCalcIntegrityItem && (
+                    <div className="mt-4 space-y-2">
+                        <Label htmlFor="unitTestPassId">Deterministic Unit Test Pass ID (for calculator integrity)</Label>
+                        <Input
+                            id="unitTestPassId"
+                            value={unitTestPassId}
+                            onChange={(event) => setUnitTestPassId(event.target.value)}
+                            placeholder="e.g. calc-ci-2026-02-15.1422"
+                        />
+                    </div>
+                )}
 
                 <div className="mt-4">
                     <Button onClick={submitQa} disabled={submitting} size="sm">
@@ -349,6 +493,312 @@ export default function ArticleReviewPage() {
                             onChange={(e) => setRationale(e.target.value)}
                         />
                     </div>
+
+                    <div className="grid gap-3 md:grid-cols-3">
+                        <div className="space-y-1">
+                            <Label htmlFor="evidenceQuality">Evidence quality</Label>
+                            <select
+                                id="evidenceQuality"
+                                className="w-full rounded-lg border bg-background p-2 text-sm"
+                                value={evidenceQuality}
+                                onChange={(event) => setEvidenceQuality(event.target.value as 'strong' | 'moderate' | 'weak')}
+                            >
+                                <option value="strong">Strong</option>
+                                <option value="moderate">Moderate</option>
+                                <option value="weak">Weak</option>
+                            </select>
+                        </div>
+                        <div className="space-y-1">
+                            <Label htmlFor="riskLevel">Risk level</Label>
+                            <select
+                                id="riskLevel"
+                                className="w-full rounded-lg border bg-background p-2 text-sm"
+                                value={riskLevel}
+                                onChange={(event) => setRiskLevel(event.target.value as 'low' | 'medium' | 'high')}
+                            >
+                                <option value="low">Low</option>
+                                <option value="medium">Medium</option>
+                                <option value="high">High</option>
+                            </select>
+                        </div>
+                        <div className="space-y-1">
+                            <Label htmlFor="confidenceScore">Confidence score (0-100)</Label>
+                            <Input
+                                id="confidenceScore"
+                                type="number"
+                                min={0}
+                                max={100}
+                                value={confidenceScore}
+                                onChange={(event) => {
+                                    const parsed = Number.parseInt(event.target.value, 10);
+                                    setConfidenceScore(Number.isFinite(parsed) ? parsed : 0);
+                                }}
+                            />
+                        </div>
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-2">
+                        <div className="space-y-1">
+                            <Label htmlFor="issueCodes">Issue codes (comma separated)</Label>
+                            <Input
+                                id="issueCodes"
+                                value={issueCodesInput}
+                                onChange={(event) => setIssueCodesInput(event.target.value)}
+                                placeholder="factual_gap,citation_missing"
+                            />
+                        </div>
+                        <div className="space-y-2 pt-6">
+                            <label className="flex items-center gap-2 text-sm">
+                                <input
+                                    type="checkbox"
+                                    checked={citationsChecked}
+                                    onChange={(event) => setCitationsChecked(event.target.checked)}
+                                />
+                                Citations checked
+                            </label>
+                            <label className="flex items-center gap-2 text-sm">
+                                <input
+                                    type="checkbox"
+                                    checked={disclosureChecked}
+                                    onChange={(event) => setDisclosureChecked(event.target.checked)}
+                                />
+                                Disclosures checked
+                            </label>
+                        </div>
+                    </div>
+
+                    {articleInfo?.contentType === 'calculator' && (
+                        <div className="grid gap-3 md:grid-cols-2">
+                            <div className="space-y-1">
+                                <Label htmlFor="methodologyCheck">Methodology check</Label>
+                                <select
+                                    id="methodologyCheck"
+                                    className="w-full rounded-lg border bg-background p-2 text-sm"
+                                    value={methodologyCheck}
+                                    onChange={(event) => setMethodologyCheck(event.target.value as 'passed' | 'needs_changes' | 'missing')}
+                                >
+                                    <option value="passed">Passed</option>
+                                    <option value="needs_changes">Needs changes</option>
+                                    <option value="missing">Missing</option>
+                                </select>
+                            </div>
+                            <div className="space-y-1">
+                                <Label htmlFor="formulaCoverage">Formula coverage</Label>
+                                <select
+                                    id="formulaCoverage"
+                                    className="w-full rounded-lg border bg-background p-2 text-sm"
+                                    value={formulaCoverage}
+                                    onChange={(event) => setFormulaCoverage(event.target.value as 'full' | 'partial' | 'none')}
+                                >
+                                    <option value="full">Full</option>
+                                    <option value="partial">Partial</option>
+                                    <option value="none">None</option>
+                                </select>
+                            </div>
+                            <label className="flex items-center gap-2 text-sm">
+                                <input
+                                    type="checkbox"
+                                    checked={edgeCasesTested}
+                                    onChange={(event) => setEdgeCasesTested(event.target.checked)}
+                                />
+                                Edge cases tested
+                            </label>
+                            <label className="flex items-center gap-2 text-sm">
+                                <input
+                                    type="checkbox"
+                                    checked={unitsVerified}
+                                    onChange={(event) => setUnitsVerified(event.target.checked)}
+                                />
+                                Units verified
+                            </label>
+                        </div>
+                    )}
+
+                    {(articleInfo?.contentType === 'comparison' || articleInfo?.contentType === 'review') && (
+                        <div className="grid gap-3 md:grid-cols-3">
+                            <div className="space-y-1">
+                                <Label htmlFor="criteriaCoverage">Criteria coverage</Label>
+                                <select
+                                    id="criteriaCoverage"
+                                    className="w-full rounded-lg border bg-background p-2 text-sm"
+                                    value={criteriaCoverage}
+                                    onChange={(event) => setCriteriaCoverage(event.target.value as 'complete' | 'partial' | 'insufficient')}
+                                >
+                                    <option value="complete">Complete</option>
+                                    <option value="partial">Partial</option>
+                                    <option value="insufficient">Insufficient</option>
+                                </select>
+                            </div>
+                            <div className="space-y-1">
+                                <Label htmlFor="sourceDiversity">Source diversity</Label>
+                                <select
+                                    id="sourceDiversity"
+                                    className="w-full rounded-lg border bg-background p-2 text-sm"
+                                    value={sourceDiversity}
+                                    onChange={(event) => setSourceDiversity(event.target.value as 'single' | 'multiple')}
+                                >
+                                    <option value="multiple">Multiple</option>
+                                    <option value="single">Single</option>
+                                </select>
+                            </div>
+                            <label className="flex items-center gap-2 text-sm pt-7">
+                                <input
+                                    type="checkbox"
+                                    checked={affiliateDisclosureChecked}
+                                    onChange={(event) => setAffiliateDisclosureChecked(event.target.checked)}
+                                />
+                                Affiliate disclosure checked
+                            </label>
+                        </div>
+                    )}
+
+                    {articleInfo?.contentType === 'lead_capture' && (
+                        <div className="grid gap-3 md:grid-cols-3">
+                            <label className="flex items-center gap-2 text-sm pt-7">
+                                <input
+                                    type="checkbox"
+                                    checked={offerAccuracyChecked}
+                                    onChange={(event) => setOfferAccuracyChecked(event.target.checked)}
+                                />
+                                Offer accuracy checked
+                            </label>
+                            <label className="flex items-center gap-2 text-sm pt-7">
+                                <input
+                                    type="checkbox"
+                                    checked={formConsentChecked}
+                                    onChange={(event) => setFormConsentChecked(event.target.checked)}
+                                />
+                                Consent text checked
+                            </label>
+                            <div className="space-y-1">
+                                <Label htmlFor="disclosurePlacement">Disclosure placement</Label>
+                                <select
+                                    id="disclosurePlacement"
+                                    className="w-full rounded-lg border bg-background p-2 text-sm"
+                                    value={disclosurePlacement}
+                                    onChange={(event) => setDisclosurePlacement(event.target.value as 'above_fold' | 'in_form' | 'both' | 'missing')}
+                                >
+                                    <option value="both">Both</option>
+                                    <option value="above_fold">Above fold</option>
+                                    <option value="in_form">In form</option>
+                                    <option value="missing">Missing</option>
+                                </select>
+                            </div>
+                        </div>
+                    )}
+
+                    {articleInfo?.contentType === 'health_decision' && (
+                        <div className="grid gap-3 md:grid-cols-3">
+                            <div className="space-y-1">
+                                <Label htmlFor="medicalSafetyReview">Medical safety review</Label>
+                                <select
+                                    id="medicalSafetyReview"
+                                    className="w-full rounded-lg border bg-background p-2 text-sm"
+                                    value={medicalSafetyReview}
+                                    onChange={(event) => setMedicalSafetyReview(event.target.value as 'complete' | 'partial' | 'missing')}
+                                >
+                                    <option value="complete">Complete</option>
+                                    <option value="partial">Partial</option>
+                                    <option value="missing">Missing</option>
+                                </select>
+                            </div>
+                            <div className="space-y-1">
+                                <Label htmlFor="harmRisk">Harm risk</Label>
+                                <select
+                                    id="harmRisk"
+                                    className="w-full rounded-lg border bg-background p-2 text-sm"
+                                    value={harmRisk}
+                                    onChange={(event) => setHarmRisk(event.target.value as 'low' | 'medium' | 'high')}
+                                >
+                                    <option value="low">Low</option>
+                                    <option value="medium">Medium</option>
+                                    <option value="high">High</option>
+                                </select>
+                            </div>
+                            <label className="flex items-center gap-2 text-sm pt-7">
+                                <input
+                                    type="checkbox"
+                                    checked={professionalCareCtaPresent}
+                                    onChange={(event) => setProfessionalCareCtaPresent(event.target.checked)}
+                                />
+                                Professional care CTA present
+                            </label>
+                        </div>
+                    )}
+
+                    {(articleInfo?.contentType === 'wizard'
+                        || articleInfo?.contentType === 'configurator'
+                        || articleInfo?.contentType === 'quiz'
+                        || articleInfo?.contentType === 'survey'
+                        || articleInfo?.contentType === 'assessment') && (
+                        <div className="grid gap-3 md:grid-cols-3">
+                            <label className="flex items-center gap-2 text-sm pt-7">
+                                <input
+                                    type="checkbox"
+                                    checked={branchingLogicValidated}
+                                    onChange={(event) => setBranchingLogicValidated(event.target.checked)}
+                                />
+                                Branching logic validated
+                            </label>
+                            <label className="flex items-center gap-2 text-sm pt-7">
+                                <input
+                                    type="checkbox"
+                                    checked={eligibilityCopyClear}
+                                    onChange={(event) => setEligibilityCopyClear(event.target.checked)}
+                                />
+                                Eligibility copy is clear
+                            </label>
+                            <label className="flex items-center gap-2 text-sm pt-7">
+                                <input
+                                    type="checkbox"
+                                    checked={fallbackPathTested}
+                                    onChange={(event) => setFallbackPathTested(event.target.checked)}
+                                />
+                                Fallback path tested
+                            </label>
+                        </div>
+                    )}
+
+                    {(!articleInfo?.contentType
+                        || (articleInfo.contentType !== 'calculator'
+                            && articleInfo.contentType !== 'comparison'
+                            && articleInfo.contentType !== 'review'
+                            && articleInfo.contentType !== 'lead_capture'
+                            && articleInfo.contentType !== 'health_decision'
+                            && articleInfo.contentType !== 'wizard'
+                            && articleInfo.contentType !== 'configurator'
+                            && articleInfo.contentType !== 'quiz'
+                            && articleInfo.contentType !== 'survey'
+                            && articleInfo.contentType !== 'assessment')) && (
+                        <div className="grid gap-3 md:grid-cols-2">
+                            <div className="space-y-1">
+                                <Label htmlFor="factualityAssessment">Factuality assessment</Label>
+                                <select
+                                    id="factualityAssessment"
+                                    className="w-full rounded-lg border bg-background p-2 text-sm"
+                                    value={factualityAssessment}
+                                    onChange={(event) => setFactualityAssessment(event.target.value as 'verified' | 'partially_verified' | 'unclear')}
+                                >
+                                    <option value="verified">Verified</option>
+                                    <option value="partially_verified">Partially verified</option>
+                                    <option value="unclear">Unclear</option>
+                                </select>
+                            </div>
+                            <div className="space-y-1">
+                                <Label htmlFor="structureQuality">Structure quality</Label>
+                                <select
+                                    id="structureQuality"
+                                    className="w-full rounded-lg border bg-background p-2 text-sm"
+                                    value={structureQuality}
+                                    onChange={(event) => setStructureQuality(event.target.value as 'strong' | 'adequate' | 'weak')}
+                                >
+                                    <option value="strong">Strong</option>
+                                    <option value="adequate">Adequate</option>
+                                    <option value="weak">Weak</option>
+                                </select>
+                            </div>
+                        </div>
+                    )}
 
                     {actionError && (
                         <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">

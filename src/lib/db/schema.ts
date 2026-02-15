@@ -19,6 +19,9 @@ export const domains = pgTable('domains', {
     status: text('status', {
         enum: ['parked', 'active', 'redirect', 'forsale', 'defensive']
     }).notNull().default('parked'),
+    lifecycleState: text('lifecycle_state', {
+        enum: ['sourced', 'underwriting', 'approved', 'acquired', 'build', 'growth', 'monetized', 'hold', 'sell', 'sunset'],
+    }).notNull().default('sourced'),
     bucket: text('bucket', {
         enum: ['build', 'redirect', 'park', 'defensive']
     }).notNull().default('build'),
@@ -105,9 +108,123 @@ export const domains = pgTable('domains', {
     deletedAt: timestamp('deleted_at'),
 }, (t) => ({
     statusIdx: index('domain_status_idx').on(t.status),
+    lifecycleStateIdx: index('domain_lifecycle_state_idx').on(t.lifecycleState),
     tierIdx: index('domain_tier_idx').on(t.tier),
     bucketIdx: index('domain_bucket_idx').on(t.bucket), // Note: This references operational bucket
     verticalIdx: index('domain_vertical_idx').on(t.vertical),
+}));
+
+// ===========================================
+// DOMAIN LIFECYCLE EVENTS: Canonical lifecycle transition audit trail
+// ===========================================
+export const domainLifecycleEvents = pgTable('domain_lifecycle_events', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    domainId: uuid('domain_id').notNull().references(() => domains.id, { onDelete: 'cascade' }),
+    actorId: uuid('actor_id').references(() => users.id, { onDelete: 'set null' }),
+    fromState: text('from_state', {
+        enum: ['sourced', 'underwriting', 'approved', 'acquired', 'build', 'growth', 'monetized', 'hold', 'sell', 'sunset'],
+    }).notNull(),
+    toState: text('to_state', {
+        enum: ['sourced', 'underwriting', 'approved', 'acquired', 'build', 'growth', 'monetized', 'hold', 'sell', 'sunset'],
+    }).notNull(),
+    reason: text('reason'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}).notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => ({
+    domainIdx: index('domain_lifecycle_event_domain_idx').on(t.domainId),
+    actorIdx: index('domain_lifecycle_event_actor_idx').on(t.actorId),
+    createdIdx: index('domain_lifecycle_event_created_idx').on(t.createdAt),
+}));
+
+// ===========================================
+// DOMAIN REGISTRAR PROFILES: Registrar and ownership operations control plane
+// ===========================================
+export const domainRegistrarProfiles = pgTable('domain_registrar_profiles', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    domainId: uuid('domain_id').notNull().references(() => domains.id, { onDelete: 'cascade' }),
+    connectionId: uuid('connection_id').references(() => integrationConnections.id, { onDelete: 'set null' }),
+    ownershipStatus: text('ownership_status', {
+        enum: ['unknown', 'unverified', 'verified', 'pending_transfer', 'transferred'],
+    }).notNull().default('unknown'),
+    transferStatus: text('transfer_status', {
+        enum: ['none', 'initiated', 'pending', 'completed', 'failed'],
+    }).notNull().default('none'),
+    transferTargetRegistrar: text('transfer_target_registrar'),
+    transferRequestedAt: timestamp('transfer_requested_at'),
+    transferCompletedAt: timestamp('transfer_completed_at'),
+    autoRenewEnabled: boolean('auto_renew_enabled').notNull().default(true),
+    lockStatus: text('lock_status', {
+        enum: ['unknown', 'locked', 'unlocked'],
+    }).notNull().default('unknown'),
+    dnssecStatus: text('dnssec_status', {
+        enum: ['unknown', 'enabled', 'disabled'],
+    }).notNull().default('unknown'),
+    expirationRisk: text('expiration_risk', {
+        enum: ['unknown', 'none', 'low', 'medium', 'high', 'critical', 'expired'],
+    }).notNull().default('unknown'),
+    expirationRiskScore: integer('expiration_risk_score').notNull().default(0),
+    expirationRiskUpdatedAt: timestamp('expiration_risk_updated_at'),
+    ownershipLastChangedAt: timestamp('ownership_last_changed_at'),
+    ownershipChangedBy: uuid('ownership_changed_by').references(() => users.id, { onDelete: 'set null' }),
+    ownerHandle: text('owner_handle'),
+    notes: text('notes'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}).notNull(),
+    lastSyncedAt: timestamp('last_synced_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+    domainUidx: uniqueIndex('domain_registrar_profile_domain_uidx').on(t.domainId),
+    connectionIdx: index('domain_registrar_profile_connection_idx').on(t.connectionId),
+    transferStatusIdx: index('domain_registrar_profile_transfer_status_idx').on(t.transferStatus),
+    expirationRiskIdx: index('domain_registrar_profile_expiration_risk_idx').on(t.expirationRisk),
+    updatedAtIdx: index('domain_registrar_profile_updated_at_idx').on(t.updatedAt),
+    riskScoreCheck: check(
+        'domain_registrar_profile_risk_score_check',
+        sql`${t.expirationRiskScore} >= 0 AND ${t.expirationRiskScore} <= 100`,
+    ),
+    transferTimelineCheck: check(
+        'domain_registrar_profile_transfer_timeline_check',
+        sql`${t.transferCompletedAt} IS NULL OR ${t.transferRequestedAt} IS NULL OR ${t.transferCompletedAt} >= ${t.transferRequestedAt}`,
+    ),
+}));
+
+// ===========================================
+// DOMAIN OWNERSHIP EVENTS: Append-only ownership and registrar operations audit trail
+// ===========================================
+export const domainOwnershipEvents = pgTable('domain_ownership_events', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    domainId: uuid('domain_id').notNull().references(() => domains.id, { onDelete: 'cascade' }),
+    profileId: uuid('profile_id').references(() => domainRegistrarProfiles.id, { onDelete: 'set null' }),
+    actorId: uuid('actor_id').references(() => users.id, { onDelete: 'set null' }),
+    eventType: text('event_type', {
+        enum: [
+            'ownership_verified',
+            'ownership_changed',
+            'registrar_changed',
+            'transfer_initiated',
+            'transfer_completed',
+            'transfer_failed',
+            'lock_changed',
+            'dnssec_changed',
+            'auto_renew_changed',
+            'risk_recomputed',
+        ],
+    }).notNull(),
+    source: text('source', {
+        enum: ['manual', 'integration_sync', 'system'],
+    }).notNull().default('manual'),
+    summary: text('summary').notNull(),
+    previousState: jsonb('previous_state').$type<Record<string, unknown>>().default({}).notNull(),
+    nextState: jsonb('next_state').$type<Record<string, unknown>>().default({}).notNull(),
+    reason: text('reason'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}).notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => ({
+    domainIdx: index('domain_ownership_event_domain_idx').on(t.domainId),
+    profileIdx: index('domain_ownership_event_profile_idx').on(t.profileId),
+    actorIdx: index('domain_ownership_event_actor_idx').on(t.actorId),
+    typeIdx: index('domain_ownership_event_type_idx').on(t.eventType),
+    createdIdx: index('domain_ownership_event_created_idx').on(t.createdAt),
 }));
 
 // ===========================================
@@ -628,6 +745,33 @@ export const growthChannelCredentials = pgTable('growth_channel_credentials', {
     revokedIdx: index('growth_credential_revoked_idx').on(t.revokedAt),
 }));
 
+export const growthCredentialDrillRuns = pgTable('growth_credential_drill_runs', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    initiatedBy: uuid('initiated_by').references(() => users.id, { onDelete: 'set null' }),
+    scope: text('scope', {
+        enum: ['all', 'pinterest', 'youtube_shorts'],
+    }).notNull().default('all'),
+    mode: text('mode', {
+        enum: ['dry_run', 'rotation_reconnect'],
+    }).notNull().default('rotation_reconnect'),
+    status: text('status', {
+        enum: ['success', 'failed', 'partial'],
+    }).notNull(),
+    checklist: jsonb('checklist').$type<Record<string, unknown>>().default({}).notNull(),
+    results: jsonb('results').$type<Record<string, unknown>>().default({}).notNull(),
+    notes: text('notes'),
+    startedAt: timestamp('started_at').defaultNow().notNull(),
+    completedAt: timestamp('completed_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+    userIdx: index('growth_credential_drill_run_user_idx').on(t.userId),
+    statusIdx: index('growth_credential_drill_run_status_idx').on(t.status),
+    startedAtIdx: index('growth_credential_drill_run_started_at_idx').on(t.startedAt),
+    userStartedAtIdx: index('growth_credential_drill_run_user_started_at_idx').on(t.userId, t.startedAt),
+}));
+
 export const integrationConnections = pgTable('integration_connections', {
     id: uuid('id').primaryKey().defaultRandom(),
     userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -759,13 +903,17 @@ export const mediaAssets = pgTable('media_assets', {
     tags: jsonb('tags').$type<string[]>().default([]).notNull(),
     metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}).notNull(),
     usageCount: integer('usage_count').default(0).notNull(),
+    deletedAt: timestamp('deleted_at'),
+    purgeAfterAt: timestamp('purge_after_at'),
     createdAt: timestamp('created_at').defaultNow(),
 }, (t) => ({
     userIdx: index('media_asset_user_idx').on(t.userId),
     typeIdx: index('media_asset_type_idx').on(t.type),
     folderIdx: index('media_asset_folder_idx').on(t.folder),
-    urlUidx: uniqueIndex('media_asset_url_uidx').on(t.url),
+    urlUidx: uniqueIndex('media_asset_url_uidx').on(t.url).where(sql`${t.deletedAt} IS NULL`),
     usageCountIdx: index('media_asset_usage_count_idx').on(t.usageCount),
+    deletedAtIdx: index('media_asset_deleted_at_idx').on(t.deletedAt),
+    purgeAfterIdx: index('media_asset_purge_after_idx').on(t.purgeAfterAt),
     createdIdx: index('media_asset_created_idx').on(t.createdAt),
 }));
 
@@ -835,6 +983,69 @@ export const mediaModerationEvents = pgTable('media_moderation_events', {
     assetIdx: index('media_moderation_event_asset_idx').on(t.assetId),
     typeIdx: index('media_moderation_event_type_idx').on(t.eventType),
     createdIdx: index('media_moderation_event_created_idx').on(t.createdAt),
+}));
+
+export const mediaReviewPolicyDailySnapshots = pgTable('media_review_policy_daily_snapshots', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    snapshotDate: timestamp('snapshot_date', { mode: 'date' }).notNull(),
+    assignments: integer('assignments').notNull().default(0),
+    overrides: integer('overrides').notNull().default(0),
+    alertEvents: integer('alert_events').notNull().default(0),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+    nonNegativeCheck: check(
+        'media_review_policy_daily_non_negative_check',
+        sql`${t.assignments} >= 0 AND ${t.overrides} >= 0 AND ${t.alertEvents} >= 0`,
+    ),
+    userDateUidx: uniqueIndex('media_review_policy_daily_user_date_uidx').on(t.userId, t.snapshotDate),
+    userIdx: index('media_review_policy_daily_user_idx').on(t.userId),
+    dateIdx: index('media_review_policy_daily_date_idx').on(t.snapshotDate),
+}));
+
+export const mediaReviewPolicyAlertCodeDailySnapshots = pgTable('media_review_policy_alert_code_daily_snapshots', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    snapshotDate: timestamp('snapshot_date', { mode: 'date' }).notNull(),
+    alertCode: text('alert_code').notNull(),
+    count: integer('count').notNull().default(0),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+    nonNegativeCheck: check(
+        'media_review_policy_alert_daily_non_negative_check',
+        sql`${t.count} >= 0`,
+    ),
+    userDateCodeUidx: uniqueIndex('media_review_policy_alert_daily_user_code_uidx').on(
+        t.userId,
+        t.snapshotDate,
+        t.alertCode,
+    ),
+    userDateIdx: index('media_review_policy_alert_daily_user_date_idx').on(t.userId, t.snapshotDate),
+    codeIdx: index('media_review_policy_alert_daily_code_idx').on(t.alertCode),
+}));
+
+export const mediaReviewPolicyPlaybookDailySnapshots = pgTable('media_review_policy_playbook_daily_snapshots', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    snapshotDate: timestamp('snapshot_date', { mode: 'date' }).notNull(),
+    playbookId: text('playbook_id').notNull(),
+    count: integer('count').notNull().default(0),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+    nonNegativeCheck: check(
+        'media_review_policy_playbook_daily_non_negative_check',
+        sql`${t.count} >= 0`,
+    ),
+    userDatePlaybookUidx: uniqueIndex('media_review_policy_playbook_daily_user_playbook_uidx').on(
+        t.userId,
+        t.snapshotDate,
+        t.playbookId,
+    ),
+    userDateIdx: index('media_review_policy_playbook_daily_user_date_idx').on(t.userId, t.snapshotDate),
+    playbookIdx: index('media_review_policy_playbook_daily_id_idx').on(t.playbookId),
 }));
 
 // ===========================================
@@ -908,6 +1119,8 @@ export const apiCallLogs = pgTable('api_call_logs', {
     resolvedModel: text('resolved_model').notNull().default('legacy'),
     promptVersion: text('prompt_version').notNull().default('legacy.v1'),
     routingVersion: text('routing_version').notNull().default('legacy'),
+    promptHash: text('prompt_hash'),
+    promptBody: text('prompt_body'),
     fallbackUsed: boolean('fallback_used').notNull().default(false),
     inputTokens: integer('input_tokens').notNull(),
     outputTokens: integer('output_tokens').notNull(),
@@ -919,6 +1132,7 @@ export const apiCallLogs = pgTable('api_call_logs', {
     articleIdx: index('api_call_article_idx').on(t.articleId),
     domainIdx: index('api_call_domain_idx').on(t.domainId),
     stageIdx: index('api_call_stage_idx').on(t.stage),
+    promptHashIdx: index('api_call_prompt_hash_idx').on(t.promptHash),
     createdIdx: index('api_call_created_idx').on(t.createdAt),
 }));
 
@@ -946,6 +1160,63 @@ export const expenses = pgTable('expenses', {
     recurring_check: check('recurring_check', sql`NOT ${t.recurring} OR ${t.recurringInterval} IS NOT NULL`),
     dateIdx: index('expense_date_idx').on(t.expenseDate),
     categoryIdx: index('expense_category_idx').on(t.category),
+}));
+
+// ===========================================
+// DOMAIN FINANCE LEDGER: Canonical domain-level financial transactions
+// ===========================================
+export const domainFinanceLedgerEntries = pgTable('domain_finance_ledger_entries', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    domainId: uuid('domain_id').notNull().references(() => domains.id, { onDelete: 'cascade' }),
+    entryDate: timestamp('entry_date', { mode: 'date' }).notNull(),
+    entryType: text('entry_type', {
+        enum: ['acquisition_cost', 'build_cost', 'operating_cost', 'channel_spend', 'revenue', 'adjustment'],
+    }).notNull(),
+    impact: text('impact', {
+        enum: ['revenue', 'cost'],
+    }).notNull().default('cost'),
+    amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
+    currency: text('currency').notNull().default('USD'),
+    source: text('source'),
+    sourceRef: text('source_ref'),
+    notes: text('notes'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}).notNull(),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+    domainIdx: index('domain_finance_ledger_domain_idx').on(t.domainId),
+    dateIdx: index('domain_finance_ledger_date_idx').on(t.entryDate),
+    typeIdx: index('domain_finance_ledger_type_idx').on(t.entryType),
+    impactIdx: index('domain_finance_ledger_impact_idx').on(t.impact),
+    sourceRefIdx: index('domain_finance_ledger_source_ref_idx').on(t.sourceRef),
+    creatorIdx: index('domain_finance_ledger_created_by_idx').on(t.createdBy),
+}));
+
+// ===========================================
+// DOMAIN FINANCE MONTHLY CLOSES: Per-domain P&L close snapshots
+// ===========================================
+export const domainFinanceMonthlyCloses = pgTable('domain_finance_monthly_closes', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    domainId: uuid('domain_id').notNull().references(() => domains.id, { onDelete: 'cascade' }),
+    monthStart: timestamp('month_start', { mode: 'date' }).notNull(),
+    monthEnd: timestamp('month_end', { mode: 'date' }).notNull(),
+    revenueTotal: numeric('revenue_total', { precision: 12, scale: 2 }).notNull().default('0'),
+    costTotal: numeric('cost_total', { precision: 12, scale: 2 }).notNull().default('0'),
+    netTotal: numeric('net_total', { precision: 12, scale: 2 }).notNull().default('0'),
+    marginPct: numeric('margin_pct', { precision: 7, scale: 4 }),
+    entryCount: integer('entry_count').notNull().default(0),
+    closedBy: uuid('closed_by').references(() => users.id, { onDelete: 'set null' }),
+    closedAt: timestamp('closed_at').defaultNow().notNull(),
+    notes: text('notes'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}).notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+    domainIdx: index('domain_finance_close_domain_idx').on(t.domainId),
+    monthStartIdx: index('domain_finance_close_month_start_idx').on(t.monthStart),
+    closedAtIdx: index('domain_finance_close_closed_at_idx').on(t.closedAt),
+    domainMonthUidx: uniqueIndex('domain_finance_close_domain_month_uidx').on(t.domainId, t.monthStart),
 }));
 
 // ===========================================
@@ -1161,12 +1432,16 @@ export const qaChecklistResults = pgTable('qa_checklist_results', {
     templateId: uuid('template_id').references(() => qaChecklistTemplates.id),
     reviewerId: uuid('reviewer_id').notNull().references(() => users.id),
     results: jsonb('results').$type<Record<string, { checked: boolean; notes?: string }>>().default({}),
+    unitTestPassId: text('unit_test_pass_id'),
+    calculationConfigHash: text('calculation_config_hash'),
+    calculationHarnessVersion: text('calculation_harness_version'),
     allPassed: boolean('all_passed').default(false),
     completedAt: timestamp('completed_at'),
     createdAt: timestamp('created_at').defaultNow(),
 }, (t) => ({
     articleIdx: index('qa_result_article_idx').on(t.articleId),
     reviewerIdx: index('qa_result_reviewer_idx').on(t.reviewerId),
+    unitTestPassIdx: index('qa_result_unit_test_pass_idx').on(t.unitTestPassId),
 }));
 
 // ===========================================
@@ -1532,6 +1807,11 @@ export const idempotencyKeys = pgTable('idempotency_keys', {
 export const domainsRelations = relations(domains, ({ many, one }) => ({
     keywords: many(keywords),
     articles: many(articles),
+    lifecycleEvents: many(domainLifecycleEvents),
+    registrarProfile: one(domainRegistrarProfiles),
+    ownershipEvents: many(domainOwnershipEvents),
+    financeLedgerEntries: many(domainFinanceLedgerEntries),
+    financeMonthlyCloses: many(domainFinanceMonthlyCloses),
     monetizationProfile: one(monetizationProfiles),
     revenueSnapshots: many(revenueSnapshots),
     expenses: many(expenses),
@@ -1592,6 +1872,28 @@ export const expensesRelations = relations(expenses, ({ one }) => ({
     }),
 }));
 
+export const domainFinanceLedgerEntriesRelations = relations(domainFinanceLedgerEntries, ({ one }) => ({
+    domain: one(domains, {
+        fields: [domainFinanceLedgerEntries.domainId],
+        references: [domains.id],
+    }),
+    creator: one(users, {
+        fields: [domainFinanceLedgerEntries.createdBy],
+        references: [users.id],
+    }),
+}));
+
+export const domainFinanceMonthlyClosesRelations = relations(domainFinanceMonthlyCloses, ({ one }) => ({
+    domain: one(domains, {
+        fields: [domainFinanceMonthlyCloses.domainId],
+        references: [domains.id],
+    }),
+    closedByUser: one(users, {
+        fields: [domainFinanceMonthlyCloses.closedBy],
+        references: [users.id],
+    }),
+}));
+
 export const notificationsRelations = relations(notifications, ({ one }) => ({
     domain: one(domains, {
         fields: [notifications.domainId],
@@ -1622,6 +1924,8 @@ export const usersRelations = relations(users, ({ many }) => ({
     backupReviewTasks: many(reviewTasks, { relationName: 'review_task_backup_reviewer' }),
     createdPreviewBuilds: many(previewBuilds, { relationName: 'preview_build_creator' }),
     growthChannelCredentials: many(growthChannelCredentials),
+    growthCredentialDrillRunsOwned: many(growthCredentialDrillRuns, { relationName: 'growth_credential_drill_run_owner' }),
+    growthCredentialDrillRunsInitiated: many(growthCredentialDrillRuns, { relationName: 'growth_credential_drill_run_initiator' }),
     mediaAssets: many(mediaAssets),
     mediaModerationTasksOwned: many(mediaModerationTasks, { relationName: 'media_moderation_task_owner' }),
     mediaModerationTasksCreated: many(mediaModerationTasks, { relationName: 'media_moderation_task_creator' }),
@@ -1630,9 +1934,56 @@ export const usersRelations = relations(users, ({ many }) => ({
     mediaModerationTasksReviewedBy: many(mediaModerationTasks, { relationName: 'media_moderation_task_reviewed_by' }),
     mediaModerationEventsOwned: many(mediaModerationEvents, { relationName: 'media_moderation_event_owner' }),
     mediaModerationEventsActor: many(mediaModerationEvents, { relationName: 'media_moderation_event_actor' }),
+    domainLifecycleEventsActor: many(domainLifecycleEvents),
+    domainRegistrarProfilesOwnershipChanged: many(domainRegistrarProfiles),
+    domainOwnershipEventsActor: many(domainOwnershipEvents),
+    domainFinanceLedgerEntriesCreated: many(domainFinanceLedgerEntries),
+    domainFinanceMonthlyClosesClosed: many(domainFinanceMonthlyCloses),
     integrationConnectionsOwned: many(integrationConnections, { relationName: 'integration_connection_owner' }),
     integrationConnectionsCreated: many(integrationConnections, { relationName: 'integration_connection_creator' }),
     integrationSyncRunsTriggered: many(integrationSyncRuns, { relationName: 'integration_sync_run_triggered_by' }),
+}));
+
+export const domainLifecycleEventsRelations = relations(domainLifecycleEvents, ({ one }) => ({
+    domain: one(domains, {
+        fields: [domainLifecycleEvents.domainId],
+        references: [domains.id],
+    }),
+    actor: one(users, {
+        fields: [domainLifecycleEvents.actorId],
+        references: [users.id],
+    }),
+}));
+
+export const domainRegistrarProfilesRelations = relations(domainRegistrarProfiles, ({ one, many }) => ({
+    domain: one(domains, {
+        fields: [domainRegistrarProfiles.domainId],
+        references: [domains.id],
+    }),
+    connection: one(integrationConnections, {
+        fields: [domainRegistrarProfiles.connectionId],
+        references: [integrationConnections.id],
+    }),
+    ownershipChangedByUser: one(users, {
+        fields: [domainRegistrarProfiles.ownershipChangedBy],
+        references: [users.id],
+    }),
+    events: many(domainOwnershipEvents),
+}));
+
+export const domainOwnershipEventsRelations = relations(domainOwnershipEvents, ({ one }) => ({
+    domain: one(domains, {
+        fields: [domainOwnershipEvents.domainId],
+        references: [domains.id],
+    }),
+    profile: one(domainRegistrarProfiles, {
+        fields: [domainOwnershipEvents.profileId],
+        references: [domainRegistrarProfiles.id],
+    }),
+    actor: one(users, {
+        fields: [domainOwnershipEvents.actorId],
+        references: [users.id],
+    }),
 }));
 
 export const sessionsRelations = relations(sessions, ({ one }) => ({
@@ -1859,6 +2210,19 @@ export const growthChannelCredentialsRelations = relations(growthChannelCredenti
     }),
 }));
 
+export const growthCredentialDrillRunsRelations = relations(growthCredentialDrillRuns, ({ one }) => ({
+    user: one(users, {
+        fields: [growthCredentialDrillRuns.userId],
+        references: [users.id],
+        relationName: 'growth_credential_drill_run_owner',
+    }),
+    initiatedByUser: one(users, {
+        fields: [growthCredentialDrillRuns.initiatedBy],
+        references: [users.id],
+        relationName: 'growth_credential_drill_run_initiator',
+    }),
+}));
+
 export const integrationConnectionsRelations = relations(integrationConnections, ({ one, many }) => ({
     user: one(users, {
         fields: [integrationConnections.userId],
@@ -1874,6 +2238,7 @@ export const integrationConnectionsRelations = relations(integrationConnections,
         references: [users.id],
         relationName: 'integration_connection_creator',
     }),
+    registrarProfiles: many(domainRegistrarProfiles),
     syncRuns: many(integrationSyncRuns),
 }));
 
@@ -1994,6 +2359,16 @@ export const competitorSnapshotsRelations = relations(competitorSnapshots, ({ on
 // ===========================================
 export type Domain = typeof domains.$inferSelect;
 export type NewDomain = typeof domains.$inferInsert;
+export type DomainLifecycleEvent = typeof domainLifecycleEvents.$inferSelect;
+export type NewDomainLifecycleEvent = typeof domainLifecycleEvents.$inferInsert;
+export type DomainRegistrarProfile = typeof domainRegistrarProfiles.$inferSelect;
+export type NewDomainRegistrarProfile = typeof domainRegistrarProfiles.$inferInsert;
+export type DomainOwnershipEvent = typeof domainOwnershipEvents.$inferSelect;
+export type NewDomainOwnershipEvent = typeof domainOwnershipEvents.$inferInsert;
+export type DomainFinanceLedgerEntry = typeof domainFinanceLedgerEntries.$inferSelect;
+export type NewDomainFinanceLedgerEntry = typeof domainFinanceLedgerEntries.$inferInsert;
+export type DomainFinanceMonthlyClose = typeof domainFinanceMonthlyCloses.$inferSelect;
+export type NewDomainFinanceMonthlyClose = typeof domainFinanceMonthlyCloses.$inferInsert;
 export type Keyword = typeof keywords.$inferSelect;
 export type NewKeyword = typeof keywords.$inferInsert;
 export type Article = typeof articles.$inferSelect;
@@ -2008,6 +2383,7 @@ export type DomainChannelProfile = typeof domainChannelProfiles.$inferSelect;
 export type PromotionJob = typeof promotionJobs.$inferSelect;
 export type PromotionEvent = typeof promotionEvents.$inferSelect;
 export type GrowthChannelCredential = typeof growthChannelCredentials.$inferSelect;
+export type GrowthCredentialDrillRun = typeof growthCredentialDrillRuns.$inferSelect;
 export type IntegrationConnection = typeof integrationConnections.$inferSelect;
 export type NewIntegrationConnection = typeof integrationConnections.$inferInsert;
 export type IntegrationSyncRun = typeof integrationSyncRuns.$inferSelect;

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { and, count, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { getRequestUser, requireAuth } from '@/lib/auth';
 import { db, mediaAssets, mediaModerationTasks } from '@/lib/db';
@@ -183,6 +183,7 @@ export async function GET(request: NextRequest) {
             .where(and(
                 eq(mediaAssets.userId, user.id),
                 inArray(mediaAssets.id, assetIds),
+                isNull(mediaAssets.deletedAt),
             ));
 
         const assetsById = assetRows.reduce<Record<string, typeof assetRows[number]>>((acc, row) => {
@@ -260,6 +261,7 @@ export async function POST(request: NextRequest) {
             .where(and(
                 eq(mediaAssets.id, payload.assetId),
                 eq(mediaAssets.userId, user.id),
+                isNull(mediaAssets.deletedAt),
             ))
             .limit(1);
 
@@ -285,6 +287,16 @@ export async function POST(request: NextRequest) {
 
         const result = await db.transaction(async (tx) => {
             if (openIfPendingExists) {
+                const txWithExecute = tx as typeof tx & {
+                    execute?: (query: ReturnType<typeof sql>) => Promise<unknown>;
+                };
+                if (typeof txWithExecute.execute === 'function') {
+                    const lockKey = `media_task_pending:${user.id}:${payload.assetId}`;
+                    await txWithExecute.execute(
+                        sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`,
+                    );
+                }
+
                 const [existing] = await tx.select()
                     .from(mediaModerationTasks)
                     .where(and(

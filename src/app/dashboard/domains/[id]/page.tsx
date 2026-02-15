@@ -17,7 +17,9 @@ import {
 } from 'lucide-react';
 import ContentTypeConfig from '@/components/dashboard/ContentTypeConfig';
 import DomainChannelCompatibilityConfig from '@/components/dashboard/DomainChannelCompatibilityConfig';
+import DomainLifecycleControls from '@/components/dashboard/DomainLifecycleControls';
 import DomainWorkflowConfig from '@/components/dashboard/DomainWorkflowConfig';
+import DomainOwnershipOperationsConfig from '@/components/dashboard/DomainOwnershipOperationsConfig';
 
 
 interface PageProps {
@@ -184,6 +186,10 @@ export default async function DomainDetailPage({ params }: PageProps) {
                                 <Badge variant="outline" className="capitalize">{domain.bucket}</Badge>
                             </div>
                             <div>
+                                <p className="text-sm font-medium text-muted-foreground">Lifecycle</p>
+                                <Badge variant="outline" className="capitalize">{domain.lifecycleState || 'sourced'}</Badge>
+                            </div>
+                            <div>
                                 <p className="text-sm font-medium text-muted-foreground">Template</p>
                                 <p className="font-medium capitalize">{domain.siteTemplate || 'Not set'}</p>
                             </div>
@@ -299,6 +305,10 @@ export default async function DomainDetailPage({ params }: PageProps) {
                 themeStyle={domain.themeStyle ?? null}
                 currentConfig={domain.contentConfig ?? null}
             />
+
+            <DomainLifecycleControls domainId={id} />
+
+            <DomainOwnershipOperationsConfig domainId={id} />
 
             <DomainChannelCompatibilityConfig domainId={id} />
 

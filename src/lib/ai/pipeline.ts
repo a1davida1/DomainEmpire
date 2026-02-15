@@ -14,6 +14,7 @@ import { db, articles, contentQueue, apiCallLogs, keywords, domains } from '@/li
 import { getAIClient } from './openrouter';
 import { eq, and, sql } from 'drizzle-orm';
 import { PROMPTS } from './prompts';
+import { createHash } from 'node:crypto';
 import { getOrCreateVoiceSeed } from './voice-seed';
 import { createRevision } from '@/lib/audit/revisions';
 import { classifyYmylLevel } from '@/lib/review/ymyl';
@@ -50,6 +51,7 @@ type AiReviewEvaluation = {
 };
 
 type AiReviewEvaluationWithUsage = AiReviewEvaluation & {
+    promptBody: string;
     modelKey: string;
     model: string;
     resolvedModel: string;
@@ -87,15 +89,74 @@ function assertAllowedCollectLeadEndpoint(endpoint: string, articleId: string): 
     throw new Error(`Invalid collectLead endpoint for article ${articleId}`);
 }
 
+type ApiLogStage =
+    | 'keyword_research'
+    | 'outline'
+    | 'draft'
+    | 'humanize'
+    | 'seo'
+    | 'meta'
+    | 'classify'
+    | 'research';
+
+type ApiCallUsage = {
+    modelKey: string;
+    model: string;
+    resolvedModel: string;
+    promptVersion: string;
+    routingVersion: string;
+    fallbackUsed: boolean;
+    inputTokens: number;
+    outputTokens: number;
+    cost: number;
+    durationMs: number;
+};
+
+function normalizePromptBody(prompt: string): string {
+    return prompt.replaceAll('\r\n', '\n');
+}
+
+function promptHash(promptBody: string): string {
+    return createHash('sha256').update(promptBody).digest('hex');
+}
+
+async function logApiCallWithPrompt(args: {
+    articleId?: string | null;
+    domainId?: string | null;
+    stage: ApiLogStage;
+    prompt: string;
+    usage: ApiCallUsage;
+}): Promise<void> {
+    const promptBody = normalizePromptBody(args.prompt);
+    await db.insert(apiCallLogs).values({
+        articleId: args.articleId ?? null,
+        stage: args.stage,
+        modelKey: args.usage.modelKey,
+        model: args.usage.model,
+        resolvedModel: args.usage.resolvedModel,
+        promptVersion: args.usage.promptVersion,
+        routingVersion: args.usage.routingVersion,
+        promptHash: promptHash(promptBody),
+        promptBody,
+        fallbackUsed: args.usage.fallbackUsed,
+        inputTokens: args.usage.inputTokens,
+        outputTokens: args.usage.outputTokens,
+        cost: args.usage.cost.toFixed(4),
+        durationMs: args.usage.durationMs,
+        domainId: args.domainId ?? null,
+    });
+}
+
 async function evaluateWithAiReviewer(opts: {
     ai: ReturnType<typeof getAIClient>;
     contentMarkdown: string;
     keyword: string;
     title: string;
 }): Promise<AiReviewEvaluationWithUsage> {
+    const prompt = PROMPTS.aiReview(opts.contentMarkdown, opts.keyword, opts.title);
     const response = await opts.ai.generateJSON<AiReviewEvaluation>(
         'aiReview',
-        PROMPTS.aiReview(opts.contentMarkdown, opts.keyword, opts.title),
+        prompt,
         {
             model: DEFAULT_OPUS_REVIEW_MODEL,
             temperature: 0.1,
@@ -109,6 +170,7 @@ async function evaluateWithAiReviewer(opts: {
         requiresHumanReview: response.data.requiresHumanReview !== false,
         failures: Array.isArray(response.data.failures) ? response.data.failures : [],
         summary: response.data.summary || '',
+        promptBody: prompt,
         modelKey: response.modelKey,
         model: response.model,
         resolvedModel: response.resolvedModel,
@@ -462,21 +524,12 @@ Respond with JSON:
         outlinePrompt
     );
 
-    // Log API call
-    await db.insert(apiCallLogs).values({
+    await logApiCallWithPrompt({
         articleId: job.articleId,
-        stage: 'outline',
-        modelKey: response.modelKey,
-        model: response.model,
-        resolvedModel: response.resolvedModel,
-        promptVersion: response.promptVersion,
-        routingVersion: response.routingVersion,
-        fallbackUsed: response.fallbackUsed,
-        inputTokens: response.inputTokens,
-        outputTokens: response.outputTokens,
-        cost: response.cost.toFixed(4),
-        durationMs: response.durationMs,
         domainId: job.domainId,
+        stage: 'outline',
+        prompt: outlinePrompt,
+        usage: response,
     });
 
     // Update article with outline data + content type + structured config
@@ -619,21 +672,12 @@ export async function processDraftJob(jobId: string): Promise<void> {
         promptWithDifferentiation
     );
 
-    // Log call
-    await db.insert(apiCallLogs).values({
+    await logApiCallWithPrompt({
         articleId: job.articleId,
-        stage: 'draft',
-        modelKey: response.modelKey,
-        model: response.model,
-        resolvedModel: response.resolvedModel,
-        promptVersion: response.promptVersion,
-        routingVersion: response.routingVersion,
-        fallbackUsed: response.fallbackUsed,
-        inputTokens: response.inputTokens,
-        outputTokens: response.outputTokens,
-        cost: response.cost.toFixed(4),
-        durationMs: response.durationMs,
         domainId: job.domainId,
+        stage: 'draft',
+        prompt: promptWithDifferentiation,
+        usage: response,
     });
 
     const sanitizedDraft = stripEmDashes(response.content).content;
@@ -718,25 +762,15 @@ export async function processHumanizeJob(jobId: string): Promise<void> {
         stage: 'humanize',
     });
 
-    const response = await ai.generate(
-        'humanization',
-        `${differentiationInstructions}\n\n${PROMPTS.humanize(draft, voiceSeed)}`
-    );
+    const humanizePrompt = `${differentiationInstructions}\n\n${PROMPTS.humanize(draft, voiceSeed)}`;
+    const response = await ai.generate('humanization', humanizePrompt);
 
-    await db.insert(apiCallLogs).values({
+    await logApiCallWithPrompt({
         articleId: job.articleId,
-        stage: 'humanize',
-        modelKey: response.modelKey,
-        model: response.model,
-        resolvedModel: response.resolvedModel,
-        promptVersion: response.promptVersion,
-        routingVersion: response.routingVersion,
-        fallbackUsed: response.fallbackUsed,
-        inputTokens: response.inputTokens,
-        outputTokens: response.outputTokens,
-        cost: response.cost.toFixed(4),
-        durationMs: response.durationMs,
         domainId: job.domainId,
+        stage: 'humanize',
+        prompt: humanizePrompt,
+        usage: response,
     });
 
     const sanitizedHumanized = stripEmDashes(response.content).content;
@@ -813,30 +847,20 @@ export async function processSeoOptimizeJob(jobId: string): Promise<void> {
         stage: 'seo',
     });
 
-    const response = await ai.generate(
-        'seoOptimize',
-        `${differentiationInstructions}\n\n${PROMPTS.seoOptimize(
-            article.contentMarkdown,
-            article.targetKeyword || '',
-            article.secondaryKeywords || [],
-            availableLinks,
-        )}`
-    );
+    const seoPrompt = `${differentiationInstructions}\n\n${PROMPTS.seoOptimize(
+        article.contentMarkdown,
+        article.targetKeyword || '',
+        article.secondaryKeywords || [],
+        availableLinks,
+    )}`;
+    const response = await ai.generate('seoOptimize', seoPrompt);
 
-    await db.insert(apiCallLogs).values({
+    await logApiCallWithPrompt({
         articleId: job.articleId,
-        stage: 'seo',
-        modelKey: response.modelKey,
-        model: response.model,
-        resolvedModel: response.resolvedModel,
-        promptVersion: response.promptVersion,
-        routingVersion: response.routingVersion,
-        fallbackUsed: response.fallbackUsed,
-        inputTokens: response.inputTokens,
-        outputTokens: response.outputTokens,
-        cost: response.cost.toFixed(4),
-        durationMs: response.durationMs,
         domainId: job.domainId,
+        stage: 'seo',
+        prompt: seoPrompt,
+        usage: response,
     });
 
     const sanitizedSeoContent = stripEmDashes(response.content).content;
@@ -886,6 +910,7 @@ export async function processMetaJob(jobId: string): Promise<void> {
     if (!article.contentMarkdown) throw new Error('Content not found for meta generation');
     const normalizedContent = stripEmDashes(article.contentMarkdown).content;
 
+    const metaPrompt = PROMPTS.meta(normalizedContent, article.targetKeyword || '');
     const response = await ai.generateJSON<{
         title: string;
         metaDescription: string;
@@ -895,23 +920,15 @@ export async function processMetaJob(jobId: string): Promise<void> {
         suggestedSlug: string;
     }>(
         'seoOptimize', // Meta uses Haiku or similar
-        PROMPTS.meta(normalizedContent, article.targetKeyword || '')
+        metaPrompt
     );
 
-    await db.insert(apiCallLogs).values({
+    await logApiCallWithPrompt({
         articleId: job.articleId,
-        stage: 'meta',
-        modelKey: response.modelKey,
-        model: response.model,
-        resolvedModel: response.resolvedModel,
-        promptVersion: response.promptVersion,
-        routingVersion: response.routingVersion,
-        fallbackUsed: response.fallbackUsed,
-        inputTokens: response.inputTokens,
-        outputTokens: response.outputTokens,
-        cost: response.cost.toFixed(4),
-        durationMs: response.durationMs,
         domainId: job.domainId,
+        stage: 'meta',
+        prompt: metaPrompt,
+        usage: response,
     });
 
     let safeSlug = slugify(response.data.suggestedSlug || response.data.title || '');
@@ -939,20 +956,12 @@ export async function processMetaJob(jobId: string): Promise<void> {
                 title: response.data.title,
             });
 
-            await db.insert(apiCallLogs).values({
+            await logApiCallWithPrompt({
                 articleId: job.articleId,
-                stage: 'classify',
-                modelKey: aiReview.modelKey,
-                model: aiReview.model,
-                resolvedModel: aiReview.resolvedModel,
-                promptVersion: aiReview.promptVersion,
-                routingVersion: aiReview.routingVersion,
-                fallbackUsed: aiReview.fallbackUsed,
-                inputTokens: aiReview.inputTokens,
-                outputTokens: aiReview.outputTokens,
-                cost: aiReview.cost.toFixed(4),
-                durationMs: aiReview.durationMs,
                 domainId: job.domainId,
+                stage: 'classify',
+                prompt: aiReview.promptBody,
+                usage: aiReview,
             });
         } catch (error) {
             aiReviewFallbackError = error instanceof Error ? error.message : 'AI reviewer unavailable';
@@ -1048,6 +1057,7 @@ export async function processResearchJob(jobId: string): Promise<void> {
         recentDevelopments: [],
     };
 
+    const researchPrompt = PROMPTS.research(payload.targetKeyword, payload.domainName);
     const response = await generateResearchWithCache<{
         statistics: Array<{ stat: string; source: string; date: string }>;
         quotes: Array<{ quote: string; author: string; source: string }>;
@@ -1055,26 +1065,18 @@ export async function processResearchJob(jobId: string): Promise<void> {
         recentDevelopments: string[];
     }>({
         queryText: `${payload.targetKeyword} @ ${payload.domainName}`,
-        prompt: PROMPTS.research(payload.targetKeyword, payload.domainName),
+        prompt: researchPrompt,
         domainPriority: typeof payload.domainPriority === 'number' ? payload.domainPriority : 0,
         emptyResult: emptyResearch,
         queueRefreshOnMiss: true,
     });
 
-    await db.insert(apiCallLogs).values({
+    await logApiCallWithPrompt({
         articleId: job.articleId,
-        stage: 'research',
-        modelKey: response.modelKey,
-        model: response.model,
-        resolvedModel: response.resolvedModel,
-        promptVersion: response.promptVersion,
-        routingVersion: response.routingVersion,
-        fallbackUsed: response.fallbackUsed,
-        inputTokens: response.inputTokens,
-        outputTokens: response.outputTokens,
-        cost: response.cost.toFixed(4),
-        durationMs: response.durationMs,
         domainId: job.domainId,
+        stage: 'research',
+        prompt: researchPrompt,
+        usage: response,
     });
 
     await db.update(articles).set({
@@ -1190,6 +1192,14 @@ export async function processKeywordResearchJob(jobId: string): Promise<void> {
         stage: 'keyword_research',
     });
 
+    const keywordResearchPrompt = KEYWORD_RESEARCH_PROMPT(
+        payload.domain,
+        payload.niche,
+        payload.subNiche,
+        payload.targetCount,
+        intentCoverageGuidance,
+        differentiationInstructions,
+    );
     const response = await ai.generateJSON<{
         keywords: Array<{
             keyword: string;
@@ -1200,30 +1210,14 @@ export async function processKeywordResearchJob(jobId: string): Promise<void> {
         }>;
     }>(
         'keywordResearch',
-        KEYWORD_RESEARCH_PROMPT(
-            payload.domain,
-            payload.niche,
-            payload.subNiche,
-            payload.targetCount,
-            intentCoverageGuidance,
-            differentiationInstructions,
-        ),
+        keywordResearchPrompt,
     );
 
-    // Track costs
-    await db.insert(apiCallLogs).values({
-        stage: 'keyword_research',
-        modelKey: response.modelKey,
-        model: response.model,
-        resolvedModel: response.resolvedModel,
-        promptVersion: response.promptVersion,
-        routingVersion: response.routingVersion,
-        fallbackUsed: response.fallbackUsed,
-        inputTokens: response.inputTokens,
-        outputTokens: response.outputTokens,
-        cost: response.cost.toFixed(4),
-        durationMs: response.durationMs,
+    await logApiCallWithPrompt({
         domainId: job.domainId,
+        stage: 'keyword_research',
+        prompt: keywordResearchPrompt,
+        usage: response,
     });
 
     for (const kw of response.data.keywords) {

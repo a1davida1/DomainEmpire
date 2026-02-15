@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { getRequestUser, requireAuth } from '@/lib/auth';
 import { db, mediaAssets } from '@/lib/db';
@@ -184,7 +184,10 @@ export async function POST(request: NextRequest) {
             const result = await db.transaction(async (tx) => {
                 const [inserted] = await tx.insert(mediaAssets)
                     .values(insertValues)
-                    .onConflictDoNothing({ target: mediaAssets.url })
+                    .onConflictDoNothing({
+                        target: mediaAssets.url,
+                        where: sql`${mediaAssets.deletedAt} IS NULL`,
+                    })
                     .returning();
 
                 if (inserted) {
@@ -194,7 +197,7 @@ export async function POST(request: NextRequest) {
                 // URL unique constraint is global (not per-user), so lookup must match
                 const [existing] = await tx.select()
                     .from(mediaAssets)
-                    .where(eq(mediaAssets.url, storageResult.url))
+                    .where(and(eq(mediaAssets.url, storageResult.url), isNull(mediaAssets.deletedAt)))
                     .limit(1);
 
                 if (!existing) {

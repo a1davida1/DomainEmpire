@@ -6,9 +6,13 @@
  */
 
 import { db } from '@/lib/db';
-import { domains } from '@/lib/db/schema';
+import { domainRegistrarProfiles, domains } from '@/lib/db/schema';
 import { eq, and, lte, isNotNull } from 'drizzle-orm';
 import { createNotification } from '@/lib/notifications';
+import {
+    computeRegistrarExpirationRisk,
+    isRegistrarTransferStatus,
+} from '@/lib/domain/registrar-operations';
 
 interface DomainExpiry {
     domain: string;
@@ -120,7 +124,7 @@ export async function getExpiringDomains(withinDays = 30): Promise<DomainExpiry[
             domainId: d.id,
             renewalDate: d.renewalDate!,
             daysUntilExpiry: Math.ceil((d.renewalDate!.getTime() - now) / (24 * 60 * 60 * 1000)),
-            renewalPrice: d.renewalPrice,
+            renewalPrice: d.renewalPrice ? Number(d.renewalPrice) : null,
         }))
         .sort((a, b) => a.daysUntilExpiry - b.daysUntilExpiry);
 }
@@ -130,8 +134,55 @@ export async function getExpiringDomains(withinDays = 30): Promise<DomainExpiry[
  */
 export async function checkRenewals(): Promise<void> {
     const expiring = await getExpiringDomains(30);
+    const now = new Date();
 
     for (const d of expiring) {
+        const [profile] = await db.select({
+            id: domainRegistrarProfiles.id,
+            autoRenewEnabled: domainRegistrarProfiles.autoRenewEnabled,
+            transferStatus: domainRegistrarProfiles.transferStatus,
+            expirationRisk: domainRegistrarProfiles.expirationRisk,
+            expirationRiskScore: domainRegistrarProfiles.expirationRiskScore,
+            metadata: domainRegistrarProfiles.metadata,
+        })
+            .from(domainRegistrarProfiles)
+            .where(eq(domainRegistrarProfiles.domainId, d.domainId))
+            .limit(1);
+
+        const transferStatus = isRegistrarTransferStatus(profile?.transferStatus)
+            ? profile.transferStatus
+            : 'none';
+        const risk = computeRegistrarExpirationRisk({
+            renewalDate: d.renewalDate,
+            autoRenewEnabled: profile?.autoRenewEnabled !== false,
+            transferStatus,
+            now,
+        });
+
+        await db.insert(domainRegistrarProfiles).values({
+            domainId: d.domainId,
+            autoRenewEnabled: profile?.autoRenewEnabled !== false,
+            transferStatus,
+            expirationRisk: risk.risk,
+            expirationRiskScore: risk.riskScore,
+            expirationRiskUpdatedAt: now,
+            lastSyncedAt: now,
+            metadata: profile?.metadata ?? {},
+            createdAt: now,
+            updatedAt: now,
+        }).onConflictDoUpdate({
+            target: domainRegistrarProfiles.domainId,
+            set: {
+                autoRenewEnabled: profile?.autoRenewEnabled !== false,
+                transferStatus,
+                expirationRisk: risk.risk,
+                expirationRiskScore: risk.riskScore,
+                expirationRiskUpdatedAt: now,
+                lastSyncedAt: now,
+                updatedAt: now,
+            },
+        });
+
         const priceNote = d.renewalPrice ? ` Renewal: $${d.renewalPrice}` : '';
         const dateStr = d.renewalDate.toISOString().split('T')[0];
 
@@ -157,6 +208,21 @@ export async function checkRenewals(): Promise<void> {
                 title: `${d.domain} expires in ${d.daysUntilExpiry} days`,
                 message: `Domain expires on ${dateStr}.${priceNote}`,
                 domainId: d.domainId, actionUrl: `/dashboard/domains/${d.domainId}`,
+            });
+        }
+
+        const riskEscalated = risk.risk === 'high' || risk.risk === 'critical' || risk.risk === 'expired';
+        if (
+            riskEscalated
+            && (profile?.expirationRisk !== risk.risk || Number(profile?.expirationRiskScore ?? 0) !== risk.riskScore)
+        ) {
+            await createNotification({
+                type: 'renewal_warning',
+                severity: risk.risk === 'high' ? 'warning' : 'critical',
+                title: `${d.domain} renewal risk escalated (${risk.risk})`,
+                message: `${risk.recommendation} Renewal date: ${dateStr}.${priceNote}`,
+                domainId: d.domainId,
+                actionUrl: `/dashboard/domains/${d.domainId}`,
             });
         }
     }

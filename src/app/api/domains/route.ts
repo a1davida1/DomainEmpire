@@ -4,6 +4,7 @@ import { requireAuth } from '@/lib/auth';
 import { eq, ilike, and, sql, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { checkIdempotencyKey, storeIdempotencyResult } from '@/lib/api/idempotency';
+import { DOMAIN_LIFECYCLE_STATES } from '@/lib/domain/lifecycle';
 
 const SITE_TEMPLATE_VALUES = [
     'authority', 'comparison', 'calculator', 'review', 'tool', 'hub',
@@ -54,6 +55,7 @@ const createDomainSchema = z.object({
     renewalDate: z.string().optional().transform((val) => val ? new Date(val) : undefined),
     renewalPrice: z.number().optional(),
     status: z.enum(['parked', 'active', 'redirect', 'forsale', 'defensive']).optional().default('parked'),
+    lifecycleState: z.enum(DOMAIN_LIFECYCLE_STATES).optional().default('sourced'),
     bucket: z.enum(['build', 'redirect', 'park', 'defensive']).optional().default('build'), // Strategy
     tier: z.number().min(1).max(3).optional().default(3),
     niche: z.string().optional(),
@@ -81,6 +83,7 @@ export async function GET(request: NextRequest) {
         const niche = searchParams.get('niche');
         const tier = searchParams.get('tier');
         const vertical = searchParams.get('vertical');
+        const lifecycleState = searchParams.get('lifecycleState');
         const search = searchParams.get('search');
         const rawLimit = Number.parseInt(searchParams.get('limit') || '50', 10);
         const rawOffset = Number.parseInt(searchParams.get('offset') || '0', 10);
@@ -100,6 +103,9 @@ export async function GET(request: NextRequest) {
             if (validStatuses.includes(status)) {
                 conditions.push(eq(domains.status, status as typeof domains.status.enumValues[number]));
             }
+        }
+        if (lifecycleState && DOMAIN_LIFECYCLE_STATES.includes(lifecycleState as typeof DOMAIN_LIFECYCLE_STATES[number])) {
+            conditions.push(eq(domains.lifecycleState, lifecycleState as typeof domains.lifecycleState.enumValues[number]));
         }
         if (niche) {
             conditions.push(eq(domains.niche, niche));
@@ -214,6 +220,7 @@ export async function POST(request: NextRequest) {
             renewalDate: data.renewalDate,
             renewalPrice: data.renewalPrice?.toString(),
             status: data.status,
+            lifecycleState: data.lifecycleState,
             bucket: data.bucket,
             tier: data.tier,
             niche: data.niche,

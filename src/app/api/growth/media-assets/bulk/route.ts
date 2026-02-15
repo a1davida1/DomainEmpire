@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { getRequestUser, requireAuth } from '@/lib/auth';
 import { db, mediaAssets } from '@/lib/db';
 import { isFeatureEnabled } from '@/lib/feature-flags';
+import { computeGrowthMediaPurgeAfter } from '@/lib/growth/media-retention';
 
 const operationEnum = z.enum(['move_folder', 'set_moderation', 'add_tags', 'remove_tags', 'delete']);
 const moderationStatusEnum = z.enum(['pending', 'approved', 'rejected', 'needs_changes']);
@@ -91,6 +92,7 @@ export async function POST(request: NextRequest) {
             .where(and(
                 eq(mediaAssets.userId, user.id),
                 inArray(mediaAssets.id, assetIds),
+                isNull(mediaAssets.deletedAt),
             ));
 
         if (rows.length === 0) {
@@ -103,10 +105,17 @@ export async function POST(request: NextRequest) {
 
         await db.transaction(async (tx) => {
             if (payload.operation === 'delete') {
-                const deletedRows = await tx.delete(mediaAssets)
+                const deletedAt = new Date();
+                const purgeAfterAt = computeGrowthMediaPurgeAfter(deletedAt);
+                const deletedRows = await tx.update(mediaAssets)
+                    .set({
+                        deletedAt,
+                        purgeAfterAt,
+                    })
                     .where(and(
                         eq(mediaAssets.userId, user.id),
                         inArray(mediaAssets.id, matchedIds),
+                        isNull(mediaAssets.deletedAt),
                     ))
                     .returning({ id: mediaAssets.id });
                 affectedCount = deletedRows.length;
@@ -119,6 +128,7 @@ export async function POST(request: NextRequest) {
                     .where(and(
                         eq(mediaAssets.userId, user.id),
                         inArray(mediaAssets.id, matchedIds),
+                        isNull(mediaAssets.deletedAt),
                     ))
                     .returning({ id: mediaAssets.id });
                 affectedCount = updatedRows.length;
@@ -181,6 +191,7 @@ export async function POST(request: NextRequest) {
                     .where(and(
                         eq(mediaAssets.id, row.id),
                         eq(mediaAssets.userId, user.id),
+                        isNull(mediaAssets.deletedAt),
                     ));
                 affectedCount += 1;
             }

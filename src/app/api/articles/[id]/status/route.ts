@@ -4,6 +4,7 @@ import { articles, reviewEvents } from '@/lib/db/schema';
 import { requireAuth, getRequestUser } from '@/lib/auth';
 import { canTransition, getApprovalPolicy } from '@/lib/review/workflow';
 import type { YmylLevel } from '@/lib/review/ymyl';
+import { parseStructuredRationale } from '@/lib/review/rationale-policy';
 import { eq } from 'drizzle-orm';
 
 // Valid status transitions
@@ -76,7 +77,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
 
     try {
         const body = await request.json();
-        const { status: newStatus, rationale } = body;
+        const { status: newStatus, rationale, rationaleDetails } = body;
 
         if (!newStatus) {
             return NextResponse.json({ error: 'Status is required' }, { status: 400 });
@@ -101,6 +102,24 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
                     allowed: allowedTransitions,
                 },
                 { status: 400 }
+            );
+        }
+
+        const rationaleValidation = parseStructuredRationale({
+            contentType: article.contentType,
+            rationale: typeof rationale === 'string' ? rationale : null,
+            rationaleDetails,
+            fromStatus: currentStatus,
+            toStatus: newStatus,
+        });
+
+        if (!rationaleValidation.ok) {
+            return NextResponse.json(
+                {
+                    error: rationaleValidation.error,
+                    details: rationaleValidation.details || null,
+                },
+                { status: 400 },
             );
         }
 
@@ -161,7 +180,16 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
                 actorRole: user.role,
                 eventType: eventType,
                 rationale: rationale || null,
-                metadata: { previousStatus: currentStatus, newStatus },
+                metadata: {
+                    previousStatus: currentStatus,
+                    newStatus,
+                    rationaleSchemaVersion: Object.keys(rationaleValidation.parsed || {}).length > 0
+                        ? 'review_rationale_v1'
+                        : null,
+                    rationaleDetails: Object.keys(rationaleValidation.parsed || {}).length > 0
+                        ? rationaleValidation.parsed
+                        : null,
+                },
             });
 
             // If approving, attempt auto-publish within the same transaction if possible
@@ -176,6 +204,9 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
             newStatus: autoPublished ? 'published' : newStatus,
             autoPublished,
             rationale: rationale || null,
+            rationaleDetails: Object.keys(rationaleValidation.parsed || {}).length > 0
+                ? rationaleValidation.parsed
+                : null,
         });
     } catch (error) {
         console.error('Failed to transition article status:', error);

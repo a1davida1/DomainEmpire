@@ -28,6 +28,7 @@ import { generateResearchWithCache } from '@/lib/ai/research-cache';
 import { db, domains, domainResearch, apiCallLogs, revenueSnapshots } from '@/lib/db';
 import { eq, and, gte, sql } from 'drizzle-orm';
 import { checkDomainAvailability } from '@/lib/deploy/godaddy';
+import { createHash } from 'node:crypto';
 
 // ─── Result Types ───────────────────────────────────────────
 
@@ -318,12 +319,15 @@ export async function evaluateDomain(
         reasoning: '',
     };
 
+    const keywordPrompt = keywordSerpPrompt(domain, detectedNiche);
+    const marketPrompt = marketAnalysisPrompt(domain, detectedNiche);
+
     // Parallel: keyword/SERP + market
     const [keywordOutcome, marketOutcome] = await Promise.all([
         safeAICall(async () => {
             const response = await generateResearchWithCache<KeywordSerpResponse>({
                 queryText: `keyword-serp:${domain}:${detectedNiche}`,
-                prompt: keywordSerpPrompt(domain, detectedNiche),
+                prompt: keywordPrompt,
                 domainPriority: 3,
                 emptyResult: emptyKeywordResearch,
                 queueRefreshOnMiss: true,
@@ -336,7 +340,7 @@ export async function evaluateDomain(
         safeAICall(async () => {
             const response = await generateResearchWithCache<MarketAnalysisResponse>({
                 queryText: `market-analysis:${domain}:${detectedNiche}`,
-                prompt: marketAnalysisPrompt(domain, detectedNiche),
+                prompt: marketPrompt,
                 domainPriority: 3,
                 emptyResult: emptyMarketResearch,
                 queueRefreshOnMiss: true,
@@ -351,7 +355,7 @@ export async function evaluateDomain(
     if (keywordOutcome.success) {
         keywordData = keywordOutcome.result.data;
         totalApiCost += keywordOutcome.result.cost;
-        await logApiCall('evaluate', keywordOutcome.result);
+        await logApiCall('evaluate', keywordOutcome.result, keywordPrompt);
     } else {
         console.warn(`Keyword AI failed for ${domain}, using heuristics:`, keywordOutcome.error);
         hadAiFallback = true;
@@ -360,7 +364,7 @@ export async function evaluateDomain(
     if (marketOutcome.success) {
         marketData = marketOutcome.result.data;
         totalApiCost += marketOutcome.result.cost;
-        await logApiCall('evaluate', marketOutcome.result);
+        await logApiCall('evaluate', marketOutcome.result, marketPrompt);
     } else {
         console.warn(`Market AI failed for ${domain}, using heuristics:`, marketOutcome.error);
         hadAiFallback = true;
@@ -370,32 +374,33 @@ export async function evaluateDomain(
     let thesisData: InvestmentThesisResponse | null = null;
 
     if (keywordData && marketData) {
+        const thesisPrompt = investmentThesisPrompt(
+            domain,
+            detectedNiche,
+            brandSignal.score,
+            {
+                volume: keywordData.primaryKeyword.monthlyVolume,
+                difficulty: keywordData.primaryKeyword.difficulty,
+                cpc: keywordData.primaryKeyword.cpc,
+            },
+            {
+                trend: marketData.market.trend,
+                ymyl: marketData.risks.ymylSeverity,
+                rpm: marketData.monetization.estimatedRpm,
+            },
+            acquisitionCost,
+        );
         const thesisOutcome = await safeAICall(() =>
             ai.generateJSON<InvestmentThesisResponse>(
                 'keywordResearch', // Uses Grok fast
-                investmentThesisPrompt(
-                    domain,
-                    detectedNiche,
-                    brandSignal.score,
-                    {
-                        volume: keywordData!.primaryKeyword.monthlyVolume,
-                        difficulty: keywordData!.primaryKeyword.difficulty,
-                        cpc: keywordData!.primaryKeyword.cpc,
-                    },
-                    {
-                        trend: marketData!.market.trend,
-                        ymyl: marketData!.risks.ymylSeverity,
-                        rpm: marketData!.monetization.estimatedRpm,
-                    },
-                    acquisitionCost
-                )
+                thesisPrompt
             )
         );
 
         if (thesisOutcome.success) {
             thesisData = thesisOutcome.result.data;
             totalApiCost += thesisOutcome.result.cost;
-            await logApiCall('evaluate', thesisOutcome.result);
+            await logApiCall('evaluate', thesisOutcome.result, thesisPrompt);
         } else {
             console.warn(`Thesis AI failed for ${domain}, using heuristics:`, thesisOutcome.error);
             hadAiFallback = true;
@@ -506,7 +511,10 @@ async function logApiCall(
         cost: number;
         durationMs: number;
     },
+    prompt: string,
 ): Promise<void> {
+    const promptBody = prompt.replaceAll('\r\n', '\n');
+    const promptHash = createHash('sha256').update(promptBody).digest('hex');
     await db.insert(apiCallLogs).values({
         stage: stage as 'evaluate',
         modelKey: result.modelKey || 'legacy',
@@ -514,6 +522,8 @@ async function logApiCall(
         resolvedModel: result.resolvedModel || result.model,
         promptVersion: result.promptVersion || 'legacy.v1',
         routingVersion: result.routingVersion || 'legacy',
+        promptHash,
+        promptBody,
         fallbackUsed: result.fallbackUsed === true,
         inputTokens: result.inputTokens,
         outputTokens: result.outputTokens,

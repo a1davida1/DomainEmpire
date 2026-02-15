@@ -39,6 +39,7 @@ vi.mock('drizzle-orm', () => ({
     count: vi.fn(() => ({ type: 'count' })),
     desc: vi.fn((arg: unknown) => ({ type: 'desc', arg })),
     eq: vi.fn((...args: unknown[]) => ({ type: 'eq', args })),
+    isNull: vi.fn((...args: unknown[]) => ({ type: 'isNull', args })),
     sql: sqlMock,
 }));
 

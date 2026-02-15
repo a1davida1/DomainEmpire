@@ -35,9 +35,16 @@ const mockMediaModerationTasksTable = {
 };
 
 let taskRows: Array<Record<string, unknown>> = [];
+let taskCountRows: Array<Record<string, unknown>> = [];
 let assetRows: Array<Record<string, unknown>> = [];
 let pendingTaskRows: Array<Record<string, unknown>> = [];
 let insertedTaskRows: Array<Record<string, unknown>> = [];
+
+const sqlMock = ((strings: TemplateStringsArray, ...values: unknown[]) => ({
+    type: 'sql',
+    strings: [...strings],
+    values,
+})) as unknown as ((strings: TemplateStringsArray, ...values: unknown[]) => unknown);
 
 vi.mock('@/lib/auth', () => ({
     requireAuth: mockRequireAuth,
@@ -54,9 +61,12 @@ vi.mock('@/lib/growth/media-review-audit', () => ({
 
 vi.mock('drizzle-orm', () => ({
     and: vi.fn((...args: unknown[]) => ({ type: 'and', args })),
+    count: vi.fn(() => ({ type: 'count' })),
     desc: vi.fn((arg: unknown) => ({ type: 'desc', arg })),
     eq: vi.fn((...args: unknown[]) => ({ type: 'eq', args })),
     inArray: vi.fn((...args: unknown[]) => ({ type: 'inArray', args })),
+    isNull: vi.fn((...args: unknown[]) => ({ type: 'isNull', args })),
+    sql: sqlMock,
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -96,6 +106,7 @@ describe('growth media-review/tasks route', () => {
         mockAppendMediaModerationEvent.mockResolvedValue({ id: 'event-1' });
 
         taskRows = [];
+        taskCountRows = [];
         assetRows = [];
         pendingTaskRows = [];
         insertedTaskRows = [];
@@ -103,19 +114,28 @@ describe('growth media-review/tasks route', () => {
         mockFrom.mockImplementation((table: unknown) => {
             if (table === mockMediaModerationTasksTable) {
                 return {
-                    where: () => ({
-                        orderBy: () => ({
+                    where: () => {
+                        const whereResult = [...taskCountRows] as Array<Record<string, unknown>> & {
+                            orderBy: () => { limit: () => Promise<Array<Record<string, unknown>>> };
+                            limit: () => Promise<Array<Record<string, unknown>>>;
+                        };
+                        whereResult.orderBy = () => ({
                             limit: async () => taskRows,
-                        }),
-                        limit: async () => taskRows,
-                    }),
+                        });
+                        whereResult.limit = async () => taskRows;
+                        return whereResult;
+                    },
                 };
             }
             if (table === mockMediaAssetsTable) {
                 return {
-                    where: () => ({
-                        limit: async () => assetRows,
-                    }),
+                    where: () => {
+                        const whereResult = [...assetRows] as Array<Record<string, unknown>> & {
+                            limit: () => Promise<Array<Record<string, unknown>>>;
+                        };
+                        whereResult.limit = async () => assetRows;
+                        return whereResult;
+                    },
                 };
             }
             return {
@@ -141,7 +161,9 @@ describe('growth media-review/tasks route', () => {
                 from: () => ({
                     where: () => ({
                         orderBy: () => ({
-                            limit: async () => pendingTaskRows,
+                            limit: () => ({
+                                for: async () => pendingTaskRows,
+                            }),
                         }),
                     }),
                 }),
@@ -152,6 +174,7 @@ describe('growth media-review/tasks route', () => {
 
     it('lists an empty moderation queue', async () => {
         taskRows = [];
+        taskCountRows = [{ total: 0 }];
         const response = await GET(makeGetRequest('http://localhost/api/growth/media-review/tasks?limit=10'));
         expect(response.status).toBe(200);
         const body = await response.json();

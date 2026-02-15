@@ -1,6 +1,18 @@
 import { and, eq } from 'drizzle-orm';
-import { db, domains, integrationConnections, integrationSyncRuns, revenueSnapshots } from '@/lib/db';
+import {
+    db,
+    domainOwnershipEvents,
+    domainRegistrarProfiles,
+    domains,
+    integrationConnections,
+    integrationSyncRuns,
+    revenueSnapshots,
+} from '@/lib/db';
 import { syncRenewalDates } from '@/lib/domain/renewals';
+import {
+    computeRegistrarExpirationRisk,
+    isRegistrarTransferStatus,
+} from '@/lib/domain/registrar-operations';
 import { getDomainAnalytics } from '@/lib/analytics/cloudflare';
 import { getDomainGSCSummary } from '@/lib/analytics/search-console';
 
@@ -37,9 +49,111 @@ function normalizeStartOfDay(value: Date): Date {
 }
 
 async function executeRegistrarRenewalSync(
-    connection: { provider: string; domainId: string | null },
+    connection: { id: string; provider: string; domainId: string | null },
 ): Promise<SyncResult> {
     const updated = await syncRenewalDates(connection.domainId ?? undefined);
+    const now = new Date();
+    let riskSnapshot: Record<string, unknown> | null = null;
+
+    if (connection.domainId) {
+        const [domainRow] = await db.select({
+            id: domains.id,
+            renewalDate: domains.renewalDate,
+            profileId: domainRegistrarProfiles.id,
+            autoRenewEnabled: domainRegistrarProfiles.autoRenewEnabled,
+            transferStatus: domainRegistrarProfiles.transferStatus,
+            expirationRisk: domainRegistrarProfiles.expirationRisk,
+            expirationRiskScore: domainRegistrarProfiles.expirationRiskScore,
+            metadata: domainRegistrarProfiles.metadata,
+        })
+            .from(domains)
+            .leftJoin(domainRegistrarProfiles, eq(domainRegistrarProfiles.domainId, domains.id))
+            .where(eq(domains.id, connection.domainId))
+            .limit(1);
+
+        if (domainRow) {
+            const resolvedTransferStatus = isRegistrarTransferStatus(domainRow.transferStatus)
+                ? domainRow.transferStatus
+                : 'none';
+            const risk = computeRegistrarExpirationRisk({
+                renewalDate: domainRow.renewalDate,
+                autoRenewEnabled: domainRow.autoRenewEnabled !== false,
+                transferStatus: resolvedTransferStatus,
+                now,
+            });
+
+            const [profile] = await db.insert(domainRegistrarProfiles)
+                .values({
+                    domainId: connection.domainId,
+                    connectionId: connection.id,
+                    autoRenewEnabled: domainRow.autoRenewEnabled !== false,
+                    transferStatus: resolvedTransferStatus,
+                    expirationRisk: risk.risk,
+                    expirationRiskScore: risk.riskScore,
+                    expirationRiskUpdatedAt: now,
+                    lastSyncedAt: now,
+                    metadata: domainRow.metadata ?? {},
+                    createdAt: now,
+                    updatedAt: now,
+                })
+                .onConflictDoUpdate({
+                    target: domainRegistrarProfiles.domainId,
+                    set: {
+                        connectionId: connection.id,
+                        expirationRisk: risk.risk,
+                        expirationRiskScore: risk.riskScore,
+                        expirationRiskUpdatedAt: now,
+                        lastSyncedAt: now,
+                        updatedAt: now,
+                    },
+                })
+                .returning({
+                    id: domainRegistrarProfiles.id,
+                    expirationRisk: domainRegistrarProfiles.expirationRisk,
+                    expirationRiskScore: domainRegistrarProfiles.expirationRiskScore,
+                });
+
+            if (
+                profile
+                && (
+                    !domainRow.profileId
+                    || domainRow.expirationRisk !== risk.risk
+                    || Number(domainRow.expirationRiskScore ?? 0) !== risk.riskScore
+                )
+            ) {
+                await db.insert(domainOwnershipEvents).values({
+                    domainId: connection.domainId,
+                    profileId: profile.id,
+                    actorId: null,
+                    eventType: 'risk_recomputed',
+                    source: 'integration_sync',
+                    summary: `Renewal risk synced as ${risk.risk} (${risk.riskScore})`,
+                    previousState: {
+                        expirationRisk: domainRow.expirationRisk ?? 'unknown',
+                        expirationRiskScore: Number(domainRow.expirationRiskScore ?? 0),
+                    },
+                    nextState: {
+                        expirationRisk: risk.risk,
+                        expirationRiskScore: risk.riskScore,
+                        renewalWindow: risk.renewalWindow,
+                        daysUntilRenewal: risk.daysUntilRenewal,
+                    },
+                    metadata: {
+                        provider: connection.provider,
+                        recommendation: risk.recommendation,
+                    },
+                    createdAt: now,
+                });
+            }
+
+            riskSnapshot = {
+                risk: risk.risk,
+                riskScore: risk.riskScore,
+                renewalWindow: risk.renewalWindow,
+                daysUntilRenewal: risk.daysUntilRenewal,
+            };
+        }
+    }
 
     return {
         status: 'success',
@@ -50,6 +164,7 @@ async function executeRegistrarRenewalSync(
             provider: connection.provider,
             scope: connection.domainId ? 'domain' : 'portfolio',
             updatedDomains: updated,
+            ...(riskSnapshot ? { riskSnapshot } : {}),
         },
     };
 }
@@ -178,7 +293,7 @@ async function executeSearchConsoleSync(
 
 async function executeProviderSync(
     provider: string,
-    connection: { provider: string; domainId: string | null; domainName: string | null },
+    connection: { id: string; provider: string; domainId: string | null; domainName: string | null },
     days: number,
 ): Promise<SyncResult> {
     switch (provider) {

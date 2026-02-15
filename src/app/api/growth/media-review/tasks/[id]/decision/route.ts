@@ -284,8 +284,17 @@ export async function POST(
                     .where(and(
                         eq(mediaModerationTasks.id, id),
                         eq(mediaModerationTasks.userId, task.userId),
+                        eq(mediaModerationTasks.status, 'pending'),
                     ))
                     .returning();
+
+                if (!pendingTask) {
+                    return {
+                        task: null,
+                        asset: null,
+                        partialApproval: null,
+                    };
+                }
 
                 await appendMediaModerationEvent(tx, {
                     userId: task.userId,
@@ -322,8 +331,17 @@ export async function POST(
                 .where(and(
                     eq(mediaModerationTasks.id, id),
                     eq(mediaModerationTasks.userId, task.userId),
+                    eq(mediaModerationTasks.status, 'pending'),
                 ))
                 .returning();
+
+            if (!updatedTask) {
+                return {
+                    task: null,
+                    asset: null,
+                    partialApproval: null as null,
+                };
+            }
 
             let updatedAsset: typeof mediaAssets.$inferSelect | null = null;
             if (payload.status !== 'cancelled') {
@@ -384,6 +402,13 @@ export async function POST(
                 partialApproval: null as null,
             };
         });
+
+        if (!result.task) {
+            return NextResponse.json(
+                { error: 'Task decision changed by another process; retry' },
+                { status: 409 },
+            );
+        }
 
         return NextResponse.json({
             success: true,

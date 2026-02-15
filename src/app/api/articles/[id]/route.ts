@@ -35,6 +35,28 @@ const jsonbSchemas: Record<string, z.ZodType> = {
     geoData: geoDataSchema,
 };
 
+// GET /api/articles/[id] - Fetch single article
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+    const params = await props.params;
+    const authError = await requireAuth(request);
+    if (authError) return authError;
+
+    try {
+        const article = await db.query.articles.findFirst({
+            where: eq(articles.id, params.id),
+        });
+
+        if (!article) {
+            return NextResponse.json({ error: 'Article not found' }, { status: 404 });
+        }
+
+        return NextResponse.json(article);
+    } catch (error) {
+        console.error('Failed to fetch article:', error);
+        return NextResponse.json({ error: 'Internal Server Error', message: 'Failed to fetch article' }, { status: 500 });
+    }
+}
+
 /** Validate optional JSONB fields, returning a 400 response on failure or null on success. */
 function validateJsonbFields(
     body: Record<string, unknown>,

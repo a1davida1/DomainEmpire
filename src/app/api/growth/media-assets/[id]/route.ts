@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { getRequestUser, requireAuth } from '@/lib/auth';
 import { db, mediaAssets } from '@/lib/db';
 import { isFeatureEnabled } from '@/lib/feature-flags';
+import { computeGrowthMediaPurgeAfter } from '@/lib/growth/media-retention';
 
 const moderationStatusEnum = z.enum(['pending', 'approved', 'rejected', 'needs_changes']);
 const provenanceSourceEnum = z.enum(['manual_upload', 'external_url', 'ai_generated', 'worker', 'imported', 'migrated']);
@@ -89,7 +90,7 @@ export async function PATCH(
             id: mediaAssets.id,
             metadata: mediaAssets.metadata,
         }).from(mediaAssets)
-            .where(and(eq(mediaAssets.id, id), eq(mediaAssets.userId, user.id)))
+            .where(and(eq(mediaAssets.id, id), eq(mediaAssets.userId, user.id), isNull(mediaAssets.deletedAt)))
             .limit(1);
 
         if (!currentAsset) {
@@ -123,7 +124,7 @@ export async function PATCH(
             ...(typeof payload.folder === 'string' ? { folder: payload.folder } : {}),
             ...(Array.isArray(payload.tags) ? { tags: payload.tags } : {}),
             metadata: nextMetadata,
-        }).where(and(eq(mediaAssets.id, id), eq(mediaAssets.userId, user.id))).returning();
+        }).where(and(eq(mediaAssets.id, id), eq(mediaAssets.userId, user.id), isNull(mediaAssets.deletedAt))).returning();
 
         if (!asset) return NextResponse.json({ error: 'Media asset not found' }, { status: 404 });
 
@@ -151,15 +152,51 @@ export async function DELETE(
     }
 
     try {
-        const [asset] = await db.delete(mediaAssets)
-            .where(and(eq(mediaAssets.id, id), eq(mediaAssets.userId, user.id)))
-            .returning({ id: mediaAssets.id });
+        const [existingAsset] = await db.select({
+            id: mediaAssets.id,
+            metadata: mediaAssets.metadata,
+        })
+            .from(mediaAssets)
+            .where(and(eq(mediaAssets.id, id), eq(mediaAssets.userId, user.id), isNull(mediaAssets.deletedAt)))
+            .limit(1);
+
+        if (!existingAsset) {
+            return NextResponse.json({ error: 'Media asset not found' }, { status: 404 });
+        }
+
+        const deletedAt = new Date();
+        const purgeAfterAt = computeGrowthMediaPurgeAfter(deletedAt);
+        const nextMetadata = {
+            ...asMetadata(existingAsset.metadata),
+            deletedBy: user.id,
+            deletedAt: deletedAt.toISOString(),
+            storagePurgeScheduledFor: purgeAfterAt.toISOString(),
+            storagePurgeStatus: 'scheduled',
+        };
+
+        const [asset] = await db.update(mediaAssets)
+            .set({
+                metadata: nextMetadata,
+                deletedAt,
+                purgeAfterAt,
+            })
+            .where(and(eq(mediaAssets.id, id), eq(mediaAssets.userId, user.id), isNull(mediaAssets.deletedAt)))
+            .returning({
+                id: mediaAssets.id,
+                deletedAt: mediaAssets.deletedAt,
+                purgeAfterAt: mediaAssets.purgeAfterAt,
+            });
 
         if (!asset) {
             return NextResponse.json({ error: 'Media asset not found' }, { status: 404 });
         }
 
-        return NextResponse.json({ success: true, id: asset.id });
+        return NextResponse.json({
+            success: true,
+            id: asset.id,
+            deletedAt: asset.deletedAt,
+            purgeAfterAt: asset.purgeAfterAt,
+        });
     } catch (error) {
         console.error('Failed to delete media asset:', error);
         return NextResponse.json(

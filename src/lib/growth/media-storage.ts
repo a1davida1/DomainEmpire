@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomUUID } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import { dirname, extname, join } from 'node:path';
 
 export type GrowthMediaStorageProvider = 'local' | 's3_compatible';
@@ -20,6 +20,11 @@ export interface StoreGrowthMediaResult {
     bytes: number;
     contentType: string;
     etag?: string | null;
+}
+
+export interface DeleteGrowthMediaInput {
+    key: string;
+    provider?: GrowthMediaStorageProvider;
 }
 
 interface S3Config {
@@ -127,6 +132,27 @@ async function storeLocal(input: StoreGrowthMediaInput): Promise<StoreGrowthMedi
         contentType: input.contentType,
         etag: createHash('md5').update(input.buffer).digest('hex'),
     };
+}
+
+function resolveLocalAbsolutePath(objectKey: string): string {
+    const normalizedKey = objectKey.trim().replace(/^\/+/, '');
+    if (normalizedKey.length === 0 || normalizedKey.includes('..')) {
+        throw new Error('Invalid media storage key for local provider');
+    }
+    const localRoot = process.env.GROWTH_MEDIA_LOCAL_DIR?.trim() || DEFAULT_LOCAL_ROOT;
+    return join(localRoot, ...normalizedKey.split('/'));
+}
+
+async function deleteLocal(objectKey: string): Promise<void> {
+    const absolutePath = resolveLocalAbsolutePath(objectKey);
+    try {
+        await unlink(absolutePath);
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+            return;
+        }
+        throw error;
+    }
 }
 
 function requireS3Config(): S3Config {
@@ -284,6 +310,102 @@ async function storeS3Compatible(input: StoreGrowthMediaInput): Promise<StoreGro
     };
 }
 
+async function deleteS3Compatible(objectKey: string): Promise<void> {
+    const config = requireS3Config();
+    const normalizedKey = objectKey.trim().replace(/^\/+/, '');
+    if (normalizedKey.length === 0 || normalizedKey.includes('..')) {
+        throw new Error('Invalid media storage key for S3-compatible provider');
+    }
+
+    const encodedKey = normalizedKey.split('/').map(encodeRfc3986).join('/');
+    const requestUrl = new URL(`${config.endpoint}/${encodeRfc3986(config.bucket)}/${encodedKey}`);
+    const payloadHash = sha256Hex('');
+    const now = new Date();
+    const amzDate = formatAmzDate(now);
+    const dateStamp = amzDate.slice(0, 8);
+    const credentialScope = `${dateStamp}/${config.region}/s3/aws4_request`;
+
+    const signedHeaderEntries: Array<[string, string]> = [
+        ['host', requestUrl.host],
+        ['x-amz-content-sha256', payloadHash],
+        ['x-amz-date', amzDate],
+    ];
+    if (config.sessionToken) {
+        signedHeaderEntries.push(['x-amz-security-token', config.sessionToken]);
+    }
+    const canonicalHeaders = `${signedHeaderEntries
+        .map(([name, value]) => `${name}:${value}\n`)
+        .join('')}`;
+    const signedHeaders = signedHeaderEntries.map(([name]) => name).join(';');
+    const canonicalRequest = [
+        'DELETE',
+        requestUrl.pathname,
+        '',
+        canonicalHeaders,
+        signedHeaders,
+        payloadHash,
+    ].join('\n');
+    const stringToSign = [
+        'AWS4-HMAC-SHA256',
+        amzDate,
+        credentialScope,
+        sha256Hex(canonicalRequest),
+    ].join('\n');
+    const signingKey = hmac(
+        hmac(
+            hmac(
+                hmac(`AWS4${config.secretAccessKey}`, dateStamp),
+                config.region,
+            ),
+            's3',
+        ),
+        'aws4_request',
+    );
+    const signature = createHmac('sha256', signingKey)
+        .update(stringToSign, 'utf8')
+        .digest('hex');
+    const authorization = [
+        `AWS4-HMAC-SHA256 Credential=${config.accessKeyId}/${credentialScope}`,
+        `SignedHeaders=${signedHeaders}`,
+        `Signature=${signature}`,
+    ].join(', ');
+
+    const requestHeaders: Record<string, string> = {
+        Authorization: authorization,
+        'X-Amz-Content-Sha256': payloadHash,
+        'X-Amz-Date': amzDate,
+        Host: requestUrl.host,
+    };
+    if (config.sessionToken) {
+        requestHeaders['X-Amz-Security-Token'] = config.sessionToken;
+    }
+
+    const timeoutMs = Number.isFinite(Number.parseInt(process.env.GROWTH_MEDIA_S3_UPLOAD_TIMEOUT_MS || '', 10))
+        ? Math.max(1000, Number.parseInt(process.env.GROWTH_MEDIA_S3_UPLOAD_TIMEOUT_MS || '', 10))
+        : 120_000;
+
+    let response: Response;
+    try {
+        response = await fetch(requestUrl, {
+            method: 'DELETE',
+            headers: requestHeaders,
+            signal: AbortSignal.timeout(timeoutMs),
+        });
+    } catch (err) {
+        if (err instanceof DOMException && err.name === 'TimeoutError') {
+            throw new Error(`S3-compatible delete timed out after ${timeoutMs}ms`);
+        }
+        throw err;
+    }
+
+    if (!response.ok && response.status !== 404) {
+        const body = await response.text().catch(() => '');
+        throw new Error(
+            `S3-compatible delete failed (${response.status} ${response.statusText}): ${truncate(body)}`,
+        );
+    }
+}
+
 export async function storeGrowthMedia(input: StoreGrowthMediaInput): Promise<StoreGrowthMediaResult> {
     if (!input.userId) {
         throw new Error('userId is required for media storage');
@@ -297,4 +419,18 @@ export async function storeGrowthMedia(input: StoreGrowthMediaInput): Promise<St
         return storeS3Compatible(input);
     }
     return storeLocal(input);
+}
+
+export async function deleteGrowthMedia(input: DeleteGrowthMediaInput): Promise<void> {
+    const key = input.key?.trim();
+    if (!key) {
+        throw new Error('key is required for media deletion');
+    }
+
+    const provider = input.provider ?? resolveProvider();
+    if (provider === 's3_compatible') {
+        await deleteS3Compatible(key);
+        return;
+    }
+    await deleteLocal(key);
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { getRequestUser, requireAuth } from '@/lib/auth';
 import { db, mediaAssets, mediaAssetUsage, promotionCampaigns, promotionJobs } from '@/lib/db';
@@ -47,7 +47,7 @@ export async function POST(
 
         const [asset] = await db.select({ id: mediaAssets.id, userId: mediaAssets.userId })
             .from(mediaAssets)
-            .where(eq(mediaAssets.id, id))
+            .where(and(eq(mediaAssets.id, id), isNull(mediaAssets.deletedAt)))
             .limit(1);
         if (!asset) {
             return NextResponse.json({ error: 'Media asset not found' }, { status: 404 });
@@ -91,7 +91,7 @@ export async function POST(
             const [updated] = await tx.update(mediaAssets).set({
                 usageCount: sql`COALESCE(${mediaAssets.usageCount}, 0) + 1`,
             })
-                .where(eq(mediaAssets.id, id))
+                .where(and(eq(mediaAssets.id, id), isNull(mediaAssets.deletedAt)))
                 .returning({ usageCount: mediaAssets.usageCount });
 
             if (!updated) {

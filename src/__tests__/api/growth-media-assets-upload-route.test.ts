@@ -20,6 +20,12 @@ const mockMediaAssetsTable = {
 let insertedRows: Array<Record<string, unknown>> = [];
 let existingRows: Array<Record<string, unknown>> = [];
 
+const sqlMock = ((strings: TemplateStringsArray, ...values: unknown[]) => ({
+    type: 'sql',
+    strings: [...strings],
+    values,
+})) as unknown as ((strings: TemplateStringsArray, ...values: unknown[]) => unknown);
+
 vi.mock('@/lib/auth', () => ({
     requireAuth: mockRequireAuth,
     getRequestUser: mockGetRequestUser,
@@ -36,6 +42,8 @@ vi.mock('@/lib/growth/media-storage', () => ({
 vi.mock('drizzle-orm', () => ({
     and: vi.fn((...args: unknown[]) => ({ type: 'and', args })),
     eq: vi.fn((...args: unknown[]) => ({ type: 'eq', args })),
+    isNull: vi.fn((...args: unknown[]) => ({ type: 'isNull', args })),
+    sql: sqlMock,
 }));
 
 vi.mock('@/lib/db', () => ({

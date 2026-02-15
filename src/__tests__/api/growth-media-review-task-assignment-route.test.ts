@@ -9,6 +9,8 @@ const mockEvaluateMediaReviewAssignmentPolicy = vi.fn();
 const mockCreateNotification = vi.fn();
 const mockSendOpsChannelAlert = vi.fn();
 const mockShouldForwardFairnessWarningsToOps = vi.fn();
+const mockCreateFairnessIncidentTickets = vi.fn();
+const mockRecordMediaReviewAssignmentPolicySnapshot = vi.fn();
 
 const mockSelect = vi.fn();
 const mockFrom = vi.fn();
@@ -33,6 +35,7 @@ const mockUsersTable = {
 };
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
+const OWNER_USER_ID = '55555555-5555-4555-8555-555555555555';
 const REVIEWER_ID = '22222222-2222-4222-8222-222222222222';
 const BACKUP_REVIEWER_ID = '33333333-3333-4333-8333-333333333333';
 const TEAM_LEAD_ID = '44444444-4444-4444-8444-444444444444';
@@ -67,9 +70,19 @@ vi.mock('@/lib/alerts/ops-channel', () => ({
     shouldForwardFairnessWarningsToOps: mockShouldForwardFairnessWarningsToOps,
 }));
 
+vi.mock('@/lib/alerts/fairness-incidents', () => ({
+    createFairnessIncidentTickets: mockCreateFairnessIncidentTickets,
+}));
+
+vi.mock('@/lib/growth/media-review-policy-snapshots', () => ({
+    recordMediaReviewAssignmentPolicySnapshot: mockRecordMediaReviewAssignmentPolicySnapshot,
+}));
+
 vi.mock('drizzle-orm', () => ({
     and: vi.fn((...args: unknown[]) => ({ type: 'and', args })),
     eq: vi.fn((...args: unknown[]) => ({ type: 'eq', args })),
+    or: vi.fn((...args: unknown[]) => ({ type: 'or', args })),
+    isNull: vi.fn((...args: unknown[]) => ({ type: 'isNull', args })),
     inArray: vi.fn((...args: unknown[]) => ({ type: 'inArray', args })),
 }));
 
@@ -104,6 +117,8 @@ describe('growth media-review/tasks/[id]/assignment route', () => {
         mockCreateNotification.mockResolvedValue('notification-1');
         mockSendOpsChannelAlert.mockResolvedValue({ delivered: true, reason: null, statusCode: 200 });
         mockShouldForwardFairnessWarningsToOps.mockReturnValue(true);
+        mockCreateFairnessIncidentTickets.mockResolvedValue([]);
+        mockRecordMediaReviewAssignmentPolicySnapshot.mockResolvedValue(undefined);
         mockEvaluateMediaReviewAssignmentPolicy.mockResolvedValue({
             violations: [],
             alerts: [],
@@ -417,5 +432,44 @@ describe('growth media-review/tasks/[id]/assignment route', () => {
             title: expect.stringContaining('override'),
             severity: 'critical',
         }));
+    });
+
+    it('uses task owner scope for fairness policy and audit events during admin reassignment', async () => {
+        mockGetRequestUser.mockReturnValue({ id: USER_ID, role: 'admin', name: 'Admin One' });
+        selectedTaskRows = [{
+            id: 'ffffffff-1111-4111-8111-111111111111',
+            userId: OWNER_USER_ID,
+            assetId: '99999999-9999-4999-8999-999999999999',
+            status: 'pending',
+            reviewerId: null,
+            backupReviewerId: null,
+            metadata: {},
+        }];
+        reviewerRows = [{ id: REVIEWER_ID, role: 'reviewer' }];
+        updatedTaskRows = [{
+            id: 'ffffffff-1111-4111-8111-111111111111',
+            userId: OWNER_USER_ID,
+            assetId: '99999999-9999-4999-8999-999999999999',
+            status: 'pending',
+            reviewerId: REVIEWER_ID,
+            backupReviewerId: null,
+            metadata: {},
+        }];
+
+        const response = await POST(
+            makeRequest({ reviewerId: REVIEWER_ID, reason: 'Cross-user moderation reassignment' }),
+            { params: Promise.resolve({ id: 'ffffffff-1111-4111-8111-111111111111' }) },
+        );
+
+        expect(response.status).toBe(200);
+        expect(mockEvaluateMediaReviewAssignmentPolicy).toHaveBeenCalledWith(expect.objectContaining({
+            userId: OWNER_USER_ID,
+        }));
+        expect(mockAppendMediaModerationEvent).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({
+                userId: OWNER_USER_ID,
+            }),
+        );
     });
 });

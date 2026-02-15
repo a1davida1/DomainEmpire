@@ -1,7 +1,8 @@
 import { db } from '@/lib/db';
-import { approvalPolicies, qaChecklistResults, reviewEvents } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { approvalPolicies, qaChecklistResults, reviewEvents, citations } from '@/lib/db/schema';
+import { eq, and, sql } from 'drizzle-orm';
 import type { YmylLevel } from './ymyl';
+import { getYmylCitationThreshold } from './policy-thresholds';
 
 const ROLE_HIERARCHY: Record<string, number> = {
     editor: 1,
@@ -114,6 +115,26 @@ export async function canTransition(opts: {
                 allowed: false,
                 reason: 'Expert sign-off required for high YMYL content',
             };
+        }
+    }
+
+    // Check citation minimums for YMYL content before publish.
+    if (opts.targetStatus === 'published') {
+        const citationThreshold = getYmylCitationThreshold(opts.ymylLevel);
+        if (citationThreshold > 0) {
+            const [citationStats] = await db.select({
+                count: sql<number>`count(*)::int`,
+            })
+                .from(citations)
+                .where(eq(citations.articleId, opts.articleId));
+
+            const citationCount = citationStats?.count || 0;
+            if (citationCount < citationThreshold) {
+                return {
+                    allowed: false,
+                    reason: `At least ${citationThreshold} citations are required for ${opts.ymylLevel.toUpperCase()} YMYL content before publication`,
+                };
+            }
         }
     }
 

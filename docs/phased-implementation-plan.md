@@ -50,7 +50,19 @@ Assumption: KDP manuscript authoring is external; app scope is ingesting/linking
    - encrypted credential vault implemented for growth channels (`growth_channel_credentials`, `GET/PUT/DELETE /api/growth/channel-credentials`)
    - credential refresh automation implemented: auto-refresh on publish for expiring tokens + manual refresh endpoint (`POST /api/growth/channel-credentials`) + warning alerts on refresh failure
    - reconnect drill path implemented (`POST /api/growth/channel-credentials/reconnect`) and credential rotation runbook added (`docs/ops/growth-credential-rotation-runbook.md`)
+   - credential drill evidence + checklist automation implemented (`growth_credential_drill_runs`, `GET/POST /api/growth/channel-credentials/drill`) with dry-run, checklist gating, per-channel reconnect/refresh validation, and persisted drill outcomes
+   - non-dry-run credential drills now require an explicit `incidentChecklistId` and persist structured incident checklist attachments (`results.incidentChecklistAttachment`) with per-step evidence IDs
+   - canonical domain lifecycle state machine baseline now implemented: `domains.lifecycle_state`, append-only lifecycle transition audit log (`domain_lifecycle_events`), and transition API (`GET/POST /api/domains/[id]/lifecycle`) with actor-role transition policy checks
+   - portfolio finance ledger baseline now implemented: canonical ledger entries (`domain_finance_ledger_entries`) and per-domain monthly close snapshots (`domain_finance_monthly_closes`) with APIs (`GET/POST /api/finance/ledger`, `GET/POST /api/finance/monthly-close`)
+   - monetization reconciliation baseline now implemented: finance reconciliation summary endpoint (`GET /api/finance/reconciliation`) comparing ledger revenue vs revenue snapshots with variance statusing and partner margin reporting
+   - growth dashboard credential tab now includes drill execution controls + recent drill evidence history (run IDs, statuses, checklist failures)
+   - AI prompt archival implemented for content pipeline and evaluator calls (`api_call_logs.prompt_hash`, `api_call_logs.prompt_body`) to preserve per-stage prompt evidence for audit/debug workflows
+   - deterministic tool QA now stores calculator unit-test pass evidence (`qa_checklist_results.unit_test_pass_id`, `calculation_config_hash`, `calculation_harness_version`) with API validation when `calc_tested` is checked
+   - review decision transitions now enforce structured rationale schemas by content format (`rationaleDetails` with format-specific fields for calculator/comparison/lead-capture/health/wizard/general)
+   - publish transition now enforces YMYL citation minimums before publication (default thresholds: medium >= 2 citations, high >= 3 citations; env-overridable)
    - policy preflight baseline implemented in publish path (HTTPS destination enforcement, banned-term blocking, hashtag guardrails, punctuation normalization including no em dashes)
+   - channel policy-pack layer implemented in publish preflight (`youtube_shorts_core`, `pinterest_core`) with pack metadata capture, copy-length thresholds, disclosure checks, and UTM recommendation warnings
+   - growth publish policy audit endpoint + dashboard surfacing implemented (`GET /api/growth/policy-audit`) with blocked/published outcomes, top block reasons, policy-pack distribution, and recent policy decision events
    - worker publish path now resolves per-user stored credentials (with env fallback) via `launchedBy` propagation across growth jobs
    - guardrails implemented in worker: daily caps, duplicate creative suppression, per-domain cooldown, campaign metrics sync
    - per-domain channel compatibility implemented (`domain_channel_profiles`, `/api/domains/[id]/channel-compatibility`, dashboard editor)
@@ -66,6 +78,7 @@ Assumption: KDP manuscript authoring is external; app scope is ingesting/linking
    - assignment fairness policy implemented (pending-cap + round-robin skew constraints, admin force override, reassignment concentration alerts, and policy snapshot persistence on assignment events/metadata)
    - moderation policy insights endpoint implemented (`GET /api/growth/media-review/insights`) and surfaced on the growth dashboard for reviewer load skew, override counts, concentration share, and daily alert/override trend visibility
    - moderation policy insights CSV export implemented (`GET /api/growth/media-review/insights?format=csv`) and exposed in growth dashboard controls
+   - long-horizon fairness trend persistence implemented (`media_review_policy_daily_snapshots`, `media_review_policy_alert_code_daily_snapshots`, `media_review_policy_playbook_daily_snapshots`) with assignment-time snapshot upserts and insights trend sourcing from persisted daily aggregates
    - fairness policy ops-channel bridge implemented via webhook (`GROWTH_FAIRNESS_OPS_WEBHOOK_URL` / `OPS_ALERT_WEBHOOK_URL`) for blocked assignments and override/warning escalation signals, with dedup/rate-limit guardrails (`OPS_ALERT_MIN_INTERVAL_SECONDS`)
    - incident-playbook bindings implemented for fairness signals (`FAIRNESS-001..004`) with runbook links (`docs/ops/fairness-alert-playbooks.md`) embedded in assignment notifications, webhook payloads, and policy metadata
    - domain workflow profile editor implemented (per-domain writing-phase template IDs, schedule profile, branding color/style metadata)
@@ -82,12 +95,10 @@ Assumption: KDP manuscript authoring is external; app scope is ingesting/linking
    - scheduler cadence diversification implemented by domain bucket (`build`/`redirect`/`park`/`defensive`) with deterministic phase shifts and weighted publish windows
    - domain differentiation guardrails injected into AI prompts (domain-specific perspective/narrative/structure guidance + intent-coverage balancing in keyword research + voice-seed uniqueness hardening)
    - disclosure defaults hardened to always include transparent About, Editorial Policy, and How-We-Make-Money trust pages unless explicitly overridden
+   - media storage lifecycle hardening implemented: media assets now soft-delete with configurable retention windows, worker-driven storage purge automation, purge retry backoff, and active-only URL uniqueness (`deleted_at` scoped)
 
 Open gaps for Phase 3 exit:
-1. Credential lifecycle completion: execute and validate rotation/reconnect drill in staging with incident checklist.
-2. Platform policy compliance tuning for live publishing (expand beyond baseline preflight with channel policy packs + audit dashboard).
-3. Assignment governance hardening: add long-horizon persisted trend storage (beyond event-window snapshots) and automated incident ticket creation from playbook-bound fairness signals.
-4. Storage hardening (lifecycle/retention/CDN policy automation).
+1. None currently open in this track (remaining work is rollout execution and staging evidence capture using implemented controls).
 
 ### Assignment Fairness Thresholds
 
@@ -163,10 +174,7 @@ The following list maps the requested content surface to current implementation 
 | Internal audit trail UI | Partially implemented (review tasks/events, revisions, compliance pages) | Immutable event export, diff timeline unification across acquisition/content/growth workflows |
 
 Cross-cutting gaps still open:
-1. Prompt hash and prompt body archival by stage for all AI-generated outputs.
-2. Unit-test pass ID storage for deterministic tool calculations.
-3. Reviewer rationale standards per format (enforced schema, not freeform only).
-4. Citation coverage threshold gates before publication for YMYL content.
+1. None currently open in this track (remaining work is operational hardening and rollout validation).
 
 ---
 
@@ -692,6 +700,83 @@ Integration families to support:
 1. `Wave A` (immediate): integration connection registry + sync audit trail, keyword-difficulty content prioritization.
 2. `Wave B`: affiliate/parking revenue attribution ingestion, domain lifecycle state transitions + ROI-based resurfacing.
 3. `Wave C`: competitive automation refresh loops, cross-domain strategy propagation, marketplace hardening.
+
+### Execution Status Board (2026-02-15)
+
+The following board tracks the requested scope as `done`, `partial`, or `not_started` against current implementation.
+
+#### Ideal-State Gaps Status
+
+| Capability | Status | Current Evidence | Next Action |
+|---|---|---|---|
+| Canonical domain lifecycle state machine | `in_progress` | `domains.lifecycle_state`, `domain_lifecycle_events`, `GET/POST /api/domains/[id]/lifecycle`, and dashboard lifecycle controls now enforce/operate transition policy baseline | Wire lifecycle transitions into acquisition/purchase/build/growth automation hooks |
+| Portfolio finance ledger + per-domain P&L | `partial` | Canonical ledger (`domain_finance_ledger_entries`) and monthly close snapshots (`domain_finance_monthly_closes`) plus APIs are in place | Add P&L dashboard rollups, lock/close governance, and reconciliation checks |
+| Registrar and ownership operations automation | `in_progress` | Added `domain_registrar_profiles`, `domain_ownership_events`, `GET/PATCH /api/domains/[id]/ownership`, `GET /api/domains/renewal-risk`, registrar sync risk snapshots, and domain dashboard ownership controls | Add provider-native transfer/lock/DNSSEC adapters and renewal ROI recommendation automation |
+| Platform integrity and anti-abuse controls | `in_progress` | Policy-block enforcement now includes destination-quality controls (private-network blocking, allowlist checks, shortener/redirect guardrails, destination risk scoring), destination-policy blocked-publish notifications, campaign-level suspicious-activity integrity alerts, integrity summary API, click fraud-risk scoring + suspicious click notifications, and targeted lifecycle/ownership rate limits | Broaden rate-limit coverage across additional growth mutation routes and tune fraud thresholds with production data |
+| Operational controls (SLOs, playbooks, rollback) | `in_progress` | Added operational runbooks (`campaign-slo-error-budget.md`, `media-review-playbook.md`, `growth-rollback-procedures.md`) plus `GET /api/growth/slo/summary` with error-budget burn calculations | Wire SLO budget-burn outputs into automatic launch-freeze and incident workflows |
+| Experimentation and incrementality framework | `partial` | `ab_tests` foundation exists | Add holdouts/lift/confidence and stop-scale gates |
+| Automated capital allocation optimizer | `not_started` | No auto allocator by CAC/LTV/payback bands | Implement budget optimizer with hard loss limits |
+| SEO and site health observability | `partial` | `search_quality` alerts, backlink snapshots, monitoring triggers exist | Add ranking volatility/crawl/runtime/conversion anomaly alerting |
+| Monetization reconciliation layer | `in_progress` | Added `GET /api/finance/reconciliation` for ledger-vs-snapshot variance checks and partner margin rollups | Add provider-native payout sync adapters and automated variance/margin anomaly alerts |
+| Data platform hardening | `not_started` | No warehouse contract/replay/versioning layer | Add contracts, replay/backfill, metric versioning checks |
+| Exit and portfolio disposition workflows | `not_started` | No sale workflow automation yet | Add valuation + broker + diligence packet pipeline |
+| Scale architecture hardening | `not_started` | No multi-account sharding/failover controls yet | Add provider sharding, regional failover, capacity controls |
+| Closed-loop model calibration | `not_started` | No realized-outcome retraining loop yet | Add 30/60/90-day policy calibration jobs |
+| Compliance automation at portfolio scale | `not_started` | Compliance baseline exists but no immutable evidence packs at scale | Add retention policy automation + audit export packs |
+
+#### Operator Requirements Status (Build Scope)
+
+| Requirement | Status | Current Evidence |
+|---|---|---|
+| Revenue tracking integrations (parking + affiliate) | `in_progress` | Added normalized ingestion endpoint `POST /api/integrations/revenue/ingest` plus reconciliation summary endpoint `GET /api/finance/reconciliation` for payout variance and partner margin checks | Add provider-native sync adapters and reconciliation anomaly alerts |
+| Domain metrics pipeline | `partial` | Revenue/traffic/CTR/avg position snapshots exist |
+| Renewal management automation | `in_progress` | Renewal sync + warning flows augmented with registrar profile risk scoring, renewal window queue API, ownership/transfer operational states, and on-page ownership operations controls |
+| Content pipeline operations | `done` | AI content pipeline + scheduling controls implemented |
+| A/B testing management | `partial` | `ab_tests` API/schema baseline exists |
+| Affiliate operations | `partial` | Affiliate profile management exists; full commission reconciliation pending |
+| SEO monitoring | `partial` | Search quality + backlink monitoring exists |
+| Competitive analysis | `partial` | Competitor and snapshot structures exist |
+| Domain lifecycle management | `in_progress` | Canonical states defined; transition enforcement being implemented |
+| Cross-domain optimization | `partial` | Strategy/profile primitives exist; automated propagation loops pending |
+| ROI-based prioritization | `in_progress` | Added automated ROI resurfacing endpoint `GET /api/domains/priorities/roi` combining ledger + traffic signals into prioritized action queues | Wire endpoint outputs into dashboard task queues and campaign auto-planning |
+| Integration marketplace | `done` | Connections, sync runs, provider catalog, operations UI implemented |
+
+#### Use Existing Tools Status
+
+| Integration Direction | Status | Notes |
+|---|---|---|
+| Hosting management (cPanel, Cloudflare) | `partial` | Cloudflare paths active; cPanel in connector scope |
+| Analytics via external providers | `partial` | External connectors exist; expanded ingest coverage pending |
+| Email marketing (Mailchimp/ConvertKit) | `partial` | Provider catalog/connection layer exists; deeper sync adapters pending |
+| Design assets (Figma) | `partial` | Figma connector scaffolding in marketplace; workflow depth pending |
+
+#### Execution Addendum Status
+
+| Wave | Status | Notes |
+|---|---|---|
+| Wave A | `done` | Connection registry/sync trail + keyword-opportunity prioritization delivered |
+| Wave B | `in_progress` | Lifecycle + registrar/ownership operations baselines delivered; ROI resurfacing + revenue ingestion + reconciliation summary APIs delivered; provider-native payout adapters still pending |
+| Wave C | `not_started` | Competitive refresh loops and propagation automation pending |
+
+### Logical Batch Plan (Execution Order)
+
+1. `Batch 1` (`done` baseline): Canonical domain lifecycle state machine
+   - Schema: lifecycle state + append-only transition events.
+   - API: transition endpoint with allowed transitions and actor permission enforcement.
+2. `Batch 2` (`done` baseline): Portfolio finance ledger + monthly close snapshots
+   - Schema/API for canonical ledger entries, close workflow, per-domain P&L rollups.
+3. `Batch 3` (`in_progress`): Registrar and ownership operations automation
+   - Ownership event log, transfer tracking, DNSSEC/lock status, risk alerts.
+4. `Batch 4` (`in_progress`): Platform integrity and anti-abuse
+   - Bot/fraud scoring, suspicious activity alerts, route-level rate limits, destination quality policy checks.
+5. `Batch 5` (`in_progress`): Operational controls completion
+   - Campaign SLOs/error budgets, reviewer playbooks, rollback procedures.
+6. `Batch 6` (`in_progress`): Wave B completion
+   - Parking + affiliate ingestion/reconciliation foundation, ROI resurfacing automation.
+7. `Batch 7`: Next-wave observability and experimentation
+   - Holdouts/lift gates, SEO/runtime anomaly monitoring, data contract checks.
+8. `Batch 8`: Scale/compliance/exit hardening
+   - Disposition workflows, failover/sharding controls, compliance evidence automation.
 
 ---
 

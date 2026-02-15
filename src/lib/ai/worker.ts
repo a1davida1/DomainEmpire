@@ -66,8 +66,14 @@ import { publishToGrowthChannel } from '@/lib/growth/publishers';
 import { refreshExpiringGrowthCredentialsAudit, resolveGrowthPublishCredential } from '@/lib/growth/channel-credentials';
 import { evaluateGrowthPublishPolicy } from '@/lib/growth/policy';
 import { runMediaReviewEscalationSweep } from '@/lib/growth/media-review-escalation';
+import { purgeDeletedGrowthMediaStorage } from '@/lib/growth/media-retention';
 import { runIntegrationConnectionSync } from '@/lib/integrations/executor';
 import { scheduleIntegrationConnectionSyncJobs } from '@/lib/integrations/scheduler';
+import { createNotification } from '@/lib/notifications';
+import {
+    evaluatePromotionIntegrityAlert,
+    summarizePromotionIntegrity,
+} from '@/lib/growth/integrity';
 
 const LOCK_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 const JOB_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes max per job
@@ -838,7 +844,7 @@ async function trackMediaUsage(opts: {
 
     await db.update(mediaAssets).set({
         usageCount: sql`${mediaAssets.usageCount} + 1`,
-    }).where(eq(mediaAssets.id, opts.assetId));
+    }).where(and(eq(mediaAssets.id, opts.assetId), isNull(mediaAssets.deletedAt)));
 }
 
 interface CampaignMetricsSnapshot {
@@ -902,6 +908,72 @@ interface PromotionContext {
     payload: Record<string, unknown>;
     campaign: typeof promotionCampaigns.$inferSelect;
     research: typeof domainResearch.$inferSelect;
+}
+
+function parseEnvInt(name: string, fallback: number, min: number, max: number): number {
+    const raw = Number.parseInt(process.env[name] || '', 10);
+    if (!Number.isFinite(raw)) return fallback;
+    return Math.max(min, Math.min(raw, max));
+}
+
+function parseEnvFloat(name: string, fallback: number, min: number, max: number): number {
+    const raw = Number.parseFloat(process.env[name] || '');
+    if (!Number.isFinite(raw)) return fallback;
+    return Math.max(min, Math.min(raw, max));
+}
+
+async function maybeTriggerCampaignIntegrityAlert(input: {
+    campaignId: string;
+    domain: string;
+    domainId: string | null;
+}): Promise<void> {
+    const windowHours = parseEnvInt('GROWTH_INTEGRITY_ALERT_WINDOW_HOURS', 24, 1, 24 * 14);
+    const blockedDestinationThreshold = parseEnvInt('GROWTH_INTEGRITY_BLOCKED_DESTINATION_THRESHOLD', 4, 1, 100);
+    const highRiskPublishedThreshold = parseEnvInt('GROWTH_INTEGRITY_HIGH_RISK_PUBLISHED_THRESHOLD', 3, 1, 100);
+    const hostConcentrationThreshold = parseEnvFloat('GROWTH_INTEGRITY_HOST_CONCENTRATION_THRESHOLD', 0.8, 0.5, 0.99);
+    const hostConcentrationMinSamples = parseEnvInt('GROWTH_INTEGRITY_HOST_CONCENTRATION_MIN_SAMPLES', 8, 3, 500);
+
+    const windowStart = new Date(Date.now() - windowHours * 60 * 60 * 1000);
+    const rows = await db.select({
+        eventType: promotionEvents.eventType,
+        occurredAt: promotionEvents.occurredAt,
+        attributes: promotionEvents.attributes,
+    })
+        .from(promotionEvents)
+        .where(and(
+            eq(promotionEvents.campaignId, input.campaignId),
+            gte(promotionEvents.occurredAt, windowStart),
+            inArray(promotionEvents.eventType, ['published', 'publish_blocked']),
+        ))
+        .orderBy(desc(promotionEvents.occurredAt))
+        .limit(3000);
+
+    const summary = summarizePromotionIntegrity(rows);
+    const alert = evaluatePromotionIntegrityAlert(summary, {
+        blockedDestinationThreshold,
+        highRiskPublishedThreshold,
+        hostConcentrationThreshold,
+        hostConcentrationMinSamples,
+    });
+
+    if (!alert.shouldAlert) {
+        return;
+    }
+
+    await createNotification({
+        type: 'info',
+        severity: alert.severity,
+        title: `Growth integrity alert for ${input.domain}`,
+        message: alert.reasons.join('; '),
+        domainId: input.domainId ?? undefined,
+        actionUrl: '/dashboard/growth',
+        metadata: {
+            campaignId: input.campaignId,
+            windowHours,
+            summary,
+            reasons: alert.reasons,
+        },
+    });
 }
 
 function resolveCampaignDailyCap(campaign: typeof promotionCampaigns.$inferSelect): number {
@@ -1045,7 +1117,7 @@ async function resolvePublishAssetId(
     const type = channel === 'youtube_shorts' ? 'video' : 'image';
     const rows = await db.select({ id: mediaAssets.id })
         .from(mediaAssets)
-        .where(eq(mediaAssets.type, type))
+        .where(and(eq(mediaAssets.type, type), isNull(mediaAssets.deletedAt)))
         .orderBy(asc(mediaAssets.usageCount), asc(mediaAssets.createdAt))
         .limit(1);
 
@@ -1151,7 +1223,7 @@ async function runPublishJob(
     if (assetId) {
         const [assetRow] = await db.select({ url: mediaAssets.url })
             .from(mediaAssets)
-            .where(eq(mediaAssets.id, assetId))
+            .where(and(eq(mediaAssets.id, assetId), isNull(mediaAssets.deletedAt)))
             .limit(1);
         assetUrl = assetRow?.url ?? null;
     }
@@ -1173,9 +1245,14 @@ async function runPublishJob(
             channel,
             creativeHash,
             destinationUrl,
+            destinationHost: policyCheck.destinationHost,
+            destinationRiskScore: policyCheck.destinationRiskScore,
             blockReasons: policyCheck.blockReasons,
             policyWarnings: policyCheck.warnings,
             policyChanges: policyCheck.changes,
+            policyPackId: policyCheck.policyPackId,
+            policyPackVersion: policyCheck.policyPackVersion,
+            policyChecksApplied: policyCheck.checksApplied,
             scheduledPublishFor,
         });
 
@@ -1189,6 +1266,41 @@ async function runPublishJob(
                 sourceStage: 'publish_blocked',
             },
         });
+
+        const destinationBlockReasons = policyCheck.blockReasons
+            .filter((reason) => reason.toLowerCase().includes('destination'));
+        if (destinationBlockReasons.length > 0) {
+            try {
+                await createNotification({
+                    type: 'info',
+                    severity: 'warning',
+                    title: 'Growth publish blocked by destination quality policy',
+                    message: `${context.research.domain}: ${destinationBlockReasons.join('; ')}`,
+                    domainId: context.research.domainId ?? undefined,
+                    actionUrl: '/dashboard/growth',
+                    metadata: {
+                        campaignId: context.campaign.id,
+                        channel,
+                        destinationUrl,
+                        destinationHost: policyCheck.destinationHost,
+                        destinationRiskScore: policyCheck.destinationRiskScore,
+                        blockReasons: destinationBlockReasons,
+                    },
+                });
+            } catch (notificationError) {
+                console.error('Failed to create destination quality policy notification:', notificationError);
+            }
+        }
+
+        try {
+            await maybeTriggerCampaignIntegrityAlert({
+                campaignId: context.campaign.id,
+                domain: context.research.domain,
+                domainId: context.research.domainId ?? null,
+            });
+        } catch (integrityAlertError) {
+            console.error('Failed to evaluate campaign integrity alerts after publish block:', integrityAlertError);
+        }
 
         return `Blocked publish: ${policyCheck.blockReasons.join('; ')}`;
     }
@@ -1214,12 +1326,17 @@ async function runPublishJob(
         assetId,
         assetUrl,
         destinationUrl,
+        destinationHost: policyCheck.destinationHost,
+        destinationRiskScore: policyCheck.destinationRiskScore,
         copy: policyCheck.normalizedCopy,
         externalPostId: publishResult.externalPostId,
         publishStatus: publishResult.status,
         publishMetadata: publishResult.metadata,
         policyWarnings: policyCheck.warnings,
         policyChanges: policyCheck.changes,
+        policyPackId: policyCheck.policyPackId,
+        policyPackVersion: policyCheck.policyPackVersion,
+        policyChecksApplied: policyCheck.checksApplied,
         scheduledPublishFor,
         launchedBy,
         credentialSource: credential ? 'stored' : 'env',
@@ -1230,6 +1347,16 @@ async function runPublishJob(
         assetId: assetId ?? undefined,
         promotionJobId: getLinkedPromotionJobId(job),
     });
+
+    try {
+        await maybeTriggerCampaignIntegrityAlert({
+            campaignId: context.campaign.id,
+            domain: context.research.domain,
+            domainId: context.research.domainId ?? null,
+        });
+    } catch (integrityAlertError) {
+        console.error('Failed to evaluate campaign integrity alerts after publish success:', integrityAlertError);
+    }
 
     await enqueueGrowthExecutionJob({
         campaignId: context.campaign.id,
@@ -3058,6 +3185,16 @@ export async function runWorkerContinuously(options: WorkerOptions = {}): Promis
                 await snapshotCompliance().catch((err: unknown) => console.error('[Compliance] Error:', err));
                 await checkStaleDatasets().catch((err: unknown) => console.error('[DatasetFreshness] Error:', err));
                 await purgeExpiredSessions().catch((err: unknown) => console.error('[SessionPurge] Error:', err));
+                await purgeDeletedGrowthMediaStorage()
+                    .then((summary) => {
+                        if (summary.scanned > 0) {
+                            console.log(
+                                `[GrowthMediaPurge] scanned=${summary.scanned} purged=${summary.purged} ` +
+                                `noStorageKey=${summary.noStorageKey} failures=${summary.failures}`,
+                            );
+                        }
+                    })
+                    .catch((err: unknown) => console.error('[GrowthMediaPurge] Error:', err));
                 await refreshExpiringGrowthCredentialsAudit()
                     .then((summary) => {
                         if (summary.due > 0) {

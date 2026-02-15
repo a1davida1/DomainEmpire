@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull, or } from 'drizzle-orm';
 import { z } from 'zod';
 import { getRequestUser, requireRole } from '@/lib/auth';
 import { db, mediaModerationTasks, users } from '@/lib/db';
@@ -10,6 +10,7 @@ import { resolveFairnessPlaybookBindings } from '@/lib/growth/fairness-playbooks
 import { createNotification } from '@/lib/notifications';
 import { sendOpsChannelAlert, shouldForwardFairnessWarningsToOps } from '@/lib/alerts/ops-channel';
 import { createFairnessIncidentTickets } from '@/lib/alerts/fairness-incidents';
+import { recordMediaReviewAssignmentPolicySnapshot } from '@/lib/growth/media-review-policy-snapshots';
 
 const assignmentSchema = z.object({
     claim: z.boolean().optional(),
@@ -169,10 +170,18 @@ export async function POST(
         const isAdminLike = user.role === 'admin' || user.role === 'expert';
         const taskWhere = isAdminLike
             ? eq(mediaModerationTasks.id, id)
-            : and(
-                eq(mediaModerationTasks.id, id),
-                eq(mediaModerationTasks.reviewerId, user.id),
-            );
+            : payload.claim
+                ? and(
+                    eq(mediaModerationTasks.id, id),
+                    or(
+                        eq(mediaModerationTasks.reviewerId, user.id),
+                        isNull(mediaModerationTasks.reviewerId),
+                    ),
+                )
+                : and(
+                    eq(mediaModerationTasks.id, id),
+                    eq(mediaModerationTasks.reviewerId, user.id),
+                );
         const [task] = await db.select().from(mediaModerationTasks)
             .where(taskWhere)
             .limit(1);
@@ -186,6 +195,8 @@ export async function POST(
                 { status: 409 },
             );
         }
+
+        const taskOwnerUserId = task.userId;
 
         const currentMetadata = asMetadata(task.metadata);
 
@@ -330,7 +341,7 @@ export async function POST(
 
         if (nextReviewerId && nextReviewerId !== task.reviewerId) {
             policyEvaluation = await evaluateMediaReviewAssignmentPolicy({
-                userId: user.id,
+                userId: taskOwnerUserId,
                 taskId: task.id,
                 targetReviewerId: nextReviewerId,
                 previousReviewerId: task.reviewerId ?? null,
@@ -347,7 +358,7 @@ export async function POST(
 
                     try {
                         blockedIncidentTickets = await createFairnessIncidentTickets({
-                            userId: user.id,
+                            userId: taskOwnerUserId,
                             actorId: user.id,
                             taskId: task.id,
                             targetReviewerId: nextReviewerId,
@@ -371,7 +382,7 @@ export async function POST(
                             severity: 'warning',
                             title: 'Moderation assignment blocked by fairness policy',
                             message: `Task ${task.id} assignment to ${nextReviewerId} blocked (${policyEvaluation.violations.map((item) => item.code).join(', ')})`,
-                            userId: user.id,
+                            userId: taskOwnerUserId,
                             actionUrl: blockedPlaybookBindings[0]?.runbookUrl,
                             metadata: {
                                 taskId: task.id,
@@ -392,7 +403,7 @@ export async function POST(
                             title: 'Fairness policy blocked moderation assignment',
                             message: `Assignment blocked for task ${task.id} to reviewer ${nextReviewerId}`,
                             details: {
-                                userId: user.id,
+                                userId: taskOwnerUserId,
                                 taskId: task.id,
                                 actorId: user.id,
                                 targetReviewerId: nextReviewerId,
@@ -453,6 +464,12 @@ export async function POST(
             nextMetadata.assignmentReason = payload.reason;
         }
 
+        const assignmentAction = payload.claim
+            ? 'claim'
+            : payload.release
+                ? 'release'
+                : 'set';
+
         const [updatedTask] = await db.transaction(async (tx) => {
             const [taskRow] = await tx.update(mediaModerationTasks)
                 .set({
@@ -473,17 +490,13 @@ export async function POST(
             }
 
             await appendMediaModerationEvent(tx, {
-                userId: user.id,
+                userId: taskOwnerUserId,
                 taskId: taskRow.id,
                 assetId: taskRow.assetId,
                 actorId: user.id,
                 eventType: 'assigned',
                 payload: {
-                    action: payload.claim
-                        ? 'claim'
-                        : payload.release
-                            ? 'release'
-                            : 'set',
+                    action: assignmentAction,
                     previousReviewerId: task.reviewerId,
                     nextReviewerId,
                     previousBackupReviewerId: task.backupReviewerId,
@@ -510,12 +523,25 @@ export async function POST(
             );
         }
 
+        try {
+            await recordMediaReviewAssignmentPolicySnapshot({
+                userId: taskOwnerUserId,
+                occurredAt: now,
+                assignmentDelta: assignmentAction === 'release' || !nextReviewerId ? 0 : 1,
+                overrideApplied: policyOverrideApplied,
+                alertCodes: policyEvaluation?.alerts.map((item) => item.code) ?? [],
+                playbookIds: policyPlaybookBindings.map((binding) => binding.playbookId),
+            });
+        } catch (snapshotError) {
+            console.error('Failed to persist media review policy snapshot:', snapshotError);
+        }
+
         if (policyEvaluation && (policyOverrideApplied || policyEvaluation.alerts.length > 0)) {
             const signalCodes = policySignalCodes.join(', ');
 
             try {
                 policyIncidentTickets = await createFairnessIncidentTickets({
-                    userId: user.id,
+                    userId: taskOwnerUserId,
                     actorId: user.id,
                     taskId: updatedTask.id,
                     targetReviewerId: nextReviewerId,
@@ -543,7 +569,7 @@ export async function POST(
                         ? 'Moderation assignment fairness override applied'
                         : 'Moderation assignment policy alert',
                     message: `Task ${updatedTask.id} assignment signals: ${signalCodes}`,
-                    userId: user.id,
+                    userId: taskOwnerUserId,
                     actionUrl: policyPlaybookBindings[0]?.runbookUrl,
                     metadata: {
                         taskId: updatedTask.id,
@@ -568,7 +594,7 @@ export async function POST(
                             : 'Fairness warning in moderation assignment',
                         message: `Task ${updatedTask.id} assignment signals: ${signalCodes}`,
                         details: {
-                            userId: user.id,
+                            userId: taskOwnerUserId,
                             taskId: updatedTask.id,
                             actorId: user.id,
                             overrideApplied: policyOverrideApplied,

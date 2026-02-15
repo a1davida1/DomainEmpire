@@ -38,6 +38,7 @@ vi.mock('drizzle-orm', () => ({
     and: vi.fn((...args: unknown[]) => ({ type: 'and', args })),
     eq: vi.fn((...args: unknown[]) => ({ type: 'eq', args })),
     inArray: vi.fn((...args: unknown[]) => ({ type: 'inArray', args })),
+    isNull: vi.fn((...args: unknown[]) => ({ type: 'isNull', args })),
 }));
 
 vi.mock('@/lib/db', () => ({

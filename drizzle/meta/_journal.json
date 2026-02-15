@@ -155,6 +155,69 @@
       "when": 1771113600000,
       "tag": "0021_windy_marketplace",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1771140846263,
+      "tag": "0022_salty_sir_ram",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1771142065827,
+      "tag": "0023_motionless_enchantress",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1771145000000,
+      "tag": "0024_robust_lockjaw",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1771148600000,
+      "tag": "0025_violet_signal",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1771161000000,
+      "tag": "0026_brisk_prompt_archive",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1771165200000,
+      "tag": "0027_quiet_test_pass",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1771172400000,
+      "tag": "0028_domain_lifecycle_machine",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1771179600000,
+      "tag": "0029_finance_ledger",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1771186800000,
+      "tag": "0030_registrar_ownership_ops",
+      "breakpoints": true
     }
   ]
 }

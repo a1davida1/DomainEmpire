@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { and, eq, gte } from 'drizzle-orm';
+import { and, eq, gte, lte } from 'drizzle-orm';
 import { getRequestUser, requireRole } from '@/lib/auth';
-import { db, mediaModerationEvents, mediaModerationTasks } from '@/lib/db';
+import {
+    db,
+    mediaModerationEvents,
+    mediaModerationTasks,
+    mediaReviewPolicyAlertCodeDailySnapshots,
+    mediaReviewPolicyDailySnapshots,
+    mediaReviewPolicyPlaybookDailySnapshots,
+} from '@/lib/db';
 import { isFeatureEnabled } from '@/lib/feature-flags';
 
 function asPayload(value: unknown): Record<string, unknown> {
@@ -60,6 +67,14 @@ function toUtcDayKey(value: Date): string {
     return value.toISOString().slice(0, 10);
 }
 
+function toUtcDayStart(value: Date): Date {
+    return new Date(Date.UTC(
+        value.getUTCFullYear(),
+        value.getUTCMonth(),
+        value.getUTCDate(),
+    ));
+}
+
 function escapeCsv(value: string | number | null | undefined): string {
     if (value === null || value === undefined) return '';
     const str = String(value);
@@ -92,15 +107,22 @@ export async function GET(request: NextRequest) {
             : 72;
         const trendDaysRaw = Number.parseInt(url.searchParams.get('trendDays') || '14', 10);
         const trendDays = Number.isFinite(trendDaysRaw)
-            ? Math.max(3, Math.min(trendDaysRaw, 90))
+            ? Math.max(3, Math.min(trendDaysRaw, 365))
             : 14;
 
         const now = new Date();
         const windowStart = new Date(now.getTime() - windowHours * 60 * 60 * 1000);
         const trendStart = new Date(now.getTime() - trendDays * 24 * 60 * 60 * 1000);
-        const lookbackStart = windowStart.getTime() < trendStart.getTime() ? windowStart : trendStart;
+        const trendStartDay = toUtcDayStart(trendStart);
+        const trendEndDay = toUtcDayStart(now);
 
-        const [pendingRows, assignmentRows] = await Promise.all([
+        const [
+            pendingRows,
+            assignmentRows,
+            trendSnapshotRows,
+            trendAlertRows,
+            trendPlaybookRows,
+        ] = await Promise.all([
             db.select({
                 reviewerId: mediaModerationTasks.reviewerId,
             })
@@ -118,13 +140,47 @@ export async function GET(request: NextRequest) {
                 .where(and(
                     eq(mediaModerationEvents.userId, user.id),
                     eq(mediaModerationEvents.eventType, 'assigned'),
-                    gte(mediaModerationEvents.createdAt, lookbackStart),
+                    gte(mediaModerationEvents.createdAt, windowStart),
                 ))
                 .limit(QUERY_CAP),
+            db.select({
+                snapshotDate: mediaReviewPolicyDailySnapshots.snapshotDate,
+                assignments: mediaReviewPolicyDailySnapshots.assignments,
+                overrides: mediaReviewPolicyDailySnapshots.overrides,
+                alertEvents: mediaReviewPolicyDailySnapshots.alertEvents,
+            })
+                .from(mediaReviewPolicyDailySnapshots)
+                .where(and(
+                    eq(mediaReviewPolicyDailySnapshots.userId, user.id),
+                    gte(mediaReviewPolicyDailySnapshots.snapshotDate, trendStartDay),
+                    lte(mediaReviewPolicyDailySnapshots.snapshotDate, trendEndDay),
+                )),
+            db.select({
+                snapshotDate: mediaReviewPolicyAlertCodeDailySnapshots.snapshotDate,
+                alertCode: mediaReviewPolicyAlertCodeDailySnapshots.alertCode,
+                count: mediaReviewPolicyAlertCodeDailySnapshots.count,
+            })
+                .from(mediaReviewPolicyAlertCodeDailySnapshots)
+                .where(and(
+                    eq(mediaReviewPolicyAlertCodeDailySnapshots.userId, user.id),
+                    gte(mediaReviewPolicyAlertCodeDailySnapshots.snapshotDate, trendStartDay),
+                    lte(mediaReviewPolicyAlertCodeDailySnapshots.snapshotDate, trendEndDay),
+                )),
+            db.select({
+                snapshotDate: mediaReviewPolicyPlaybookDailySnapshots.snapshotDate,
+                playbookId: mediaReviewPolicyPlaybookDailySnapshots.playbookId,
+                count: mediaReviewPolicyPlaybookDailySnapshots.count,
+            })
+                .from(mediaReviewPolicyPlaybookDailySnapshots)
+                .where(and(
+                    eq(mediaReviewPolicyPlaybookDailySnapshots.userId, user.id),
+                    gte(mediaReviewPolicyPlaybookDailySnapshots.snapshotDate, trendStartDay),
+                    lte(mediaReviewPolicyPlaybookDailySnapshots.snapshotDate, trendEndDay),
+                )),
         ]);
 
         const pendingTruncated = pendingRows.length >= QUERY_CAP;
-        const assignmentsTruncated = assignmentRows.length >= QUERY_CAP;
+        let assignmentsTruncated = assignmentRows.length >= QUERY_CAP;
 
         const pendingByReviewer: Record<string, number> = {};
         for (const row of pendingRows) {
@@ -162,6 +218,14 @@ export async function GET(request: NextRequest) {
             };
         }
 
+        const snapshotTrendAvailable = (
+            trendSnapshotRows.length > 0
+            || trendAlertRows.length > 0
+            || trendPlaybookRows.length > 0
+        );
+
+        let trendSource: 'snapshot' | 'events' = snapshotTrendAvailable ? 'snapshot' : 'events';
+
         for (const row of assignmentRows) {
             const createdAt = toDate(row.createdAt);
             if (!createdAt) continue;
@@ -196,29 +260,88 @@ export async function GET(request: NextRequest) {
                     playbookCounts[playbookId] = (playbookCounts[playbookId] || 0) + 1;
                 }
             }
+        }
 
-            if (createdAt.getTime() >= trendStart.getTime()) {
+        if (snapshotTrendAvailable) {
+            for (const row of trendSnapshotRows) {
+                const snapshotDate = toDate(row.snapshotDate);
+                if (!snapshotDate) continue;
+                const bucket = trendByDay[toUtcDayKey(snapshotDate)];
+                if (!bucket) continue;
+                bucket.assignments += Number(row.assignments) || 0;
+                bucket.overrides += Number(row.overrides) || 0;
+                bucket.alertEvents += Number(row.alertEvents) || 0;
+            }
+
+            for (const row of trendAlertRows) {
+                const snapshotDate = toDate(row.snapshotDate);
+                if (!snapshotDate) continue;
+                const bucket = trendByDay[toUtcDayKey(snapshotDate)];
+                if (!bucket) continue;
+                const code = row.alertCode?.trim();
+                if (!code) continue;
+                bucket.alertCodeCounts[code] = (bucket.alertCodeCounts[code] || 0) + (Number(row.count) || 0);
+            }
+
+            for (const row of trendPlaybookRows) {
+                const snapshotDate = toDate(row.snapshotDate);
+                if (!snapshotDate) continue;
+                const bucket = trendByDay[toUtcDayKey(snapshotDate)];
+                if (!bucket) continue;
+                const playbookId = row.playbookId?.trim();
+                if (!playbookId) continue;
+                bucket.playbookCounts[playbookId] = (bucket.playbookCounts[playbookId] || 0) + (Number(row.count) || 0);
+            }
+        } else {
+            const trendRows = await db.select({
+                payload: mediaModerationEvents.payload,
+                createdAt: mediaModerationEvents.createdAt,
+            })
+                .from(mediaModerationEvents)
+                .where(and(
+                    eq(mediaModerationEvents.userId, user.id),
+                    eq(mediaModerationEvents.eventType, 'assigned'),
+                    gte(mediaModerationEvents.createdAt, trendStart),
+                ))
+                .limit(QUERY_CAP);
+
+            if (trendRows.length >= QUERY_CAP) {
+                assignmentsTruncated = true;
+            }
+
+            for (const row of trendRows) {
+                const createdAt = toDate(row.createdAt);
+                if (!createdAt) continue;
+
+                const payload = asPayload(row.payload);
+                const action = readString(payload, 'action');
+                if (action === 'release') continue;
+                const nextReviewerId = readString(payload, 'nextReviewerId');
+                const overrideApplied = readBoolean(payload, 'policyOverrideApplied');
+                const alertCodes = readAlertCodes(payload);
+                const playbookIds = readPlaybookIds(payload);
+
                 const bucket = trendByDay[toUtcDayKey(createdAt)];
-                if (bucket) {
-                    if (nextReviewerId) {
-                        bucket.assignments += 1;
+                if (!bucket) continue;
+                if (nextReviewerId) {
+                    bucket.assignments += 1;
+                }
+                if (overrideApplied) {
+                    bucket.overrides += 1;
+                }
+                if (alertCodes.length > 0) {
+                    bucket.alertEvents += 1;
+                    for (const code of alertCodes) {
+                        bucket.alertCodeCounts[code] = (bucket.alertCodeCounts[code] || 0) + 1;
                     }
-                    if (overrideApplied) {
-                        bucket.overrides += 1;
-                    }
-                    if (alertCodes.length > 0) {
-                        bucket.alertEvents += 1;
-                        for (const code of alertCodes) {
-                            bucket.alertCodeCounts[code] = (bucket.alertCodeCounts[code] || 0) + 1;
-                        }
-                    }
-                    if (playbookIds.length > 0) {
-                        for (const playbookId of playbookIds) {
-                            bucket.playbookCounts[playbookId] = (bucket.playbookCounts[playbookId] || 0) + 1;
-                        }
+                }
+                if (playbookIds.length > 0) {
+                    for (const playbookId of playbookIds) {
+                        bucket.playbookCounts[playbookId] = (bucket.playbookCounts[playbookId] || 0) + 1;
                     }
                 }
             }
+            trendSource = 'events';
         }
 
         const topAssignmentEntry = Object.entries(assignmentByReviewer)
@@ -290,6 +413,7 @@ export async function GET(request: NextRequest) {
                 playbookCounts,
             },
             trends,
+            trendSource,
             generatedAt: now.toISOString(),
         });
     } catch (error) {

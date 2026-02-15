@@ -1,4 +1,4 @@
-CREATE TABLE "domain_channel_profiles" (
+CREATE TABLE IF NOT EXISTS "domain_channel_profiles" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"domain_id" uuid NOT NULL,
 	"channel" text NOT NULL,
@@ -19,7 +19,12 @@ CREATE TABLE "domain_channel_profiles" (
 	CONSTRAINT "domain_channel_profile_quiet_end_check" CHECK ("domain_channel_profiles"."quiet_hours_end" IS NULL OR ("domain_channel_profiles"."quiet_hours_end" >= 0 AND "domain_channel_profiles"."quiet_hours_end" <= 23))
 );
 --> statement-breakpoint
-ALTER TABLE "domain_channel_profiles" ADD CONSTRAINT "domain_channel_profiles_domain_id_domains_id_fk" FOREIGN KEY ("domain_id") REFERENCES "public"."domains"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-CREATE UNIQUE INDEX "domain_channel_profile_domain_channel_uidx" ON "domain_channel_profiles" USING btree ("domain_id","channel");--> statement-breakpoint
-CREATE INDEX "domain_channel_profile_domain_idx" ON "domain_channel_profiles" USING btree ("domain_id");--> statement-breakpoint
-CREATE INDEX "domain_channel_profile_channel_idx" ON "domain_channel_profiles" USING btree ("channel");--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "domain_channel_profiles" ADD CONSTRAINT "domain_channel_profiles_domain_id_domains_id_fk" FOREIGN KEY ("domain_id") REFERENCES "public"."domains"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "domain_channel_profile_domain_channel_uidx" ON "domain_channel_profiles" USING btree ("domain_id","channel");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "domain_channel_profile_domain_idx" ON "domain_channel_profiles" USING btree ("domain_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "domain_channel_profile_channel_idx" ON "domain_channel_profiles" USING btree ("channel");--> statement-breakpoint

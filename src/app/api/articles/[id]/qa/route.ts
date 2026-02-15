@@ -5,6 +5,10 @@ import { requireAuth, getRequestUser } from '@/lib/auth';
 import { getChecklistForArticle, submitChecklist, getLatestQaResult } from '@/lib/review/qa';
 import { logReviewEvent } from '@/lib/audit/events';
 import { eq } from 'drizzle-orm';
+import { hashCalculatorConfigForTestPass } from '@/lib/review/calculation-integrity';
+
+const UNIT_TEST_PASS_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{5,127}$/;
+const DEFAULT_CALCULATION_HARNESS_VERSION = 'calculator-harness.v1';
 
 // GET /api/articles/[id]/qa — get QA checklist + latest result
 export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
@@ -40,17 +44,65 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
 
     try {
         const body = await request.json();
-        const { results, templateId } = body;
+        const { results, templateId, unitTestPassId, calculationHarnessVersion } = body;
 
         if (!results || typeof results !== 'object') {
             return NextResponse.json({ error: 'Results object is required' }, { status: 400 });
         }
+
+        const article = await db.query.articles.findFirst({
+            where: eq(articles.id, params.id),
+            columns: {
+                id: true,
+                contentType: true,
+                calculatorConfig: true,
+            },
+        });
+        if (!article) {
+            return NextResponse.json({ error: 'Article not found' }, { status: 404 });
+        }
+
+        const normalizedUnitTestPassId = typeof unitTestPassId === 'string' ? unitTestPassId.trim() : '';
+        if (normalizedUnitTestPassId.length > 0 && !UNIT_TEST_PASS_ID_PATTERN.test(normalizedUnitTestPassId)) {
+            return NextResponse.json(
+                { error: 'Invalid unitTestPassId format' },
+                { status: 400 },
+            );
+        }
+
+        const calcTested = Boolean((results as Record<string, { checked?: boolean }>).calc_tested?.checked);
+        if (article.contentType === 'calculator' && calcTested && normalizedUnitTestPassId.length === 0) {
+            return NextResponse.json(
+                { error: 'unitTestPassId is required when calc_tested is checked for calculator content' },
+                { status: 400 },
+            );
+        }
+
+        let calculationConfigHash: string | null = null;
+        if (normalizedUnitTestPassId.length > 0 && article.contentType === 'calculator') {
+            calculationConfigHash = hashCalculatorConfigForTestPass(article.calculatorConfig);
+            if (!calculationConfigHash) {
+                return NextResponse.json(
+                    { error: 'Calculator config is required before recording a deterministic test pass' },
+                    { status: 400 },
+                );
+            }
+        }
+
+        const normalizedHarnessVersion = typeof calculationHarnessVersion === 'string'
+            ? calculationHarnessVersion.trim()
+            : '';
 
         const { id, allPassed } = await submitChecklist({
             articleId: params.id,
             templateId: templateId || null,
             reviewerId: user.id,
             results,
+            unitTestPassId: normalizedUnitTestPassId || null,
+            calculationConfigHash,
+            calculationHarnessVersion: normalizedUnitTestPassId.length > 0
+                ? (normalizedHarnessVersion || DEFAULT_CALCULATION_HARNESS_VERSION)
+                : null,
         });
 
         await logReviewEvent({
@@ -58,7 +110,12 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
             actorId: user.id,
             actorRole: user.role,
             eventType: 'qa_completed',
-            metadata: { allPassed, templateId },
+            metadata: {
+                allPassed,
+                templateId,
+                unitTestPassId: normalizedUnitTestPassId || null,
+                calculationConfigHash,
+            },
         });
 
         return NextResponse.json({ id, allPassed });

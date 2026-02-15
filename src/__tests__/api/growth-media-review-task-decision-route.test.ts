@@ -221,4 +221,29 @@ describe('growth media-review/tasks/[id]/decision route', () => {
         expect(body.partialApproval.requiredApprovals).toBe(2);
         expect(body.partialApproval.approvedCount).toBe(1);
     });
+
+    it('returns 409 when task status changes before decision update is persisted', async () => {
+        selectedTaskRows = [{
+            id: 'cccccccc-1111-4111-8111-111111111111',
+            userId: USER_ID,
+            assetId: '22222222-2222-4222-8222-222222222222',
+            status: 'pending',
+            reviewerId: null,
+        }];
+        updatedTaskRows = [];
+
+        const response = await POST(
+            makeRequest({
+                status: 'approved',
+                reviewNotes: 'Race condition check',
+            }),
+            {
+                params: Promise.resolve({ id: 'cccccccc-1111-4111-8111-111111111111' }),
+            },
+        );
+
+        expect(response.status).toBe(409);
+        const body = await response.json();
+        expect(body.error).toContain('changed by another process');
+    });
 });

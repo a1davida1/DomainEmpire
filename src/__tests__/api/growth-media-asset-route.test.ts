@@ -8,16 +8,13 @@ const mockSelect = vi.fn();
 const mockFrom = vi.fn();
 const mockUpdate = vi.fn();
 const mockSet = vi.fn();
-const mockDelete = vi.fn();
 const mockWhere = vi.fn();
-const mockWhereDelete = vi.fn();
 
 const mockMediaAssetsTable = {
     id: 'id',
 };
 
 let updatedRows: Array<Record<string, unknown>> = [];
-let deletedRows: Array<Record<string, unknown>> = [];
 let currentRows: Array<Record<string, unknown>> = [];
 
 vi.mock('@/lib/auth', () => ({
@@ -32,6 +29,7 @@ vi.mock('@/lib/feature-flags', () => ({
 vi.mock('drizzle-orm', () => ({
     and: vi.fn((...args: unknown[]) => ({ type: 'and', args })),
     eq: vi.fn((...args: unknown[]) => ({ type: 'eq', args })),
+    isNull: vi.fn((...args: unknown[]) => ({ type: 'isNull', args })),
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -43,10 +41,6 @@ vi.mock('@/lib/db', () => ({
         update: (...args: unknown[]) => {
             mockUpdate(...args);
             return { set: mockSet };
-        },
-        delete: (...args: unknown[]) => {
-            mockDelete(...args);
-            return { where: mockWhereDelete };
         },
     },
     mediaAssets: mockMediaAssetsTable,
@@ -69,7 +63,6 @@ describe('growth media-asset by id route', () => {
         mockIsFeatureEnabled.mockReturnValue(true);
 
         updatedRows = [];
-        deletedRows = [];
         currentRows = [{
             id: 'asset-1',
             metadata: {},
@@ -80,9 +73,6 @@ describe('growth media-asset by id route', () => {
         }));
         mockSet.mockImplementation(() => ({
             where: mockWhere,
-        }));
-        mockWhereDelete.mockImplementation(() => ({
-            returning: async () => deletedRows,
         }));
         mockFrom.mockImplementation(() => ({
             where: () => ({
@@ -129,7 +119,15 @@ describe('growth media-asset by id route', () => {
     });
 
     it('deletes media asset', async () => {
-        deletedRows = [{ id: 'asset-1' }];
+        currentRows = [{
+            id: 'asset-1',
+            metadata: {},
+        }];
+        updatedRows = [{
+            id: 'asset-1',
+            deletedAt: new Date('2026-02-15T00:00:00.000Z'),
+            purgeAfterAt: new Date('2026-03-17T00:00:00.000Z'),
+        }];
 
         const response = await DELETE(
             makeRequest({}),
@@ -140,6 +138,6 @@ describe('growth media-asset by id route', () => {
         const body = await response.json();
         expect(body.success).toBe(true);
         expect(body.id).toBe('asset-1');
-        expect(mockDelete).toHaveBeenCalled();
+        expect(mockUpdate).toHaveBeenCalled();
     });
 });

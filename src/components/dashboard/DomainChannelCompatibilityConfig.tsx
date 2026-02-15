@@ -145,7 +145,7 @@ export default function DomainChannelCompatibilityConfig({ domainId }: Props) {
             <CardHeader>
                 <CardTitle>Channel Compatibility</CardTitle>
                 <CardDescription>
-                    Configure per-domain social channel support, publish caps, and anti-detection timing controls.
+                    Configure per-domain social channel support, publish caps, and cadence variance controls.
                 </CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">

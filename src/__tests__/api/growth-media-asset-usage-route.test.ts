@@ -41,6 +41,7 @@ vi.mock('@/lib/feature-flags', () => ({
 vi.mock('drizzle-orm', () => ({
     and: vi.fn((...args: unknown[]) => ({ type: 'and', args })),
     eq: vi.fn((...args: unknown[]) => ({ type: 'eq', args })),
+    isNull: vi.fn((...args: unknown[]) => ({ type: 'isNull', args })),
     sql: sqlMock,
 }));
 

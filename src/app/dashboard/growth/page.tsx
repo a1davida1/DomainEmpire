@@ -158,6 +158,39 @@ interface ModerationPolicyInsightsResponse {
     generatedAt: string;
 }
 
+interface GrowthPolicyAuditResponse {
+    windowHours: number;
+    evaluatedCount: number;
+    publishedCount: number;
+    blockedCount: number;
+    warningEventCount: number;
+    changedEventCount: number;
+    blockReasonCounts: Record<string, number>;
+    warningCounts: Record<string, number>;
+    policyPackCounts: Record<string, number>;
+    byChannel: Record<GrowthChannel, {
+        evaluated: number;
+        published: number;
+        blocked: number;
+        warningEvents: number;
+        changedEvents: number;
+    }>;
+    recent: Array<{
+        campaignId: string;
+        domain: string;
+        eventType: string;
+        channel: GrowthChannel | null;
+        warnings: string[];
+        blockReasons: string[];
+        changes: string[];
+        policyPackId: string | null;
+        policyPackVersion: string | null;
+        occurredAt: string | null;
+    }>;
+    truncated: boolean;
+    generatedAt: string;
+}
+
 interface ModerationApprovalSummary {
     mode: 'any' | 'ordered';
     approvedCount: number;
@@ -189,6 +222,55 @@ interface GrowthCredentialStatus {
 
 interface GrowthCredentialListResponse {
     credentials: GrowthCredentialStatus[];
+}
+
+type GrowthCredentialDrillScope = 'all' | GrowthChannel;
+type GrowthCredentialDrillStatus = 'success' | 'failed' | 'partial';
+type GrowthCredentialDrillMode = 'dry_run' | 'rotation_reconnect';
+
+interface GrowthCredentialDrillChecklist {
+    campaignLaunchFrozen: boolean;
+    monitoringChecked: boolean;
+    providerTokensRevoked: boolean;
+    reconnectCompleted: boolean;
+    testPublishValidated: boolean;
+}
+
+interface GrowthCredentialDrillIncidentAttachment {
+    incidentChecklistId: string;
+    drillRunId: string;
+    drillStatus: GrowthCredentialDrillStatus;
+    attachedAt: string;
+    evidenceIds: string[];
+}
+
+interface GrowthCredentialDrillRun {
+    id: string;
+    userId: string;
+    initiatedBy: string | null;
+    scope: GrowthCredentialDrillScope;
+    mode: GrowthCredentialDrillMode;
+    status: GrowthCredentialDrillStatus;
+    checklist: Record<string, unknown>;
+    results: Record<string, unknown>;
+    notes: string | null;
+    startedAt: string;
+    completedAt: string;
+    createdAt: string;
+    updatedAt: string;
+}
+
+interface GrowthCredentialDrillListResponse {
+    runs: GrowthCredentialDrillRun[];
+}
+
+interface GrowthCredentialDrillFormState {
+    scope: GrowthCredentialDrillScope;
+    dryRun: boolean;
+    validateRefresh: boolean;
+    notes: string;
+    incidentChecklistId: string;
+    checklist: GrowthCredentialDrillChecklist;
 }
 
 interface CampaignFormState {
@@ -331,6 +413,45 @@ function readStringArray(
         .filter((entry) => entry.length > 0);
 }
 
+function parseCredentialDrillIncidentAttachment(
+    value: unknown,
+): GrowthCredentialDrillIncidentAttachment | null {
+    if (!isRecord(value)) return null;
+    const incidentChecklistId = typeof value.incidentChecklistId === 'string'
+        ? value.incidentChecklistId.trim()
+        : '';
+    const drillRunId = typeof value.drillRunId === 'string'
+        ? value.drillRunId.trim()
+        : '';
+    const drillStatus = value.drillStatus;
+    const attachedAt = typeof value.attachedAt === 'string'
+        ? value.attachedAt
+        : '';
+    const evidenceIds = Array.isArray(value.evidenceIds)
+        ? value.evidenceIds
+            .filter((entry): entry is string => typeof entry === 'string')
+            .map((entry) => entry.trim())
+            .filter((entry) => entry.length > 0)
+        : [];
+
+    if (
+        incidentChecklistId.length === 0
+        || drillRunId.length === 0
+        || attachedAt.length === 0
+        || (drillStatus !== 'success' && drillStatus !== 'failed' && drillStatus !== 'partial')
+    ) {
+        return null;
+    }
+
+    return {
+        incidentChecklistId,
+        drillRunId,
+        drillStatus,
+        attachedAt,
+        evidenceIds,
+    };
+}
+
 function toModerationAssignmentDraft(task: MediaModerationTask): ModerationAssignmentDraft {
     return {
         reviewerId: task.reviewerId ?? '',
@@ -431,6 +552,12 @@ function moderationBadgeClass(status: ModerationStatus | 'cancelled'): string {
     return 'bg-zinc-100 text-zinc-800';
 }
 
+function drillStatusBadgeClass(status: GrowthCredentialDrillStatus): string {
+    if (status === 'success') return 'bg-emerald-100 text-emerald-800';
+    if (status === 'partial') return 'bg-yellow-100 text-yellow-800';
+    return 'bg-red-100 text-red-800';
+}
+
 export default function GrowthDashboardPage() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -444,13 +571,16 @@ export default function GrowthDashboardPage() {
     const [moderationTasks, setModerationTasks] = useState<MediaModerationTask[]>([]);
     const [reviewers, setReviewers] = useState<ReviewerDirectoryEntry[]>([]);
     const [moderationPolicyInsights, setModerationPolicyInsights] = useState<ModerationPolicyInsightsResponse | null>(null);
+    const [growthPolicyAudit, setGrowthPolicyAudit] = useState<GrowthPolicyAuditResponse | null>(null);
     const [credentials, setCredentials] = useState<GrowthCredentialStatus[]>([]);
+    const [credentialDrillRuns, setCredentialDrillRuns] = useState<GrowthCredentialDrillRun[]>([]);
     const [candidates, setCandidates] = useState<DomainResearchCandidate[]>([]);
 
     const [creatingCampaign, setCreatingCampaign] = useState(false);
     const [creatingAsset, setCreatingAsset] = useState(false);
     const [uploadingAssetFile, setUploadingAssetFile] = useState(false);
     const [savingCredential, setSavingCredential] = useState(false);
+    const [runningCredentialDrill, setRunningCredentialDrill] = useState(false);
     const [applyingBulkAction, setApplyingBulkAction] = useState(false);
     const [mutatingCampaignId, setMutatingCampaignId] = useState<string | null>(null);
     const [mutatingAssetId, setMutatingAssetId] = useState<string | null>(null);
@@ -495,6 +625,20 @@ export default function GrowthDashboardPage() {
         refreshTokenExpiresAt: '',
         scopes: '',
         providerAccountId: '',
+    });
+    const [credentialDrillForm, setCredentialDrillForm] = useState<GrowthCredentialDrillFormState>({
+        scope: 'all',
+        dryRun: true,
+        validateRefresh: true,
+        notes: '',
+        incidentChecklistId: '',
+        checklist: {
+            campaignLaunchFrozen: false,
+            monitoringChecked: false,
+            providerTokensRevoked: false,
+            reconnectCompleted: false,
+            testPublishValidated: false,
+        },
     });
 
     const credentialByChannel = useMemo(() => {
@@ -623,7 +767,9 @@ export default function GrowthDashboardPage() {
             requestJson<MediaModerationTaskListResponse>('/api/growth/media-review/tasks?limit=100'),
             requestJson<ReviewerDirectoryResponse>('/api/growth/media-review/reviewers?limit=200'),
             requestJson<ModerationPolicyInsightsResponse>('/api/growth/media-review/insights?windowHours=72&trendDays=21'),
+            requestJson<GrowthPolicyAuditResponse>('/api/growth/policy-audit?windowHours=168'),
             requestJson<GrowthCredentialListResponse>('/api/growth/channel-credentials'),
+            requestJson<GrowthCredentialDrillListResponse>('/api/growth/channel-credentials/drill?limit=20'),
             requestJson<CandidateListResponse>('/api/acquisition/candidates?limit=100'),
         ]);
 
@@ -666,14 +812,28 @@ export default function GrowthDashboardPage() {
             firstError = (firstError || moderationInsightsResult.reason) as ApiError;
         }
 
-        const credentialsResult = tasks[5];
+        const growthPolicyAuditResult = tasks[5];
+        if (growthPolicyAuditResult.status === 'fulfilled') {
+            setGrowthPolicyAudit(growthPolicyAuditResult.value);
+        } else {
+            firstError = (firstError || growthPolicyAuditResult.reason) as ApiError;
+        }
+
+        const credentialsResult = tasks[6];
         if (credentialsResult.status === 'fulfilled') {
             setCredentials(credentialsResult.value.credentials || []);
         } else {
             firstError = (firstError || credentialsResult.reason) as ApiError;
         }
 
-        const candidatesResult = tasks[6];
+        const drillRunsResult = tasks[7];
+        if (drillRunsResult.status === 'fulfilled') {
+            setCredentialDrillRuns(drillRunsResult.value.runs || []);
+        } else {
+            firstError = (firstError || drillRunsResult.reason) as ApiError;
+        }
+
+        const candidatesResult = tasks[8];
         if (candidatesResult.status === 'fulfilled') {
             setCandidates(candidatesResult.value.candidates || []);
             setCampaignForm((prev) => {
@@ -1291,6 +1451,75 @@ export default function GrowthDashboardPage() {
         }
     }, [refreshDashboard]);
 
+    const handleRunCredentialDrill = useCallback(async () => {
+        setMessage(null);
+        setError(null);
+        if (!credentialDrillForm.dryRun && credentialDrillForm.incidentChecklistId.trim().length === 0) {
+            setError('Incident checklist ID is required for non-dry-run drills.');
+            return;
+        }
+        setRunningCredentialDrill(true);
+
+        const payload: Record<string, unknown> = {
+            scope: credentialDrillForm.scope,
+            dryRun: credentialDrillForm.dryRun,
+            validateRefresh: credentialDrillForm.validateRefresh,
+            notes: credentialDrillForm.notes.trim() || null,
+            incidentChecklistId: credentialDrillForm.incidentChecklistId.trim() || null,
+        };
+        if (!credentialDrillForm.dryRun) {
+            payload.checklist = credentialDrillForm.checklist;
+        }
+
+        try {
+            const response = await fetch('/api/growth/channel-credentials/drill', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(payload),
+            });
+            const data = await response.json().catch(() => null);
+            if (data === null || !isRecord(data)) {
+                throw toError(response.status, { error: 'Invalid response from credential drill endpoint' });
+            }
+
+            if (!response.ok && response.status !== 409) {
+                throw toError(response.status, data);
+            }
+
+            const runRecord = isRecord(data.run) ? data.run : null;
+            const runId = runRecord && typeof runRecord.id === 'string' ? runRecord.id : 'unknown';
+            const status = typeof data.status === 'string' ? data.status : (response.ok ? 'success' : 'failed');
+            const errorMessage = typeof data.error === 'string'
+                ? data.error
+                : 'Credential drill reported policy/checklist failure';
+            const attachmentFromBody = parseCredentialDrillIncidentAttachment(data.incidentChecklistAttachment);
+            const attachmentFromRun = (
+                runRecord
+                && isRecord(runRecord.results)
+                && parseCredentialDrillIncidentAttachment(runRecord.results.incidentChecklistAttachment)
+            ) || null;
+            const attachment = attachmentFromBody ?? attachmentFromRun;
+
+            if (!response.ok || status === 'failed') {
+                setError(`${errorMessage} (run ${runId}).`);
+            } else {
+                const attachmentSuffix = attachment
+                    ? ` Attached to incident checklist ${attachment.incidentChecklistId} (${attachment.evidenceIds.length} evidence IDs).`
+                    : '';
+                setMessage(`Credential drill ${status} (run ${runId}).${attachmentSuffix}`);
+            }
+
+            await refreshDashboard();
+        } catch (requestError) {
+            const typedError = requestError as ApiError;
+            setError(typedError.message || 'Failed to run credential drill');
+        } finally {
+            setRunningCredentialDrill(false);
+        }
+    }, [credentialDrillForm, refreshDashboard]);
+
     if (loading) {
         return (
             <div className="p-6 space-y-4">
@@ -1535,6 +1764,112 @@ export default function GrowthDashboardPage() {
                             )}
                         </CardContent>
                     </Card>
+
+                    {growthPolicyAudit && (
+                        <Card>
+                            <CardHeader>
+                                <CardTitle>Publish Policy Audit</CardTitle>
+                                <CardDescription>
+                                    Channel policy-pack outcomes over the last {growthPolicyAudit.windowHours} hours.
+                                </CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-3">
+                                <div className="grid gap-2 md:grid-cols-5 text-xs">
+                                    <div className="rounded border p-2">
+                                        <div className="text-muted-foreground">Evaluated</div>
+                                        <div className="text-sm font-medium">{growthPolicyAudit.evaluatedCount}</div>
+                                    </div>
+                                    <div className="rounded border p-2">
+                                        <div className="text-muted-foreground">Published</div>
+                                        <div className="text-sm font-medium">{growthPolicyAudit.publishedCount}</div>
+                                    </div>
+                                    <div className="rounded border p-2">
+                                        <div className="text-muted-foreground">Blocked</div>
+                                        <div className="text-sm font-medium">{growthPolicyAudit.blockedCount}</div>
+                                    </div>
+                                    <div className="rounded border p-2">
+                                        <div className="text-muted-foreground">Warning Events</div>
+                                        <div className="text-sm font-medium">{growthPolicyAudit.warningEventCount}</div>
+                                    </div>
+                                    <div className="rounded border p-2">
+                                        <div className="text-muted-foreground">Changed Copy</div>
+                                        <div className="text-sm font-medium">{growthPolicyAudit.changedEventCount}</div>
+                                    </div>
+                                </div>
+                                <div className="grid gap-2 md:grid-cols-2 text-xs">
+                                    {Object.entries(growthPolicyAudit.byChannel).map(([channel, values]) => (
+                                        <div key={channel} className="rounded border p-2">
+                                            <div className="font-medium">{CHANNEL_LABELS[channel as GrowthChannel]}</div>
+                                            <div className="text-muted-foreground">
+                                                {values.evaluated} evaluated • {values.published} published • {values.blocked} blocked
+                                            </div>
+                                            <div className="text-muted-foreground">
+                                                {values.warningEvents} warning events • {values.changedEvents} changed-copy events
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                                {Object.keys(growthPolicyAudit.blockReasonCounts).length > 0 && (
+                                    <div className="flex flex-wrap gap-2">
+                                        {Object.entries(growthPolicyAudit.blockReasonCounts)
+                                            .sort((left, right) => right[1] - left[1])
+                                            .slice(0, 8)
+                                            .map(([reason, count]) => (
+                                                <Badge key={reason} variant="outline">
+                                                    {reason} ({count})
+                                                </Badge>
+                                            ))}
+                                    </div>
+                                )}
+                                {Object.keys(growthPolicyAudit.policyPackCounts).length > 0 && (
+                                    <div className="flex flex-wrap gap-2">
+                                        {Object.entries(growthPolicyAudit.policyPackCounts)
+                                            .sort((left, right) => right[1] - left[1])
+                                            .map(([packId, count]) => (
+                                                <Badge key={packId} variant="outline">
+                                                    {packId} {count}
+                                                </Badge>
+                                            ))}
+                                    </div>
+                                )}
+                                {growthPolicyAudit.recent.length > 0 && (
+                                    <div className="rounded-md border overflow-x-auto">
+                                        <table className="min-w-full text-xs">
+                                            <thead className="bg-muted/40">
+                                                <tr>
+                                                    <th className="text-left px-3 py-2">Time</th>
+                                                    <th className="text-left px-3 py-2">Domain</th>
+                                                    <th className="text-left px-3 py-2">Channel</th>
+                                                    <th className="text-left px-3 py-2">Result</th>
+                                                    <th className="text-left px-3 py-2">Policy Pack</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {growthPolicyAudit.recent.slice(0, 12).map((event) => (
+                                                    <tr key={`${event.campaignId}:${event.occurredAt}:${event.eventType}`} className="border-t">
+                                                        <td className="px-3 py-2">{formatDate(event.occurredAt)}</td>
+                                                        <td className="px-3 py-2">{event.domain}</td>
+                                                        <td className="px-3 py-2">{event.channel ? CHANNEL_LABELS[event.channel] : 'n/a'}</td>
+                                                        <td className="px-3 py-2">
+                                                            {event.eventType === 'publish_blocked' ? 'Blocked' : 'Published'}
+                                                        </td>
+                                                        <td className="px-3 py-2">
+                                                            {event.policyPackId || 'n/a'}
+                                                            {event.policyPackVersion ? ` (${event.policyPackVersion})` : ''}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                                <div className="text-xs text-muted-foreground">
+                                    Generated {formatDate(growthPolicyAudit.generatedAt)}
+                                    {growthPolicyAudit.truncated ? ' • Results capped to protect query latency.' : ''}
+                                </div>
+                            </CardContent>
+                        </Card>
+                    )}
                 </TabsContent>
 
                 <TabsContent value="media" className="space-y-4">
@@ -2341,6 +2676,224 @@ export default function GrowthDashboardPage() {
                                     </Button>
                                 </div>
                             </form>
+                        </CardContent>
+                    </Card>
+
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2">
+                                <ClipboardCheck className="h-5 w-5" />
+                                Credential Drill
+                            </CardTitle>
+                            <CardDescription>
+                                Execute checklist-backed reconnect/refresh drills and capture evidence IDs.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            <div className="grid gap-4 md:grid-cols-3">
+                                <div className="space-y-2">
+                                    <Label htmlFor="drillScope">Scope</Label>
+                                    <select
+                                        id="drillScope"
+                                        className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                                        value={credentialDrillForm.scope}
+                                        onChange={(event) => setCredentialDrillForm((prev) => ({
+                                            ...prev,
+                                            scope: event.target.value as GrowthCredentialDrillScope,
+                                        }))}
+                                    >
+                                        <option value="all">All Channels</option>
+                                        <option value="pinterest">Pinterest</option>
+                                        <option value="youtube_shorts">YouTube Shorts</option>
+                                    </select>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="drillNotes">Incident Notes (optional)</Label>
+                                    <Input
+                                        id="drillNotes"
+                                        value={credentialDrillForm.notes}
+                                        onChange={(event) => setCredentialDrillForm((prev) => ({
+                                            ...prev,
+                                            notes: event.target.value,
+                                        }))}
+                                        placeholder="Incident ticket or run context"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="drillIncidentChecklistId">Incident Checklist ID</Label>
+                                    <Input
+                                        id="drillIncidentChecklistId"
+                                        value={credentialDrillForm.incidentChecklistId}
+                                        onChange={(event) => setCredentialDrillForm((prev) => ({
+                                            ...prev,
+                                            incidentChecklistId: event.target.value,
+                                        }))}
+                                        placeholder="Required for non-dry-run drills"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-4 text-sm">
+                                <label className="inline-flex items-center gap-2">
+                                    <input
+                                        type="checkbox"
+                                        checked={credentialDrillForm.dryRun}
+                                        onChange={(event) => setCredentialDrillForm((prev) => ({
+                                            ...prev,
+                                            dryRun: event.target.checked,
+                                        }))}
+                                    />
+                                    Dry Run
+                                </label>
+                                <label className="inline-flex items-center gap-2">
+                                    <input
+                                        type="checkbox"
+                                        checked={credentialDrillForm.validateRefresh}
+                                        onChange={(event) => setCredentialDrillForm((prev) => ({
+                                            ...prev,
+                                            validateRefresh: event.target.checked,
+                                        }))}
+                                    />
+                                    Validate Refresh Tokens
+                                </label>
+                            </div>
+
+                            {!credentialDrillForm.dryRun && (
+                                <div className="rounded-md border p-3 space-y-2">
+                                    <div className="text-sm font-medium">Incident Checklist</div>
+                                    <div className="grid gap-2 md:grid-cols-2 text-sm">
+                                        <label className="inline-flex items-center gap-2">
+                                            <input
+                                                type="checkbox"
+                                                checked={credentialDrillForm.checklist.campaignLaunchFrozen}
+                                                onChange={(event) => setCredentialDrillForm((prev) => ({
+                                                    ...prev,
+                                                    checklist: {
+                                                        ...prev.checklist,
+                                                        campaignLaunchFrozen: event.target.checked,
+                                                    },
+                                                }))}
+                                            />
+                                            Campaign launches frozen
+                                        </label>
+                                        <label className="inline-flex items-center gap-2">
+                                            <input
+                                                type="checkbox"
+                                                checked={credentialDrillForm.checklist.monitoringChecked}
+                                                onChange={(event) => setCredentialDrillForm((prev) => ({
+                                                    ...prev,
+                                                    checklist: {
+                                                        ...prev.checklist,
+                                                        monitoringChecked: event.target.checked,
+                                                    },
+                                                }))}
+                                            />
+                                            Monitoring checked
+                                        </label>
+                                        <label className="inline-flex items-center gap-2">
+                                            <input
+                                                type="checkbox"
+                                                checked={credentialDrillForm.checklist.providerTokensRevoked}
+                                                onChange={(event) => setCredentialDrillForm((prev) => ({
+                                                    ...prev,
+                                                    checklist: {
+                                                        ...prev.checklist,
+                                                        providerTokensRevoked: event.target.checked,
+                                                    },
+                                                }))}
+                                            />
+                                            Provider tokens revoked
+                                        </label>
+                                        <label className="inline-flex items-center gap-2">
+                                            <input
+                                                type="checkbox"
+                                                checked={credentialDrillForm.checklist.reconnectCompleted}
+                                                onChange={(event) => setCredentialDrillForm((prev) => ({
+                                                    ...prev,
+                                                    checklist: {
+                                                        ...prev.checklist,
+                                                        reconnectCompleted: event.target.checked,
+                                                    },
+                                                }))}
+                                            />
+                                            Reconnect completed
+                                        </label>
+                                        <label className="inline-flex items-center gap-2">
+                                            <input
+                                                type="checkbox"
+                                                checked={credentialDrillForm.checklist.testPublishValidated}
+                                                onChange={(event) => setCredentialDrillForm((prev) => ({
+                                                    ...prev,
+                                                    checklist: {
+                                                        ...prev.checklist,
+                                                        testPublishValidated: event.target.checked,
+                                                    },
+                                                }))}
+                                            />
+                                            Test publish validated
+                                        </label>
+                                    </div>
+                                </div>
+                            )}
+
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => void handleRunCredentialDrill()}
+                                disabled={runningCredentialDrill || featureDisabled}
+                            >
+                                {runningCredentialDrill ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                                Run Credential Drill
+                            </Button>
+
+                            <div className="space-y-2">
+                                <div className="text-sm font-medium">Recent Drill Runs</div>
+                                {credentialDrillRuns.length === 0 ? (
+                                    <p className="text-sm text-muted-foreground">No drill runs recorded yet.</p>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {credentialDrillRuns.map((run) => {
+                                            const errors = readStringArray(run.results, 'errors');
+                                            const missingChecklist = readStringArray(run.results, 'missingChecklistFields');
+                                            const incidentAttachment = parseCredentialDrillIncidentAttachment(
+                                                run.results?.incidentChecklistAttachment,
+                                            );
+                                            return (
+                                                <div key={run.id} className="rounded-md border p-3 text-sm space-y-1">
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <Badge className={drillStatusBadgeClass(run.status)}>
+                                                            {run.status}
+                                                        </Badge>
+                                                        <Badge variant="outline">{run.scope}</Badge>
+                                                        <Badge variant="outline">{run.mode}</Badge>
+                                                        <span className="text-muted-foreground">
+                                                            {formatDate(run.startedAt)}
+                                                        </span>
+                                                    </div>
+                                                    <div className="text-muted-foreground break-all">
+                                                        Run ID: {run.id}
+                                                    </div>
+                                                    {incidentAttachment && (
+                                                        <div className="text-muted-foreground break-all">
+                                                            Incident checklist: {incidentAttachment.incidentChecklistId} • Evidence IDs: {incidentAttachment.evidenceIds.length}
+                                                        </div>
+                                                    )}
+                                                    {errors.length > 0 && (
+                                                        <div className="text-red-700">
+                                                            Errors: {errors.join('; ')}
+                                                        </div>
+                                                    )}
+                                                    {missingChecklist.length > 0 && (
+                                                        <div className="text-yellow-700">
+                                                            Missing checklist: {missingChecklist.join(', ')}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
                         </CardContent>
                     </Card>
 

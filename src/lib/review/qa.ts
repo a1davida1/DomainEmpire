@@ -1,6 +1,6 @@
 import { db } from '@/lib/db';
 import { qaChecklistTemplates, qaChecklistResults } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import type { YmylLevel } from './ymyl';
 
 export type ChecklistItem = {
@@ -88,6 +88,9 @@ export async function submitChecklist(opts: {
     templateId: string | null;
     reviewerId: string;
     results: Record<string, { checked: boolean; notes?: string }>;
+    unitTestPassId?: string | null;
+    calculationConfigHash?: string | null;
+    calculationHarnessVersion?: string | null;
 }) {
     const items = Object.values(opts.results);
     const allPassed = items.every(r => r.checked);
@@ -97,6 +100,9 @@ export async function submitChecklist(opts: {
         templateId: opts.templateId,
         reviewerId: opts.reviewerId,
         results: opts.results,
+        unitTestPassId: opts.unitTestPassId ?? null,
+        calculationConfigHash: opts.calculationConfigHash ?? null,
+        calculationHarnessVersion: opts.calculationHarnessVersion ?? null,
         allPassed,
         completedAt: new Date(),
     }).returning({ id: qaChecklistResults.id });
@@ -108,7 +114,7 @@ export async function getLatestQaResult(articleId: string) {
     const results = await db.select()
         .from(qaChecklistResults)
         .where(eq(qaChecklistResults.articleId, articleId))
-        .orderBy(qaChecklistResults.completedAt)
+        .orderBy(desc(qaChecklistResults.completedAt))
         .limit(1);
 
     return results[0] || null;
