@@ -6,6 +6,7 @@ export type FeatureFlag =
 
 export type FeatureFlagContext = {
     userId?: string;
+    sessionId?: string;
 };
 
 type FeatureFlagConfig = {
@@ -83,7 +84,7 @@ export function isFeatureEnabled(flag: FeatureFlag, context: FeatureFlagContext 
     if (rollout >= 100) return true;
     if (rollout <= 0) return false;
 
-    const identity = context.userId || 'anonymous';
+    const identity = context.sessionId || context.userId || 'anonymous';
     return hashToBucket(`${flag}:${identity}`) < rollout;
 }
 

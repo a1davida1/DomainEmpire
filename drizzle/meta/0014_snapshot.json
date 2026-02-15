@@ -1230,7 +1230,16 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "backlink_snapshot_domain_date_unq": {
+          "name": "backlink_snapshot_domain_date_unq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "domain_id",
+            "snapshot_date"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -1458,7 +1467,16 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "comp_snapshot_competitor_date_unq": {
+          "name": "comp_snapshot_competitor_date_unq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "competitor_id",
+            "snapshot_date"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -2496,13 +2514,13 @@
         },
         "registration_price": {
           "name": "registration_price",
-          "type": "real",
+          "type": "numeric(12, 2)",
           "primaryKey": false,
           "notNull": false
         },
         "aftermarket_price": {
           "name": "aftermarket_price",
-          "type": "real",
+          "type": "numeric(12, 2)",
           "primaryKey": false,
           "notNull": false
         },
@@ -4217,7 +4235,7 @@
         },
         "budget": {
           "name": "budget",
-          "type": "real",
+          "type": "numeric(12, 2)",
           "primaryKey": false,
           "notNull": true,
           "default": 0
@@ -5875,7 +5893,7 @@
         },
         "estimated_value": {
           "name": "estimated_value",
-          "type": "real",
+          "type": "numeric(12, 2)",
           "primaryKey": false,
           "notNull": false
         },
@@ -6019,9 +6037,20 @@
           ]
         }
       },
-      "policies": {},
+      "policies": {
+        "subscribers_app_access": {
+          "name": "subscribers_app_access",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "current_role"
+          ],
+          "using": "(true)",
+          "withCheck": "(true)"
+        }
+      },
       "checkConstraints": {},
-      "isRLSEnabled": false
+      "isRLSEnabled": true
     },
     "public.users": {
       "name": "users",

@@ -107,7 +107,7 @@ export async function generateFaqPage(
     // Render FAQ items as native details/summary
     const faqHtmlParts: string[] = [];
     for (const item of faqItems) {
-        const answerHtml = await renderMarkdownToHtml(item.answer);
+        const answerHtml = await renderMarkdownToHtml(item.answer, { currentDomain: domain });
         faqHtmlParts.push(`<details class="faq-item">
   <summary class="faq-question">${escapeHtml(item.question)}</summary>
   <div class="faq-answer">${answerHtml}</div>
@@ -119,7 +119,7 @@ export async function generateFaqPage(
     if (faqHtmlParts.length > 0) {
         contentBlock = `<div class="faq-list">${faqHtmlParts.join('\n')}</div>`;
     } else {
-        const fullHtml = await renderMarkdownToHtml(markdown);
+        const fullHtml = await renderMarkdownToHtml(markdown, { currentDomain: domain });
         contentBlock = `${fullHtml}`;
     }
 

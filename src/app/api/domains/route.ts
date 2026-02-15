@@ -5,6 +5,46 @@ import { eq, ilike, and, sql, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { checkIdempotencyKey, storeIdempotencyResult } from '@/lib/api/idempotency';
 
+const SITE_TEMPLATE_VALUES = [
+    'authority', 'comparison', 'calculator', 'review', 'tool', 'hub',
+    'decision', 'cost_guide', 'niche', 'info', 'consumer', 'brand',
+    'magazine', 'landing', 'docs', 'storefront', 'minimal', 'dashboard',
+    'newsletter', 'community',
+] as const;
+
+const contentConfigSchema = z.object({
+    voiceSeed: z.object({
+        name: z.string(),
+        background: z.string(),
+        quirk: z.string(),
+        toneDial: z.number(),
+        tangents: z.string(),
+        petPhrase: z.string(),
+        formatting: z.string(),
+    }).optional(),
+    schedule: z.object({
+        frequency: z.enum(['daily', 'weekly', 'sporadic']),
+        timeOfDay: z.enum(['morning', 'evening', 'random']),
+        wordCountRange: z.tuple([z.number().int().min(200), z.number().int().max(10000)]).refine(([min, max]) => min <= max, { message: 'min must be <= max' }),
+    }).optional(),
+    contentTypeMix: z.record(z.string(), z.number().min(0)).optional(),
+    writingWorkflow: z.object({
+        outlineTemplate: z.string().optional(),
+        draftTemplate: z.string().optional(),
+        humanizeTemplate: z.string().optional(),
+        seoTemplate: z.string().optional(),
+        metaTemplate: z.string().optional(),
+        reviewTemplate: z.string().optional(),
+    }).optional(),
+    branding: z.object({
+        colorScheme: z.string().optional(),
+        primaryColor: z.string().optional(),
+        secondaryColor: z.string().optional(),
+        accentColor: z.string().optional(),
+        typographyPreset: z.string().optional(),
+    }).optional(),
+});
+
 // Validation schema for creating a domain
 const createDomainSchema = z.object({
     domain: z.string().min(1).regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z]{2,})+$/i, 'Invalid domain format'),
@@ -20,13 +60,14 @@ const createDomainSchema = z.object({
     subNiche: z.string().optional(),
     vertical: z.string().optional(), // Legal, Insurance, etc.
     monetizationTier: z.number().min(1).max(4).optional().default(3),
-    siteTemplate: z.enum(['authority', 'comparison', 'calculator', 'review', 'tool', 'hub', 'decision', 'cost_guide', 'niche', 'info', 'consumer', 'brand']).optional().default('authority'),
+    siteTemplate: z.enum(SITE_TEMPLATE_VALUES).optional().default('authority'),
     notes: z.string().optional(),
     tags: z.array(z.string()).optional().default([]),
     cloudflareAccount: z.string().optional(),
     themeStyle: z.string().optional(),
     monetizationModel: z.string().optional(),
     estimatedRevenueAtMaturity: z.string().optional(),
+    contentConfig: contentConfigSchema.optional(),
 });
 
 // GET /api/domains - List all domains with optional filters
@@ -188,6 +229,7 @@ export async function POST(request: NextRequest) {
             monetizationModel: data.monetizationModel,
             estimatedRevenueAtMaturityLow: revLow,
             estimatedRevenueAtMaturityHigh: revHigh,
+            contentConfig: data.contentConfig,
         };
 
         const inserted = await db.insert(domains).values(newDomain).returning();

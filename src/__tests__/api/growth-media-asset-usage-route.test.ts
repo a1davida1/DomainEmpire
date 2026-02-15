@@ -58,6 +58,19 @@ vi.mock('@/lib/db', () => ({
             mockUpdate(...args);
             return { set: mockSet };
         },
+        transaction: async (callback: (tx: {
+            insert: (...args: unknown[]) => { values: typeof mockValues };
+            update: (...args: unknown[]) => { set: typeof mockSet };
+        }) => Promise<unknown>) => callback({
+            insert: (...args: unknown[]) => {
+                mockInsert(...args);
+                return { values: mockValues };
+            },
+            update: (...args: unknown[]) => {
+                mockUpdate(...args);
+                return { set: mockSet };
+            },
+        }),
     },
     mediaAssets: mockMediaAssetsTable,
     mediaAssetUsage: mockMediaAssetUsageTable,

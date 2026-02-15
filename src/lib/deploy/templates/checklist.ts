@@ -117,7 +117,7 @@ export async function generateChecklistPage(
         const stepItems: string[] = [];
         for (let i = 0; i < steps.length; i++) {
             const step = steps[i];
-            const bodyHtml = step.body ? await renderMarkdownToHtml(step.body) : '';
+            const bodyHtml = step.body ? await renderMarkdownToHtml(step.body, { currentDomain: domain }) : '';
             const inputId = `checklist-step-${i}`;
             stepItems.push(`<div class="checklist-item">
   <label for="${inputId}">
@@ -134,7 +134,7 @@ export async function generateChecklistPage(
     <div class="checklist-list">${stepItems.join('\n')}</div>`;
     } else {
         // No H2 headings found — fall back to full rendered markdown
-        const fullHtml = await renderMarkdownToHtml(markdown);
+        const fullHtml = await renderMarkdownToHtml(markdown, { currentDomain: domain });
         contentBlock = `${fullHtml}`;
     }
 

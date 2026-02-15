@@ -7,6 +7,8 @@ import { isFeatureEnabled } from '@/lib/feature-flags';
 
 const assetTypeEnum = z.enum(['image', 'video', 'script', 'voiceover']);
 const sortEnum = z.enum(['newest', 'oldest', 'most_used', 'least_used']);
+const moderationStatusEnum = z.enum(['pending', 'approved', 'rejected', 'needs_changes']);
+const provenanceSourceEnum = z.enum(['manual_upload', 'external_url', 'ai_generated', 'worker', 'imported', 'migrated']);
 
 const createAssetSchema = z.object({
     type: assetTypeEnum,
@@ -15,7 +17,18 @@ const createAssetSchema = z.object({
     tags: z.array(z.string().trim().min(1).max(64)).max(50).optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
     dedupeByUrl: z.boolean().optional(),
+    provenanceSource: provenanceSourceEnum.optional(),
+    provenanceRef: z.string().trim().min(1).max(500).optional(),
+    moderationStatus: moderationStatusEnum.optional(),
+    moderationReason: z.string().trim().min(1).max(500).optional(),
 });
+
+function asMetadata(value: unknown): Record<string, unknown> {
+    if (!value || Array.isArray(value) || typeof value !== 'object') {
+        return {};
+    }
+    return { ...value };
+}
 
 export async function GET(request: NextRequest) {
     const authError = await requireAuth(request);
@@ -39,10 +52,12 @@ export async function GET(request: NextRequest) {
         const typeRaw = url.searchParams.get('type');
         const folderRaw = url.searchParams.get('folder');
         const searchRaw = url.searchParams.get('search');
+        const moderationStatusRaw = url.searchParams.get('moderationStatus');
+        const provenanceSourceRaw = url.searchParams.get('provenanceSource');
         const sortRaw = url.searchParams.get('sort');
         const sort = sortEnum.safeParse(sortRaw).success ? sortEnum.parse(sortRaw) : 'newest';
 
-        const conditions: SQL[] = [];
+        const conditions: SQL[] = [eq(mediaAssets.userId, user.id)];
         if (typeRaw) {
             const parsedType = assetTypeEnum.safeParse(typeRaw);
             if (!parsedType.success) {
@@ -52,6 +67,20 @@ export async function GET(request: NextRequest) {
         }
         if (folderRaw && folderRaw.trim().length > 0) {
             conditions.push(eq(mediaAssets.folder, folderRaw.trim()));
+        }
+        if (moderationStatusRaw) {
+            const parsedModerationStatus = moderationStatusEnum.safeParse(moderationStatusRaw);
+            if (!parsedModerationStatus.success) {
+                return NextResponse.json({ error: 'Invalid moderationStatus filter' }, { status: 400 });
+            }
+            conditions.push(sql`${mediaAssets.metadata} ->> 'moderationStatus' = ${parsedModerationStatus.data}`);
+        }
+        if (provenanceSourceRaw) {
+            const parsedProvenanceSource = provenanceSourceEnum.safeParse(provenanceSourceRaw);
+            if (!parsedProvenanceSource.success) {
+                return NextResponse.json({ error: 'Invalid provenanceSource filter' }, { status: 400 });
+            }
+            conditions.push(sql`${mediaAssets.metadata} ->> 'provenanceSource' = ${parsedProvenanceSource.data}`);
         }
         if (searchRaw && searchRaw.trim().length > 0) {
             const pattern = `%${searchRaw.trim()}%`;
@@ -124,30 +153,63 @@ export async function POST(request: NextRequest) {
 
         const payload = parsed.data;
         const dedupeByUrl = payload.dedupeByUrl ?? true;
-        if (dedupeByUrl) {
-            const [existing] = await db.select()
-                .from(mediaAssets)
-                .where(eq(mediaAssets.url, payload.url))
-                .limit(1);
-            if (existing) {
-                return NextResponse.json({
-                    created: false,
-                    asset: existing,
-                });
-            }
-        }
+        const nowIso = new Date().toISOString();
+        const metadata = asMetadata(payload.metadata);
 
-        const [asset] = await db.insert(mediaAssets).values({
+        const insertValues = {
+            userId: user.id,
             type: payload.type,
             url: payload.url,
             folder: payload.folder ?? 'inbox',
             tags: payload.tags ?? [],
             metadata: {
-                ...(payload.metadata ?? {}),
+                ...metadata,
                 createdBy: user.id,
-                createdAt: new Date().toISOString(),
+                createdAt: nowIso,
+                provenanceSource: payload.provenanceSource ?? 'manual_upload',
+                provenanceRef: payload.provenanceRef ?? null,
+                moderationStatus: payload.moderationStatus ?? 'pending',
+                moderationReason: payload.moderationReason ?? null,
+                moderationUpdatedAt: nowIso,
+                moderationUpdatedBy: user.id,
             },
-        }).returning();
+        };
+
+        if (dedupeByUrl) {
+            const result = await db.transaction(async (tx) => {
+                const [inserted] = await tx.insert(mediaAssets)
+                    .values(insertValues)
+                    .onConflictDoNothing({ target: mediaAssets.url })
+                    .returning();
+
+                if (inserted) {
+                    return { created: true, asset: inserted };
+                }
+
+                // URL unique constraint is global (not per-user), so lookup must match
+                const [existing] = await tx.select()
+                    .from(mediaAssets)
+                    .where(eq(mediaAssets.url, payload.url))
+                    .limit(1);
+                return { created: false, asset: existing ?? null };
+            });
+
+            if (result.created) {
+                return NextResponse.json({
+                    created: true,
+                    asset: result.asset,
+                }, { status: 201 });
+            }
+
+            return NextResponse.json({
+                created: false,
+                asset: result.asset,
+            });
+        }
+
+        const [asset] = await db.insert(mediaAssets)
+            .values(insertValues)
+            .returning();
 
         return NextResponse.json({
             created: true,

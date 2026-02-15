@@ -30,12 +30,21 @@ interface ImportResult {
 
 type DomainStatus = 'parked' | 'active' | 'redirect' | 'forsale' | 'defensive';
 type DomainBucket = 'build' | 'redirect' | 'park' | 'defensive';
-type SiteTemplate = 'authority' | 'comparison' | 'calculator' | 'review' | 'tool' | 'hub' | 'decision' | 'cost_guide' | 'niche' | 'info' | 'consumer' | 'brand';
+type SiteTemplate =
+    | 'authority' | 'comparison' | 'calculator' | 'review' | 'tool' | 'hub'
+    | 'decision' | 'cost_guide' | 'niche' | 'info' | 'consumer' | 'brand'
+    | 'magazine' | 'landing' | 'docs' | 'storefront' | 'minimal' | 'dashboard'
+    | 'newsletter' | 'community';
 type Registrar = 'godaddy' | 'namecheap' | 'cloudflare' | 'other';
 
 const VALID_STATUSES: DomainStatus[] = ['parked', 'active', 'redirect', 'forsale', 'defensive'];
 const VALID_BUCKETS: DomainBucket[] = ['build', 'redirect', 'park', 'defensive'];
-const VALID_TEMPLATES: SiteTemplate[] = ['authority', 'comparison', 'calculator', 'review', 'tool', 'hub', 'decision', 'cost_guide', 'niche', 'info', 'consumer', 'brand'];
+const VALID_TEMPLATES: SiteTemplate[] = [
+    'authority', 'comparison', 'calculator', 'review', 'tool', 'hub',
+    'decision', 'cost_guide', 'niche', 'info', 'consumer', 'brand',
+    'magazine', 'landing', 'docs', 'storefront', 'minimal', 'dashboard',
+    'newsletter', 'community',
+];
 const VALID_REGISTRARS: Registrar[] = ['godaddy', 'namecheap', 'cloudflare', 'other'];
 
 const DOMAIN_REGEX = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z]{2,})+$/i;
@@ -97,18 +106,25 @@ async function processCSVRow(row: CSVRow, result: ImportResult): Promise<void> {
     // Parse TLD
     const domainParts = domainName.split('.');
     const tld = domainParts.at(-1) ?? '';
+    const purchasePriceParsed = row.purchasePrice ? Number.parseFloat(row.purchasePrice) : Number.NaN;
+    const renewalPriceParsed = row.renewalPrice ? Number.parseFloat(row.renewalPrice) : Number.NaN;
+
+    const parsedPurchaseDate = row.purchaseDate ? new Date(row.purchaseDate) : undefined;
+    const parsedRenewalDate = row.renewalDate ? new Date(row.renewalDate) : undefined;
+    const tierNum = row.tier ? Number.parseInt(row.tier, 10) : NaN;
+    const validTier = Number.isFinite(tierNum) ? Math.min(3, Math.max(1, tierNum)) : 3;
 
     const newDomain: NewDomain = {
         domain: domainName,
         tld,
         registrar: parseRegistrar(row.registrar),
-        purchasePrice: row.purchasePrice ? Number(row.purchasePrice) : undefined,
-        purchaseDate: row.purchaseDate ? new Date(row.purchaseDate) : undefined,
-        renewalDate: row.renewalDate ? new Date(row.renewalDate) : undefined,
-        renewalPrice: row.renewalPrice ? Number(row.renewalPrice) : undefined,
+        purchasePrice: Number.isFinite(purchasePriceParsed) ? purchasePriceParsed.toString() : undefined,
+        purchaseDate: parsedPurchaseDate && Number.isFinite(parsedPurchaseDate.getTime()) ? parsedPurchaseDate : undefined,
+        renewalDate: parsedRenewalDate && Number.isFinite(parsedRenewalDate.getTime()) ? parsedRenewalDate : undefined,
+        renewalPrice: Number.isFinite(renewalPriceParsed) ? renewalPriceParsed.toString() : undefined,
         status: parseStatus(row.status),
         bucket: parseBucket(row.bucket),
-        tier: row.tier ? Math.min(3, Math.max(1, Number(row.tier))) : 3,
+        tier: validTier,
         niche: row.niche || undefined,
         subNiche: row.subNiche || undefined,
         siteTemplate: parseTemplate(row.siteTemplate),

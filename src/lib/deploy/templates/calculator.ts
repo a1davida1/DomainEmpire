@@ -242,7 +242,7 @@ export async function generateCalculatorPage(
   pageShell: import('./shared').PageShell,
 ): Promise<string> {
   const config = article.calculatorConfig as CalculatorConfig | null;
-  const contentHtml = await renderMarkdownToHtml(article.contentMarkdown || '');
+  const contentHtml = await renderMarkdownToHtml(article.contentMarkdown || '', { currentDomain: domain });
   const { disclaimerHtml, trustHtml } = await buildTrustElements(article, disclosure);
   const dataSourcesHtml = generateDataSourcesSection(datasets);
 

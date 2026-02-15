@@ -96,11 +96,15 @@ describe('growth/campaigns route', () => {
                 return {
                     where: () => ({
                         orderBy: () => ({
-                            limit: async () => campaignRows,
+                            limit: () => ({
+                                offset: async () => campaignRows,
+                            }),
                         }),
                     }),
                     orderBy: () => ({
-                        limit: async () => campaignRows,
+                        limit: () => ({
+                            offset: async () => campaignRows,
+                        }),
                     }),
                 };
             }
@@ -115,10 +119,14 @@ describe('growth/campaigns route', () => {
 
             return {
                 where: () => ({
-                    limit: async () => [],
+                    limit: () => ({
+                        offset: async () => [],
+                    }),
                 }),
                 orderBy: () => ({
-                    limit: async () => [],
+                    limit: () => ({
+                        offset: async () => [],
+                    }),
                 }),
             };
         });

@@ -31,11 +31,13 @@ import { generateCostGuidePage } from './templates/cost-guide';
 import { generateHealthDecisionPage } from './templates/health-decision';
 import { generateChecklistPage } from './templates/checklist';
 import { generateReviewPage } from './templates/review';
-import { generateWizardPage } from './templates/wizard';
+import { generateWizardPage, generateConfiguratorPage, generateQuizPage, generateSurveyPage, generateAssessmentPage } from './templates/wizard';
+import { generateInteractiveInfographicPage } from './templates/interactive-infographic';
+import { generateInteractiveMapPage } from './templates/interactive-map';
 import { generateEmbedPage } from './templates/embed';
 import { generateGeoBlocks } from './templates/geo-content';
 import { generateScrollCta } from './templates/scroll-cta';
-import { generateGlobalStyles } from './themes';
+import { generateGlobalStyles, resolveDomainTheme } from './themes';
 import { getLayoutConfig, type LayoutConfig } from './layouts';
 import { marked } from 'marked';
 import sanitizeHtml from 'sanitize-html';
@@ -126,6 +128,15 @@ export async function generateSiteFiles(domainId: string): Promise<GeneratedFile
         datasetsByArticle.set(link.articleId, list);
     }
 
+    const resolvedTheme = resolveDomainTheme({
+        themeStyle: domain.themeStyle,
+        vertical: domain.vertical,
+        niche: domain.niche,
+    });
+    if (domain.themeStyle && resolvedTheme.source !== 'explicit') {
+        console.warn(`[deploy] Unknown theme "${domain.themeStyle}" for ${domain.domain}; using "${resolvedTheme.theme}"`);
+    }
+
     const config: SiteConfig = {
         domainId,
         domain: domain.domain,
@@ -134,7 +145,7 @@ export async function generateSiteFiles(domainId: string): Promise<GeneratedFile
         niche: domain.niche || 'general',
         subNiche: domain.subNiche || undefined,
         template: domain.siteTemplate || 'authority',
-        theme: domain.themeStyle || 'default',
+        theme: resolvedTheme.theme,
         scripts,
     };
 
@@ -159,7 +170,7 @@ export async function generateSiteFiles(domainId: string): Promise<GeneratedFile
                 content: await generateArticlePage(config, a, disclosure, datasetsByArticle, pageShell),
             }))
         ),
-        { path: 'styles.css', content: generateGlobalStyles(config.theme, config.template) },
+        { path: 'styles.css', content: generateGlobalStyles(config.theme, config.template, config.domain) },
         { path: '404.html', content: generate404Page(pageShell) },
         { path: 'robots.txt', content: `User-agent: *\nAllow: /\nSitemap: https://${config.domain}/sitemap.xml` },
         { path: 'favicon.svg', content: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${config.niche === 'health' ? '\u2695' : '\u{1F310}'}</text></svg>` },
@@ -367,7 +378,7 @@ async function generateArticlePage(
     pageShell?: PageShell,
 ): Promise<string> {
     if (!pageShell) throw new Error('PageShell required');
-    const contentType = article.contentType || 'article';
+    const contentType = String(article.contentType || 'article');
     const articleDatasetInfo = datasetsByArticle?.get(article.id) ?? await getArticleDatasetInfo(article.id);
 
     switch (contentType) {
@@ -389,6 +400,18 @@ async function generateArticlePage(
             return generateReviewPage(article, config.domain, disclosure, articleDatasetInfo, pageShell);
         case 'wizard':
             return generateWizardPage(article, config.domain, disclosure, articleDatasetInfo, pageShell);
+        case 'configurator':
+            return generateConfiguratorPage(article, config.domain, disclosure, articleDatasetInfo, pageShell);
+        case 'quiz':
+            return generateQuizPage(article, config.domain, disclosure, articleDatasetInfo, pageShell);
+        case 'survey':
+            return generateSurveyPage(article, config.domain, disclosure, articleDatasetInfo, pageShell);
+        case 'assessment':
+            return generateAssessmentPage(article, config.domain, disclosure, articleDatasetInfo, pageShell);
+        case 'interactive_infographic':
+            return generateInteractiveInfographicPage(article, config.domain, disclosure, articleDatasetInfo, pageShell);
+        case 'interactive_map':
+            return generateInteractiveMapPage(article, config.domain, disclosure, articleDatasetInfo, pageShell);
         default:
             return generateStandardArticlePage(config, article, disclosure, articleDatasetInfo, pageShell);
     }
@@ -404,7 +427,7 @@ async function generateStandardArticlePage(
     articleDatasetInfo: ArticleDatasetInfo[],
     pageShell: PageShell,
 ): Promise<string> {
-    const contentHtml = await renderMarkdownToHtml(article.contentMarkdown || '');
+    const contentHtml = await renderMarkdownToHtml(article.contentMarkdown || '', { currentDomain: config.domain });
     const { disclaimerHtml, trustHtml } = await buildTrustElements(article, disclosure);
     const dataSourcesHtml = generateDataSourcesSection(articleDatasetInfo);
     const schemaLd = buildSchemaJsonLd(article, config.domain, 'Article');

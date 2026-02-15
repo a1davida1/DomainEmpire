@@ -16,6 +16,8 @@ import {
     Trash2
 } from 'lucide-react';
 import ContentTypeConfig from '@/components/dashboard/ContentTypeConfig';
+import DomainChannelCompatibilityConfig from '@/components/dashboard/DomainChannelCompatibilityConfig';
+import DomainWorkflowConfig from '@/components/dashboard/DomainWorkflowConfig';
 
 
 interface PageProps {
@@ -186,6 +188,10 @@ export default async function DomainDetailPage({ params }: PageProps) {
                                 <p className="font-medium capitalize">{domain.siteTemplate || 'Not set'}</p>
                             </div>
                             <div>
+                                <p className="text-sm font-medium text-muted-foreground">Theme Style</p>
+                                <p className="font-medium">{domain.themeStyle || 'Not set'}</p>
+                            </div>
+                            <div>
                                 <p className="text-sm font-medium text-muted-foreground">Niche</p>
                                 <p className="font-medium capitalize">{domain.niche || 'Not set'}</p>
                             </div>
@@ -287,6 +293,14 @@ export default async function DomainDetailPage({ params }: PageProps) {
                 domainId={id}
                 currentMix={(domain.contentConfig as Record<string, unknown>)?.contentTypeMix as Record<string, number> | null ?? null}
             />
+
+            <DomainWorkflowConfig
+                domainId={id}
+                themeStyle={domain.themeStyle ?? null}
+                currentConfig={domain.contentConfig ?? null}
+            />
+
+            <DomainChannelCompatibilityConfig domainId={id} />
 
             {/* Recent Articles */}
             <Card>

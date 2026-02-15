@@ -234,33 +234,40 @@ async function refreshAccessToken(
     channel: GrowthPublishChannel,
     refreshToken: string,
 ): Promise<OAuthTokenRefreshResult> {
-    if (channel === 'youtube_shorts') {
-        const clientId = assertProviderEnv('YOUTUBE_CLIENT_ID');
-        const clientSecret = assertProviderEnv('YOUTUBE_CLIENT_SECRET');
-        const tokenUrl = process.env.YOUTUBE_OAUTH_TOKEN_URL?.trim()
-            || 'https://oauth2.googleapis.com/token';
-        const body = new URLSearchParams({
-            grant_type: 'refresh_token',
-            refresh_token: refreshToken,
-            client_id: clientId,
-            client_secret: clientSecret,
-        });
-        const payload = await postTokenRefresh(channel, tokenUrl, body);
-        return parseOAuthRefreshResult(channel, payload);
+    switch (channel) {
+        case 'youtube_shorts': {
+            const clientId = assertProviderEnv('YOUTUBE_CLIENT_ID');
+            const clientSecret = assertProviderEnv('YOUTUBE_CLIENT_SECRET');
+            const tokenUrl = process.env.YOUTUBE_OAUTH_TOKEN_URL?.trim()
+                || 'https://oauth2.googleapis.com/token';
+            const body = new URLSearchParams({
+                grant_type: 'refresh_token',
+                refresh_token: refreshToken,
+                client_id: clientId,
+                client_secret: clientSecret,
+            });
+            const payload = await postTokenRefresh(channel, tokenUrl, body);
+            return parseOAuthRefreshResult(channel, payload);
+        }
+        case 'pinterest': {
+            const clientId = assertProviderEnv('PINTEREST_CLIENT_ID');
+            const clientSecret = assertProviderEnv('PINTEREST_CLIENT_SECRET');
+            const tokenUrl = process.env.PINTEREST_OAUTH_TOKEN_URL?.trim()
+                || 'https://api.pinterest.com/v5/oauth/token';
+            const body = new URLSearchParams({
+                grant_type: 'refresh_token',
+                refresh_token: refreshToken,
+                client_id: clientId,
+                client_secret: clientSecret,
+            });
+            const payload = await postTokenRefresh(channel, tokenUrl, body);
+            return parseOAuthRefreshResult(channel, payload);
+        }
+        default: {
+            const _exhaustive: never = channel;
+            throw new Error(`Unsupported growth channel for token refresh: ${_exhaustive}`);
+        }
     }
-
-    const clientId = assertProviderEnv('PINTEREST_CLIENT_ID');
-    const clientSecret = assertProviderEnv('PINTEREST_CLIENT_SECRET');
-    const tokenUrl = process.env.PINTEREST_OAUTH_TOKEN_URL?.trim()
-        || 'https://api.pinterest.com/v5/oauth/token';
-    const body = new URLSearchParams({
-        grant_type: 'refresh_token',
-        refresh_token: refreshToken,
-        client_id: clientId,
-        client_secret: clientSecret,
-    });
-    const payload = await postTokenRefresh(channel, tokenUrl, body);
-    return parseOAuthRefreshResult(channel, payload);
 }
 
 async function writeRefreshFailureSignal(
@@ -543,8 +550,12 @@ export async function resolveGrowthPublishCredential(
                     return buildPublishCredential(latest);
                 }
             }
-        } catch {
-            // Fall back to env credentials when refresh fails.
+        } catch (refreshError) {
+            console.error(`Growth credential refresh failed for ${channel}:`, refreshError);
+            const expiresAt = row.accessTokenExpiresAt ?? null;
+            if (expiresAt && expiresAt.getTime() > Date.now()) {
+                return buildPublishCredential(row);
+            }
         }
         return null;
     }

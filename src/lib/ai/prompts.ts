@@ -405,14 +405,17 @@ PRIMARY KEYWORD: ${keyword}
 SECONDARY KEYWORDS: ${secondaryKeywords.join(', ')}
 
 AVAILABLE INTERNAL LINKS (Use these REAL links instead of placeholders where relevant):
-${availableLinks.map(l => `- "${l.title}" (${l.url})`).join('\n')}
+${availableLinks.length > 0 ? availableLinks.map(l => `- "${l.title}" (${l.url})`).join('\n') : '- none available'}
 
 OPTIMIZATION TASKS:
 1. Ensure primary keyword appears in first 100 words
 2. Check keyword density (aim for 1-2% naturally)
 3. Add secondary keywords where they fit naturally
 4. Optimize headings for featured snippets
-5. INSERT INTERNAL LINKS: Scan the content for relevant anchor text and insert 2-3 links from the "AVAILABLE INTERNAL LINKS" list above. Do NOT force them. If no relevant place exists, that's fine. Do NOT use [INTERNAL_LINK] placeholders if you have a real link available.
+5. INTERNAL LINK POLICY:
+   - If internal links are provided, optionally insert up to 2 relevant links from that exact list.
+   - If none are provided, do not invent internal links and do not emit [INTERNAL_LINK] placeholders.
+   - Never add cross-domain links to related portfolio/network sites.
 6. Add external linking placeholders for authoritative sources: [EXTERNAL_LINK: anchor text | suggested source type]
 7. Ensure proper heading hierarchy (H2 -> H3, no skipped levels)
 8. Add alt text suggestions for any images: [IMAGE: description | alt text]

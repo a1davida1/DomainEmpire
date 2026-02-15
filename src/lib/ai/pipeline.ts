@@ -12,14 +12,22 @@
 
 import { db, articles, contentQueue, apiCallLogs, keywords, domains } from '@/lib/db';
 import { getAIClient } from './openrouter';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { PROMPTS } from './prompts';
 import { getOrCreateVoiceSeed } from './voice-seed';
 import { createRevision } from '@/lib/audit/revisions';
 import { classifyYmylLevel } from '@/lib/review/ymyl';
-import { calculatorConfigSchema, comparisonDataSchema } from '@/lib/validation/articles';
+import {
+    calculatorConfigSchema,
+    comparisonDataSchema,
+    wizardConfigSchema,
+    geoDataSchema,
+    isAllowedLeadEndpoint,
+} from '@/lib/validation/articles';
 import { enqueueContentJob } from '@/lib/queue/content-queue';
 import { generateResearchWithCache } from '@/lib/ai/research-cache';
+import { buildDomainDifferentiationInstructions, buildIntentCoverageGuidance } from '@/lib/ai/differentiation';
+import { isInternalLinkingEnabled } from '@/lib/content/link-policy';
 
 // Helper to slugify string
 function slugify(text: string) {
@@ -68,6 +76,17 @@ function stripEmDashes(content: string): { content: string; changed: boolean } {
     };
 }
 
+function assertAllowedCollectLeadEndpoint(endpoint: string, articleId: string): void {
+    const normalized = endpoint.trim();
+    if (isAllowedLeadEndpoint(normalized)) return;
+
+    console.error(
+        `[Pipeline] Invalid collectLead endpoint for article ${articleId}: ${normalized}. `
+        + 'Only internal paths or hosts in ALLOWED_LEAD_DOMAINS are allowed.',
+    );
+    throw new Error(`Invalid collectLead endpoint for article ${articleId}`);
+}
+
 async function evaluateWithAiReviewer(opts: {
     ai: ReturnType<typeof getAIClient>;
     contentMarkdown: string;
@@ -75,7 +94,7 @@ async function evaluateWithAiReviewer(opts: {
     title: string;
 }): Promise<AiReviewEvaluationWithUsage> {
     const response = await opts.ai.generateJSON<AiReviewEvaluation>(
-        'humanization',
+        'aiReview',
         PROMPTS.aiReview(opts.contentMarkdown, opts.keyword, opts.title),
         {
             model: DEFAULT_OPUS_REVIEW_MODEL,
@@ -104,7 +123,23 @@ async function evaluateWithAiReviewer(opts: {
 }
 
 // Content type enum values matching schema
-type ContentType = 'article' | 'comparison' | 'calculator' | 'cost_guide' | 'lead_capture' | 'health_decision' | 'checklist' | 'faq' | 'review' | 'wizard';
+type ContentType =
+    | 'article'
+    | 'comparison'
+    | 'calculator'
+    | 'cost_guide'
+    | 'lead_capture'
+    | 'health_decision'
+    | 'checklist'
+    | 'faq'
+    | 'review'
+    | 'wizard'
+    | 'configurator'
+    | 'quiz'
+    | 'survey'
+    | 'assessment'
+    | 'interactive_infographic'
+    | 'interactive_map';
 
 // Helper: word-boundary test to avoid false positives like "Elvis" → "vs"
 function wb(keyword: string, pattern: RegExp): boolean {
@@ -114,6 +149,14 @@ function wb(keyword: string, pattern: RegExp): boolean {
 // Helper to detect content type from keyword using word-boundary matching
 export function getContentType(keyword: string): ContentType {
     const lower = keyword.toLowerCase();
+
+    // Dedicated interactive formats
+    if (wb(lower, /\bquiz\b/) || lower.includes('knowledge check') || lower.includes('test yourself')) return 'quiz';
+    if (wb(lower, /\bsurvey\b/) || wb(lower, /\bquestionnaire\b/) || wb(lower, /\bpoll\b/)) return 'survey';
+    if (wb(lower, /\bassessment\b/) || wb(lower, /\bself[- ]assessment\b/) || lower.includes('score yourself')) return 'assessment';
+    if (wb(lower, /\bconfigurator\b/) || lower.includes('build your own') || lower.includes('customize')) return 'configurator';
+    if (wb(lower, /\binfographic\b/) || lower.includes('data visualization') || lower.includes('visual breakdown')) return 'interactive_infographic';
+    if (wb(lower, /\binteractive map\b/) || lower.includes('map by state') || lower.includes('regional map')) return 'interactive_map';
 
     // Comparison: "vs", "versus", "compared to"
     if (wb(lower, /\bvs\b/) || wb(lower, /\bversus\b/) || lower.includes('compared to')) return 'comparison';
@@ -169,6 +212,21 @@ export async function processOutlineJob(jobId: string): Promise<void> {
     const article = articleRecord[0];
     const researchData = article?.researchData;
 
+    const domainRecord = await db.select().from(domains).where(eq(domains.id, job.domainId!)).limit(1);
+    const domain = domainRecord[0];
+    if (!domain) {
+        throw new Error(`Domain not found: ${job.domainId}`);
+    }
+
+    const differentiationInstructions = buildDomainDifferentiationInstructions({
+        domainId: domain.id,
+        domainName: domain.domain,
+        niche: domain.niche,
+        bucket: domain.bucket,
+        keyword: payload.targetKeyword,
+        stage: 'outline',
+    });
+
     // Detect content type early for outline customization
     const detectedType = getContentType(payload.targetKeyword);
 
@@ -206,6 +264,97 @@ This is a COMPARISON page. In addition to the outline, design the comparison tab
     "defaultSort": "price",
     "verdict": "Our top pick is..."
   }`;
+    } else if (
+        detectedType === 'wizard'
+        || detectedType === 'configurator'
+        || detectedType === 'quiz'
+        || detectedType === 'survey'
+        || detectedType === 'assessment'
+    ) {
+        const needsScoring = detectedType === 'quiz' || detectedType === 'assessment';
+        const scoringInstructions = needsScoring
+            ? '\n- Define scoring logic using `scoring` with weighted fields and named score bands'
+            : '';
+        const scoringJson = needsScoring
+            ? `,
+    "scoring": {
+      "method": "weighted",
+      "weights": { "goal": 50, "budget": 50 },
+      "valueMap": {
+        "goal": { "save": 90, "speed": 60 },
+        "budget": { "low": 40, "medium": 70, "high": 95 }
+      },
+      "bands": [
+        { "min": 0, "max": 39, "label": "Early Stage", "description": "Foundational work needed first." },
+        { "min": 40, "max": 69, "label": "Developing", "description": "Good baseline with room to optimize." },
+        { "min": 70, "max": 100, "label": "Ready", "description": "Strong position for immediate action." }
+      ],
+      "outcomes": [
+        { "min": 0, "max": 39, "title": "Build fundamentals first", "body": "Focus on reducing risk and gathering more data." },
+        { "min": 40, "max": 69, "title": "Promising with caveats", "body": "You can proceed, but optimize weak areas first." },
+        { "min": 70, "max": 100, "title": "Strong fit", "body": "This looks like a high-confidence match for immediate action." }
+      ]
+    }`
+            : '';
+        typeSpecificInstructions = `
+This is an INTERACTIVE FLOW page. In addition to the outline, design a multi-step flow:
+- Define 3-6 steps with clear question prompts
+- Define fields per step (radio, checkbox, select, number, text)
+- Define result rules and recommendation outcomes
+- Include optional lead capture consent if appropriate${scoringInstructions}`;
+        typeSpecificJsonFields = `,
+  "wizardConfig": {
+    "steps": [
+      {
+        "id": "step_1",
+        "title": "Start",
+        "description": "Gather baseline information",
+        "fields": [
+          {
+            "id": "goal",
+            "type": "radio",
+            "label": "What is your goal?",
+            "options": [{ "value": "save", "label": "Save money" }, { "value": "speed", "label": "Save time" }],
+            "required": true
+          }
+        ]
+      }
+    ],
+    "resultRules": [
+      {
+        "condition": "goal == 'save'",
+        "title": "Savings-first path",
+        "body": "You should focus on low-cost options first."
+      }
+    ],
+    "resultTemplate": "recommendation"${scoringJson}
+  }`;
+    } else if (detectedType === 'interactive_infographic') {
+        typeSpecificInstructions = `
+This is an INTERACTIVE INFOGRAPHIC page:
+- Define visual comparison blocks and key metrics
+- Provide grouped categories for filtering
+- Include a short narrative summary for each metric`;
+        typeSpecificJsonFields = `,
+  "comparisonData": {
+    "options": [{ "name": "Category A", "badge": "Top", "scores": { "impact": 4, "cost": 3 } }],
+    "columns": [{ "key": "impact", "label": "Impact", "type": "rating", "sortable": true }],
+    "verdict": "Category A stands out for most readers."
+  }`;
+    } else if (detectedType === 'interactive_map') {
+        typeSpecificInstructions = `
+This is an INTERACTIVE MAP page:
+- Include region/state-level sections
+- Provide a fallback national summary
+- Keep each region block concise and actionable`;
+        typeSpecificJsonFields = `,
+  "geoData": {
+    "regions": {
+      "west": { "label": "West", "content": "<p>Regional guidance for western states.</p>" },
+      "midwest": { "label": "Midwest", "content": "<p>Regional guidance for midwest states.</p>" }
+    },
+    "fallback": "<p>General nationwide guidance for all readers.</p>"
+  }`;
     }
 
     // Generate outline
@@ -217,6 +366,8 @@ CONTEXT: ${payload.domainName}
 RESEARCH DATA (Use these facts):
 ${JSON.stringify(researchData || {})}
 ${typeSpecificInstructions}
+
+${differentiationInstructions}
 
 Requirements:
 1. Compelling H1 (with keyword)
@@ -255,6 +406,56 @@ Respond with JSON:
             columns: Array<{ key: string; label: string; type: string; sortable?: boolean }>;
             defaultSort?: string;
             verdict?: string;
+        };
+        wizardConfig?: {
+            steps: Array<{
+                id: string;
+                title: string;
+                description?: string;
+                fields: Array<{
+                    id: string;
+                    type: 'radio' | 'checkbox' | 'select' | 'number' | 'text';
+                    label: string;
+                    options?: Array<{ value: string; label: string }>;
+                    required?: boolean;
+                }>;
+                nextStep?: string;
+                branches?: Array<{ condition: string; goTo: string }>;
+            }>;
+            resultRules: Array<{
+                condition: string;
+                title: string;
+                body: string;
+                cta?: { text: string; url: string };
+            }>;
+            resultTemplate: 'summary' | 'recommendation' | 'score' | 'eligibility';
+            collectLead?: {
+                fields: string[];
+                consentText: string;
+                endpoint: string;
+            };
+            scoring?: {
+                method?: 'completion' | 'weighted';
+                weights?: Record<string, number>;
+                valueMap?: Record<string, Record<string, number>>;
+                bands?: Array<{
+                    min: number;
+                    max: number;
+                    label: string;
+                    description?: string;
+                }>;
+                outcomes?: Array<{
+                    min: number;
+                    max: number;
+                    title: string;
+                    body: string;
+                    cta?: { text: string; url: string };
+                }>;
+            };
+        };
+        geoData?: {
+            regions?: Record<string, { content: string; label?: string }>;
+            fallback: string;
         };
     }>(
         'outlineGeneration',
@@ -300,6 +501,26 @@ Respond with JSON:
             outlineUpdate.comparisonData = parsed.data;
         } else {
             console.warn(`[Pipeline] Invalid comparisonData from AI for article ${job.articleId}:`, parsed.error.issues);
+        }
+    }
+    if (response.data.wizardConfig) {
+        const parsed = wizardConfigSchema.safeParse(response.data.wizardConfig);
+        if (parsed.success) {
+            const collectLeadEndpoint = parsed.data.collectLead?.endpoint;
+            if (collectLeadEndpoint) {
+                assertAllowedCollectLeadEndpoint(collectLeadEndpoint, job.articleId ?? 'unknown');
+            }
+            outlineUpdate.wizardConfig = parsed.data;
+        } else {
+            console.warn(`[Pipeline] Invalid wizardConfig from AI for article ${job.articleId}:`, parsed.error.issues);
+        }
+    }
+    if (response.data.geoData) {
+        const parsed = geoDataSchema.safeParse(response.data.geoData);
+        if (parsed.success) {
+            outlineUpdate.geoData = parsed.data;
+        } else {
+            console.warn(`[Pipeline] Invalid geoData from AI for article ${job.articleId}:`, parsed.error.issues);
         }
     }
     await db.update(articles).set(outlineUpdate).where(eq(articles.id, job.articleId!));
@@ -383,9 +604,19 @@ export async function processDraftJob(jobId: string): Promise<void> {
         prompt = PROMPTS.article(outline, payload.targetKeyword, payload.domainName, article.researchData, voiceSeed);
     }
 
+    const differentiationInstructions = buildDomainDifferentiationInstructions({
+        domainId: domain.id,
+        domainName: domain.domain,
+        niche: domain.niche,
+        bucket: domain.bucket,
+        keyword: payload.targetKeyword,
+        stage: 'draft',
+    });
+    const promptWithDifferentiation = `${differentiationInstructions}\n\n${prompt}`;
+
     const response = await ai.generate(
         'draftGeneration',
-        prompt
+        promptWithDifferentiation
     );
 
     // Log call
@@ -407,7 +638,17 @@ export async function processDraftJob(jobId: string): Promise<void> {
 
     const sanitizedDraft = stripEmDashes(response.content).content;
     const wordCount = sanitizedDraft.split(/\s+/).filter(Boolean).length;
-    if (wordCount < 100 && contentType !== 'calculator') {
+    const shortFormTypes = new Set([
+        'calculator',
+        'wizard',
+        'configurator',
+        'quiz',
+        'survey',
+        'assessment',
+        'interactive_infographic',
+        'interactive_map',
+    ]);
+    if (wordCount < 100 && !shortFormTypes.has(contentType)) {
         throw new Error(`AI generated suspiciously short content (${wordCount} words). This usually indicates an error or refusal.`);
     }
 
@@ -468,9 +709,18 @@ export async function processHumanizeJob(jobId: string): Promise<void> {
 
     const voiceSeed = await getOrCreateVoiceSeed(job.domainId!, domain.domain, domain.niche || 'general');
 
+    const differentiationInstructions = buildDomainDifferentiationInstructions({
+        domainId: domain.id,
+        domainName: domain.domain,
+        niche: domain.niche,
+        bucket: domain.bucket,
+        keyword: articleRecord[0]?.targetKeyword || undefined,
+        stage: 'humanize',
+    });
+
     const response = await ai.generate(
         'humanization',
-        PROMPTS.humanize(draft, voiceSeed)
+        `${differentiationInstructions}\n\n${PROMPTS.humanize(draft, voiceSeed)}`
     );
 
     await db.insert(apiCallLogs).values({
@@ -535,20 +785,42 @@ export async function processSeoOptimizeJob(jobId: string): Promise<void> {
 
     if (!article.contentMarkdown) throw new Error('Content not found for SEO optimization');
 
-    // Fetch available internal links
-    const publishedArticles = await db.select({ title: articles.title, slug: articles.slug })
-        .from(articles)
-        .where(and(eq(articles.domainId, job.domainId!), eq(articles.status, 'published')))
-        .limit(20);
+    const domainRecord = await db.select().from(domains).where(eq(domains.id, job.domainId!)).limit(1);
+    const domain = domainRecord[0];
+    if (!domain) {
+        throw new Error(`Domain not found: ${job.domainId}`);
+    }
 
-    const availableLinks = publishedArticles.map(a => ({
-        title: a.title,
-        url: `/${a.slug}`
-    }));
+    let availableLinks: Array<{ title: string; url: string }> = [];
+    if (isInternalLinkingEnabled()) {
+        const publishedArticles = await db.select({ title: articles.title, slug: articles.slug })
+            .from(articles)
+            .where(and(eq(articles.domainId, job.domainId!), eq(articles.status, 'published')))
+            .limit(20);
+
+        availableLinks = publishedArticles.map((a) => ({
+            title: a.title,
+            url: `/${a.slug}`,
+        }));
+    }
+
+    const differentiationInstructions = buildDomainDifferentiationInstructions({
+        domainId: domain.id,
+        domainName: domain.domain,
+        niche: domain.niche,
+        bucket: domain.bucket,
+        keyword: article.targetKeyword || undefined,
+        stage: 'seo',
+    });
 
     const response = await ai.generate(
         'seoOptimize',
-        PROMPTS.seoOptimize(article.contentMarkdown, article.targetKeyword || '', article.secondaryKeywords || [], availableLinks)
+        `${differentiationInstructions}\n\n${PROMPTS.seoOptimize(
+            article.contentMarkdown,
+            article.targetKeyword || '',
+            article.secondaryKeywords || [],
+            availableLinks,
+        )}`
     );
 
     await db.insert(apiCallLogs).values({
@@ -834,12 +1106,24 @@ export async function processResearchJob(jobId: string): Promise<void> {
     });
 }
 
-const KEYWORD_RESEARCH_PROMPT = (domain: string, niche: string | null, subNiche: string | null, targetCount: number) => `
+const KEYWORD_RESEARCH_PROMPT = (
+    domain: string,
+    niche: string | null,
+    subNiche: string | null,
+    targetCount: number,
+    intentCoverageGuidance: string,
+    differentiationInstructions: string,
+) => `
 You are an SEO keyword research expert. Generate ${targetCount} high-value keyword opportunities for this website:
 
 DOMAIN: ${domain}
 NICHE: ${niche || 'General'}
 SUB-NICHE: ${subNiche || 'Not specified'}
+
+${differentiationInstructions}
+
+INTENT COVERAGE PRIORITY:
+${intentCoverageGuidance}
 
 For each keyword, provide:
 1. The exact keyword phrase (2-5 words preferred for long-tail)
@@ -851,8 +1135,10 @@ For each keyword, provide:
 Focus on:
 - Long-tail keywords with clear commercial or informational intent
 - Keywords a small authority site could realistically rank for (difficulty < 50)
-- Mix of informational content (how-to, guides) and commercial (best, reviews)
+- Mix of informational, commercial, transactional, and navigational opportunities
 - Keywords that suggest user readiness to take action
+- Keyword phrasing that reflects this domain's unique perspective and niche framing
+- Avoid generic or repetitive phrasing patterns across batches
 
 Return as JSON:
 {
@@ -874,6 +1160,36 @@ export async function processKeywordResearchJob(jobId: string): Promise<void> {
     const job = jobs[0];
     const payload = job.payload as { domain: string; niche: string | null; subNiche: string | null; targetCount: number };
 
+    const domainRecord = await db.select().from(domains).where(eq(domains.id, job.domainId!)).limit(1);
+    const domain = domainRecord[0];
+    if (!domain) {
+        throw new Error(`Domain not found: ${job.domainId}`);
+    }
+
+    const existingIntentRows = await db
+        .select({
+            intent: keywords.intent,
+            count: sql<number>`count(*)::int`,
+        })
+        .from(keywords)
+        .where(eq(keywords.domainId, job.domainId!))
+        .groupBy(keywords.intent);
+
+    const intentCounts = existingIntentRows.reduce<Record<string, number>>((acc, row) => {
+        const key = row.intent || 'informational';
+        acc[key] = row.count;
+        return acc;
+    }, {});
+
+    const intentCoverageGuidance = buildIntentCoverageGuidance(intentCounts, payload.targetCount);
+    const differentiationInstructions = buildDomainDifferentiationInstructions({
+        domainId: domain.id,
+        domainName: domain.domain,
+        niche: domain.niche,
+        bucket: domain.bucket,
+        stage: 'keyword_research',
+    });
+
     const response = await ai.generateJSON<{
         keywords: Array<{
             keyword: string;
@@ -884,7 +1200,14 @@ export async function processKeywordResearchJob(jobId: string): Promise<void> {
         }>;
     }>(
         'keywordResearch',
-        KEYWORD_RESEARCH_PROMPT(payload.domain, payload.niche, payload.subNiche, payload.targetCount)
+        KEYWORD_RESEARCH_PROMPT(
+            payload.domain,
+            payload.niche,
+            payload.subNiche,
+            payload.targetCount,
+            intentCoverageGuidance,
+            differentiationInstructions,
+        ),
     );
 
     // Track costs
@@ -919,8 +1242,17 @@ export async function processKeywordResearchJob(jobId: string): Promise<void> {
     }
 
     if (response.data.keywords.length > 0) {
+        const maxIntentCount = Math.max(...Object.values(intentCounts), 0);
+        const intentWeight = (intent: string): number => {
+            const count = intentCounts[intent] ?? 0;
+            if (maxIntentCount <= 0) return 1.2;
+            return 1 + ((maxIntentCount - count) / Math.max(maxIntentCount, 1)) * 0.4;
+        };
+
         const sortedKeywords = [...response.data.keywords].sort((a, b) => {
-            return (b.searchVolume / (b.difficulty || 1)) - (a.searchVolume / (a.difficulty || 1));
+            const scoreA = (a.searchVolume / (a.difficulty || 1)) * intentWeight(a.intent);
+            const scoreB = (b.searchVolume / (b.difficulty || 1)) * intentWeight(b.intent);
+            return scoreB - scoreA;
         });
         const bestKeyword = sortedKeywords[0];
 

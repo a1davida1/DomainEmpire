@@ -6,12 +6,43 @@
 import { escapeHtml, escapeAttr, type Article } from './shared';
 
 /**
- * Generate a standalone embeddable HTML page for calculator or wizard articles.
+ * Generate a standalone embeddable HTML page for supported interactive articles.
  * Returns null if the article type doesn't support embedding.
  */
 export function generateEmbedPage(article: Article, domain: string): string | null {
-    const contentType = article.contentType || 'article';
-    if (contentType !== 'calculator' && contentType !== 'wizard') return null;
+    const contentType = String(article.contentType || 'article');
+    const wizardLikeTypes = new Set(['wizard', 'configurator', 'quiz', 'survey', 'assessment']);
+    if (contentType !== 'calculator' && !wizardLikeTypes.has(contentType)) return null;
+    const wizardMode = contentType === 'configurator' || contentType === 'quiz' || contentType === 'survey' || contentType === 'assessment'
+        ? contentType
+        : 'wizard';
+    const wizardFinalLabel = wizardMode === 'configurator'
+        ? 'Review Configuration'
+        : wizardMode === 'quiz'
+            ? 'See Score'
+            : wizardMode === 'survey'
+                ? 'Submit Survey'
+                : wizardMode === 'assessment'
+                    ? 'See Assessment'
+                    : 'See Results';
+    const wizardResultsTitle = wizardMode === 'configurator'
+        ? 'Your Configuration'
+        : wizardMode === 'quiz'
+            ? 'Your Score'
+            : wizardMode === 'survey'
+                ? 'Thanks for sharing'
+                : wizardMode === 'assessment'
+                    ? 'Assessment Results'
+                    : 'Your Results';
+    const wizardRestartLabel = wizardMode === 'configurator'
+        ? 'Reconfigure'
+        : wizardMode === 'quiz'
+            ? 'Retake Quiz'
+            : wizardMode === 'survey'
+                ? 'Submit Another Response'
+                : wizardMode === 'assessment'
+                    ? 'Retake Assessment'
+                    : 'Start Over';
 
     const title = escapeHtml(article.title);
 
@@ -65,7 +96,7 @@ function compute(){
   window.parent.postMessage({type:'embed-result',source:'${escapeAttr(domain)}',values:vals},'*');
 }
 </script>`;
-    } else if (contentType === 'wizard' && article.wizardConfig) {
+    } else if (wizardLikeTypes.has(contentType) && article.wizardConfig) {
         const wc = article.wizardConfig as {
             steps: Array<{
                 id: string; title: string; description?: string;
@@ -102,11 +133,11 @@ function compute(){
             const desc = step.description ? `<p class="ws-desc">${escapeHtml(step.description)}</p>` : '';
             return `<div class="ws" data-step-id="${escapeAttr(step.id)}" data-step-index="${i}" style="${i === 0 ? '' : 'display:none'}">
   <h3>${escapeHtml(step.title)}</h3>${desc}${fieldsHtml}
-  <div class="wn">${i > 0 ? '<button type="button" class="wb">Back</button>' : '<span></span>'}<button type="button" class="wnx">${i === wc.steps.length - 1 ? 'See Results' : 'Next'}</button></div>
+  <div class="wn">${i > 0 ? '<button type="button" class="wb">Back</button>' : '<span></span>'}<button type="button" class="wnx">${i === wc.steps.length - 1 ? escapeHtml(wizardFinalLabel) : 'Next'}</button></div>
 </div>`;
         }).join('\n');
 
-        widgetHtml = `<h2>${title}</h2><div class="wizard-container"><div class="wp">${progressHtml}</div>${stepsHtml}<div class="wres" style="display:none"><h3>Your Results</h3><div class="wres-cards"></div><button type="button" class="wrs">Start Over</button></div></div>`;
+        widgetHtml = `<h2>${title}</h2><div class="wizard-container wizard-mode-${escapeAttr(wizardMode)}"><div class="wp">${progressHtml}</div>${stepsHtml}<div class="wres" style="display:none"><h3>${escapeHtml(wizardResultsTitle)}</h3><div class="wres-cards"></div><button type="button" class="wrs">${escapeHtml(wizardRestartLabel)}</button></div></div>`;
 
         const stepsJson = JSON.stringify(wc.steps.map(s => ({
             id: s.id, nextStep: s.nextStep, branches: s.branches,
@@ -172,6 +203,14 @@ button:hover{background:#1d4ed8}
 .wrc h4{margin-bottom:0.25rem}
 .cta-btn{display:inline-block;margin-top:0.5rem;background:#2563eb;color:#fff;padding:0.5rem 1rem;border-radius:0.375rem;text-decoration:none;font-weight:600}
 .wrs{background:#94a3b8;margin-top:1rem}
+.wizard-mode-configurator .wnx{background:#0f766e}
+.wizard-mode-configurator .wnx:hover{background:#115e59}
+.wizard-mode-quiz .wnx{background:#b45309}
+.wizard-mode-quiz .wnx:hover{background:#92400e}
+.wizard-mode-survey .wnx{background:#15803d}
+.wizard-mode-survey .wnx:hover{background:#166534}
+.wizard-mode-assessment .wnx{background:#c2410c}
+.wizard-mode-assessment .wnx:hover{background:#9a3412}
 .shake{animation:shake 0.3s}
 @keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
 </style>

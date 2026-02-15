@@ -70,6 +70,7 @@ export async function POST(request: NextRequest) {
         message: channel
             ? `Revoked ${revokedCount} active ${channel} credential(s). Reconnect before next publish.`
             : `Revoked ${revokedCount} active growth credential(s). Reconnect channels before next publish.`,
+        userId: user.id,
         actionUrl: '/dashboard/monitoring',
     });
 

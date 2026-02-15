@@ -3,11 +3,12 @@
  * Extracted from generator.ts to be reused across content-type templates.
  */
 
-import { db, citations, users } from '@/lib/db';
-import { eq } from 'drizzle-orm';
+import { db, citations, users, domains } from '@/lib/db';
+import { eq, isNull } from 'drizzle-orm';
 import { marked } from 'marked';
 import sanitizeHtml from 'sanitize-html';
 import type { Article, Dataset } from '@/lib/db/schema';
+import { isPortfolioCrossDomainLinkBlockingEnabled } from '@/lib/content/link-policy';
 
 // Re-export types used by templates
 export type { Article };
@@ -57,7 +58,91 @@ export function escapeAttr(unsafe: string): string {
 // Markdown → HTML Rendering
 // ==============================
 
-export async function renderMarkdownToHtml(markdown: string): Promise<string> {
+type RenderMarkdownOptions = {
+    currentDomain?: string;
+};
+
+type PortfolioDomainCache = {
+    fetchedAt: number;
+    domains: string[];
+};
+
+const PORTFOLIO_DOMAIN_CACHE_TTL_MS = 5 * 60 * 1000;
+let portfolioDomainCache: PortfolioDomainCache | null = null;
+
+function normalizeHost(host: string): string {
+    return host.replace(/^www\./i, '').trim().toLowerCase();
+}
+
+async function getPortfolioDomains(): Promise<string[]> {
+    const now = Date.now();
+    if (portfolioDomainCache && now - portfolioDomainCache.fetchedAt < PORTFOLIO_DOMAIN_CACHE_TTL_MS) {
+        return portfolioDomainCache.domains;
+    }
+
+    if (!process.env.DATABASE_URL) {
+        return [];
+    }
+
+    try {
+        const rows = await db
+            .select({ domain: domains.domain })
+            .from(domains)
+            .where(isNull(domains.deletedAt));
+
+        const unique = [...new Set(rows
+            .map((row) => normalizeHost(row.domain))
+            .filter((domain) => domain.length > 0))];
+
+        portfolioDomainCache = {
+            fetchedAt: now,
+            domains: unique,
+        };
+        return unique;
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`[deploy] Portfolio domain list unavailable for cross-link policy: ${message}`);
+        return [];
+    }
+}
+
+function stripPortfolioCrossDomainLinks(
+    html: string,
+    portfolioDomains: string[],
+    currentDomain?: string,
+): string {
+    if (portfolioDomains.length === 0) {
+        return html;
+    }
+
+    const blocked = new Set(portfolioDomains);
+    if (currentDomain) {
+        blocked.delete(normalizeHost(currentDomain));
+    }
+
+    if (blocked.size === 0) {
+        return html;
+    }
+
+    return html.replace(/<a\b([^>]*?)href=(['"])(.*?)\2([^>]*?)>([\s\S]*?)<\/a>/gi, (full, _pre, _quote, href, _post, text) => {
+        let parsed: URL | null = null;
+        try {
+            parsed = new URL(href);
+        } catch {
+            return full; // relative or invalid URL; leave unchanged
+        }
+
+        const host = normalizeHost(parsed.hostname);
+        if (!blocked.has(host)) {
+            return full;
+        }
+
+        // Keep visible text but remove portfolio cross-domain href.
+        return `<span class="portfolio-link-blocked">${text}</span>`;
+    });
+}
+
+export async function renderMarkdownToHtml(markdown: string, options: RenderMarkdownOptions = {}): Promise<string> {
     const cleaned = markdown
         .replace(/\[INTERNAL_LINK.*?\]/g, '')
         .replace(/\[EXTERNAL_LINK.*?\]/g, '')
@@ -65,7 +150,14 @@ export async function renderMarkdownToHtml(markdown: string): Promise<string> {
 
     const result = marked.parse(cleaned, { async: false });
     const html = typeof result === 'string' ? result : await result;
-    return sanitizeArticleHtml(html);
+    const sanitized = sanitizeArticleHtml(html);
+
+    if (!isPortfolioCrossDomainLinkBlockingEnabled()) {
+        return sanitized;
+    }
+
+    const portfolioDomains = await getPortfolioDomains();
+    return stripPortfolioCrossDomainLinks(sanitized, portfolioDomains, options.currentDomain);
 }
 
 // ==============================
@@ -138,12 +230,28 @@ export async function buildTrustElements(
         sections.push(`<div class="disclosure affiliate-disclosure"><small>${escapeHtml(disclosure.affiliateDisclosure)}</small></div>`);
     }
 
-    // Citations / Sources
-    const articleCitations = await db.select()
-        .from(citations)
-        .where(eq(citations.articleId, article.id))
-        .orderBy(citations.position);
+    const hasDatabase = Boolean(process.env.DATABASE_URL && process.env.DATABASE_URL.trim());
+    let articleCitations: Array<typeof citations.$inferSelect> = [];
+    let reviewer: { name: string; credentials: string | null } | undefined;
 
+    if (hasDatabase) {
+        try {
+            articleCitations = await db.select()
+                .from(citations)
+                .where(eq(citations.articleId, article.id))
+                .orderBy(citations.position);
+
+            if (disclosure?.showReviewedBy && article.lastReviewedBy) {
+                [reviewer] = await db.select({ name: users.name, credentials: users.credentials })
+                    .from(users).where(eq(users.id, article.lastReviewedBy)).limit(1);
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            console.warn(`[deploy] Trust metadata query failed for article ${article.id}; continuing without DB-backed sections: ${message}`);
+        }
+    }
+
+    // Citations / Sources
     if (articleCitations.length > 0) {
         const sourceItems = articleCitations.map((c, i) => {
             const index = i + 1;
@@ -158,13 +266,9 @@ export async function buildTrustElements(
     }
 
     // Reviewed by attribution
-    if (disclosure?.showReviewedBy && article.lastReviewedBy) {
-        const [reviewer] = await db.select({ name: users.name, credentials: users.credentials })
-            .from(users).where(eq(users.id, article.lastReviewedBy)).limit(1);
-        if (reviewer) {
-            const creds = reviewer.credentials ? `, ${escapeHtml(reviewer.credentials)}` : '';
-            sections.push(`<div class="reviewed-by"><small>Reviewed by ${escapeHtml(reviewer.name)}${creds}</small></div>`);
-        }
+    if (reviewer) {
+        const creds = reviewer.credentials ? `, ${escapeHtml(reviewer.credentials)}` : '';
+        sections.push(`<div class="reviewed-by"><small>Reviewed by ${escapeHtml(reviewer.name)}${creds}</small></div>`);
     }
 
     // Last updated
@@ -400,7 +504,7 @@ export function buildFreshnessBadge(
 // ==============================
 
 export function buildPrintButton(contentType: string): string {
-    const printableTypes = ['cost_guide', 'comparison', 'checklist', 'faq', 'review'];
+    const printableTypes = ['cost_guide', 'comparison', 'checklist', 'faq', 'review', 'interactive_infographic', 'interactive_map'];
     if (!printableTypes.includes(contentType)) return '';
     return `<button class="print-btn" onclick="window.print()" type="button">Save as PDF</button>`;
 }

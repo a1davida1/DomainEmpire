@@ -20,6 +20,8 @@ import {
     ListTodo,
     Wallet,
     Swords,
+    Megaphone,
+    PlugZap,
 } from 'lucide-react';
 
 const navigation = [
@@ -31,6 +33,8 @@ const navigation = [
     { name: 'Revenue', href: '/dashboard/revenue', icon: DollarSign },
     { name: 'Finances', href: '/dashboard/finances', icon: Wallet },
     { name: 'Competitors', href: '/dashboard/competitors', icon: Swords },
+    { name: 'Growth', href: '/dashboard/growth', icon: Megaphone },
+    { name: 'Integrations', href: '/dashboard/integrations', icon: PlugZap },
     { name: 'Queue', href: '/dashboard/queue', icon: ListTodo },
     { name: 'Research', href: '/dashboard/research', icon: Beaker },
     { name: 'Settings', href: '/dashboard/settings', icon: Settings },

@@ -95,9 +95,15 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
     return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function mergeResearchValues(values: unknown[]): unknown {
-    if (values.length === 0) return {};
+const MAX_MERGE_DEPTH = 10;
+
+function mergeResearchValues(values: unknown[], depth = 0): unknown {
+    if (values.length === 0) return null;
     if (values.length === 1) return values[0];
+
+    if (depth >= MAX_MERGE_DEPTH) {
+        return values.find((v) => v !== null && v !== undefined) ?? null;
+    }
 
     if (values.every((value) => Array.isArray(value))) {
         const arrays = values as unknown[][];
@@ -113,7 +119,7 @@ function mergeResearchValues(values: unknown[]): unknown {
                 .map((obj) => obj[key])
                 .filter((value) => value !== undefined && value !== null);
             if (keyValues.length === 0) continue;
-            merged[key] = mergeResearchValues(keyValues);
+            merged[key] = mergeResearchValues(keyValues, depth + 1);
         }
         return merged;
     }
@@ -287,7 +293,11 @@ export async function generateResearchWithCache<T>(
     });
 
     if (ranked.length > 0) {
-        const mergedData = mergeResearchValues(ranked.map((entry) => entry.row.resultJson)) as T;
+        const mergedRaw = mergeResearchValues(ranked.map((entry) => entry.row.resultJson));
+        if (mergedRaw === null || mergedRaw === undefined) {
+            console.error('Research cache merge produced null/undefined from', ranked.length, 'entries');
+        }
+        const mergedData = (mergedRaw ?? opts.emptyResult) as T;
         return {
             data: mergedData,
             modelKey: 'research',
@@ -308,13 +318,17 @@ export async function generateResearchWithCache<T>(
     const ai = getAIClient();
     try {
         const live = await ai.generateJSON<T>('research', opts.prompt);
-        await upsertResearchCacheEntry({
-            queryText: opts.queryText,
-            resultJson: live.data,
-            sourceModel: live.resolvedModel || live.model,
-            domainPriority,
-            ttlHours: opts.ttlHours,
-        });
+        try {
+            await upsertResearchCacheEntry({
+                queryText: opts.queryText,
+                resultJson: live.data,
+                sourceModel: live.resolvedModel || live.model,
+                domainPriority,
+                ttlHours: opts.ttlHours,
+            });
+        } catch (cacheError) {
+            console.error('Best-effort research cache upsert failed:', cacheError);
+        }
 
         return {
             data: live.data,

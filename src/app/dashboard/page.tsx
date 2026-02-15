@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
     Globe, DollarSign, FileText, Cpu, TrendingUp, AlertTriangle,
-    Plus, Rocket, Activity, Clock, Mail
+    Plus, Rocket, Activity, Clock, Mail, Megaphone
 } from 'lucide-react';
 import Link from 'next/link';
 import { db, domains, articles, monetizationProfiles, contentQueue, subscribers } from '@/lib/db';
@@ -291,6 +291,12 @@ export default async function DashboardPage() {
                     </p>
                 </div>
                 <div className="flex gap-2">
+                    <Link href="/dashboard/growth">
+                        <Button variant="outline">
+                            <Megaphone className="mr-2 h-4 w-4" />
+                            Growth
+                        </Button>
+                    </Link>
                     <Link href="/dashboard/deploy">
                         <Button variant="outline">
                             <Rocket className="mr-2 h-4 w-4" />

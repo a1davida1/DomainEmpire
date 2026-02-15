@@ -130,7 +130,7 @@ export async function generateLeadCapturePage(
   domainId?: string,
 ): Promise<string> {
   const config = article.leadGenConfig as LeadGenConfig | null;
-  const contentHtml = await renderMarkdownToHtml(article.contentMarkdown || '');
+  const contentHtml = await renderMarkdownToHtml(article.contentMarkdown || '', { currentDomain: domain });
   const { disclaimerHtml, trustHtml } = await buildTrustElements(article, disclosure);
   const dataSourcesHtml = generateDataSourcesSection(datasets);
   const schemaLd = buildSchemaJsonLd(article, domain, 'Article');

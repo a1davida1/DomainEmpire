@@ -46,6 +46,103 @@ interface WizardConfig {
     consentText: string;
     endpoint: string;
   };
+  scoring?: {
+    method?: 'completion' | 'weighted';
+    weights?: Record<string, number>;
+    valueMap?: Record<string, Record<string, number>>;
+    bands?: Array<{
+      min: number;
+      max: number;
+      label: string;
+      description?: string;
+    }>;
+    outcomes?: Array<{
+      min: number;
+      max: number;
+      title: string;
+      body: string;
+      cta?: { text: string; url: string };
+    }>;
+  };
+}
+
+type WizardMode = 'wizard' | 'configurator' | 'quiz' | 'survey' | 'assessment';
+
+interface WizardModeCopy {
+  finalStepLabel: string;
+  resultsTitle: string;
+  restartLabel: string;
+  emptyTitle: string;
+  emptyBody: string;
+  leadTitle: string;
+  leadButton: string;
+  showAnswerSummary: boolean;
+  showQuizScore: boolean;
+}
+
+const WIZARD_MODE_COPY: Record<WizardMode, WizardModeCopy> = {
+  wizard: {
+    finalStepLabel: 'See Results',
+    resultsTitle: 'Your Results',
+    restartLabel: 'Start Over',
+    emptyTitle: 'No matching results',
+    emptyBody: 'Please try different answers.',
+    leadTitle: 'Get Your Personalized Report',
+    leadButton: 'Get My Results',
+    showAnswerSummary: false,
+    showQuizScore: false,
+  },
+  configurator: {
+    finalStepLabel: 'Review Configuration',
+    resultsTitle: 'Your Configuration',
+    restartLabel: 'Reconfigure',
+    emptyTitle: 'Configuration ready',
+    emptyBody: 'Your current selections are shown below.',
+    leadTitle: 'Send Me This Configuration',
+    leadButton: 'Save Configuration',
+    showAnswerSummary: true,
+    showQuizScore: false,
+  },
+  quiz: {
+    finalStepLabel: 'See Score',
+    resultsTitle: 'Your Score',
+    restartLabel: 'Retake Quiz',
+    emptyTitle: 'Quiz complete',
+    emptyBody: 'You completed the quiz. Review your score below.',
+    leadTitle: 'Email My Quiz Results',
+    leadButton: 'Send Results',
+    showAnswerSummary: false,
+    showQuizScore: true,
+  },
+  survey: {
+    finalStepLabel: 'Submit Survey',
+    resultsTitle: 'Thanks for sharing',
+    restartLabel: 'Submit Another Response',
+    emptyTitle: 'Submission recorded',
+    emptyBody: 'Thank you for completing this survey.',
+    leadTitle: 'Send Me A Copy',
+    leadButton: 'Email My Response',
+    showAnswerSummary: true,
+    showQuizScore: false,
+  },
+  assessment: {
+    finalStepLabel: 'See Assessment',
+    resultsTitle: 'Assessment Results',
+    restartLabel: 'Retake Assessment',
+    emptyTitle: 'Assessment complete',
+    emptyBody: 'Review your outcome and recommendations below.',
+    leadTitle: 'Email My Assessment',
+    leadButton: 'Send Assessment',
+    showAnswerSummary: true,
+    showQuizScore: true,
+  },
+};
+
+function getWizardModeFromContentType(contentType: string | null | undefined): WizardMode {
+  if (contentType === 'configurator' || contentType === 'quiz' || contentType === 'survey' || contentType === 'assessment') {
+    return contentType;
+  }
+  return 'wizard';
 }
 
 function renderField(field: WizardStep['fields'][0]): string {
@@ -92,9 +189,10 @@ function renderField(field: WizardStep['fields'][0]): string {
   }
 }
 
-function renderStep(step: WizardStep, index: number, total: number): string {
+function renderStep(step: WizardStep, index: number, total: number, mode: WizardMode): string {
   const fieldsHtml = step.fields.map(renderField).join('\n');
   const desc = step.description ? `<p class="wizard-step-desc">${escapeHtml(step.description)}</p>` : '';
+  const finalLabel = WIZARD_MODE_COPY[mode].finalStepLabel;
 
   return `<div class="wizard-step" data-step-id="${escapeAttr(step.id)}" data-step-index="${index}" style="${index === 0 ? '' : 'display:none'}">
   <h3 class="wizard-step-title">${escapeHtml(step.title)}</h3>
@@ -102,7 +200,7 @@ function renderStep(step: WizardStep, index: number, total: number): string {
   ${fieldsHtml}
   <div class="wizard-nav">
     ${index > 0 ? '<button type="button" class="wizard-back">Back</button>' : '<span></span>'}
-    <button type="button" class="wizard-next">${index === total - 1 ? 'See Results' : 'Next'}</button>
+    <button type="button" class="wizard-next">${index === total - 1 ? finalLabel : 'Next'}</button>
   </div>
 </div>`;
 }
@@ -118,7 +216,8 @@ function buildProgressBar(steps: WizardStep[]): string {
   return `<div class="wizard-progress">${segments}</div>`;
 }
 
-function buildResultsTemplate(config: WizardConfig): string {
+function buildResultsTemplate(config: WizardConfig, mode: WizardMode): string {
+  const modeCopy = WIZARD_MODE_COPY[mode];
   // Lead capture form (optional)
   let leadHtml = '';
   if (config.collectLead) {
@@ -128,32 +227,46 @@ function buildResultsTemplate(config: WizardConfig): string {
     }).join('\n    ');
     leadHtml = `
   <div class="wizard-lead-form" style="display:none">
-    <h4>Get Your Personalized Report</h4>
+    <h4>${escapeHtml(modeCopy.leadTitle)}</h4>
     <form id="wizard-lead-form" action="${escapeAttr(config.collectLead.endpoint)}" method="POST">
       ${fields}
       <div class="consent"><label><input type="checkbox" required> ${escapeHtml(config.collectLead.consentText)}</label></div>
-      <button type="submit">Get My Results</button>
+      <button type="submit">${escapeHtml(modeCopy.leadButton)}</button>
     </form>
   </div>`;
   }
 
+  const answerSummaryHtml = modeCopy.showAnswerSummary
+    ? `<div class="wizard-answer-summary" style="display:none">
+  <h4>Selection Summary</h4>
+  <ul class="wizard-answer-list"></ul>
+</div>`
+    : '';
+  const quizScoreHtml = modeCopy.showQuizScore
+    ? '<div class="wizard-quiz-score" style="display:none"></div>'
+    : '';
+
   return `<div class="wizard-results" style="display:none">
-  <h3 class="wizard-results-title">Your Results</h3>
+  <h3 class="wizard-results-title">${escapeHtml(modeCopy.resultsTitle)}</h3>
+  ${quizScoreHtml}
   <div class="wizard-results-cards"></div>
+  ${answerSummaryHtml}
   ${leadHtml}
-  <button type="button" class="wizard-restart">Start Over</button>
+  <button type="button" class="wizard-restart">${escapeHtml(modeCopy.restartLabel)}</button>
 </div>`;
 }
 
-function buildWizardScript(config: WizardConfig): string {
+function buildWizardScript(config: WizardConfig, mode: WizardMode): string {
+  const modeCopy = WIZARD_MODE_COPY[mode];
   // Serialize config to JSON for client-side use
   const stepsJson = JSON.stringify(config.steps.map(s => ({
     id: s.id,
     nextStep: s.nextStep,
     branches: s.branches,
-    fieldIds: s.fields.map(f => ({ id: f.id, required: !!f.required })),
+    fieldIds: s.fields.map(f => ({ id: f.id, label: f.label, required: !!f.required })),
   })));
   const rulesJson = JSON.stringify(config.resultRules);
+  const scoringJson = JSON.stringify(config.scoring ?? null);
   const resultTemplate = config.resultTemplate;
 
   return `<script>
@@ -162,7 +275,12 @@ function buildWizardScript(config: WizardConfig): string {
   if(!container) return;
   var steps = ${stepsJson};
   var rules = ${rulesJson};
+  var scoring = ${scoringJson};
   var resultType = '${resultTemplate}';
+  var wizardMode = ${JSON.stringify(mode)};
+  var enableScoreUi = ${JSON.stringify(modeCopy.showQuizScore)};
+  var emptyTitle = ${JSON.stringify(modeCopy.emptyTitle)};
+  var emptyBody = ${JSON.stringify(modeCopy.emptyBody)};
   var answers = {};
   var history = [0];
 
@@ -203,6 +321,99 @@ function buildWizardScript(config: WizardConfig): string {
       if(v===undefined||v===''||(Array.isArray(v)&&v.length===0)) valid=false;
     });
     return valid;
+  }
+
+  function computeCompletionScore() {
+    var required = 0;
+    var answeredRequired = 0;
+    steps.forEach(function(step){
+      step.fieldIds.forEach(function(field){
+        if(!field.required) return;
+        required++;
+        var v = answers[field.id];
+        if(v!==undefined && v!=='' && (!Array.isArray(v) || v.length>0)) answeredRequired++;
+      });
+    });
+    return required > 0 ? Math.round((answeredRequired / required) * 100) : 100;
+  }
+
+  function toScoreValue(fieldId, value) {
+    if(value===undefined || value===null) return null;
+    var valueMap = scoring && scoring.valueMap ? scoring.valueMap[fieldId] : null;
+    if(typeof value==='number') return value;
+    if(typeof value==='string'){
+      if(valueMap && Object.prototype.hasOwnProperty.call(valueMap, value)){
+        return Number(valueMap[value]);
+      }
+      if(value.trim()!=='' && !isNaN(Number(value))) return Number(value);
+      return value.trim()!=='' ? 100 : null;
+    }
+    if(Array.isArray(value)){
+      if(value.length===0) return 0;
+      if(valueMap){
+        var sum = 0;
+        var count = 0;
+        value.forEach(function(entry){
+          if(Object.prototype.hasOwnProperty.call(valueMap, entry)){
+            sum += Number(valueMap[entry]);
+            count += 1;
+          }
+        });
+        if(count>0) return sum / count;
+      }
+      return 100;
+    }
+    return 100;
+  }
+
+  function computeWeightedScore() {
+    if(!scoring || scoring.method !== 'weighted' || !scoring.weights) return null;
+    var weights = scoring.weights;
+    var totalWeight = 0;
+    var achieved = 0;
+    Object.keys(weights).forEach(function(fieldId){
+      var weight = Number(weights[fieldId]);
+      if(!isFinite(weight) || weight <= 0) return;
+      totalWeight += weight;
+      var scoreVal = toScoreValue(fieldId, answers[fieldId]);
+      if(scoreVal===null) return;
+      var bounded = Math.max(0, Math.min(100, Number(scoreVal)));
+      achieved += weight * (bounded / 100);
+    });
+    if(totalWeight <= 0) return null;
+    return Math.round((achieved / totalWeight) * 100);
+  }
+
+  function computeScore() {
+    if(scoring && scoring.method === 'weighted') {
+      var weighted = computeWeightedScore();
+      if(weighted !== null) return weighted;
+    }
+    return computeCompletionScore();
+  }
+
+  function getScoreBand(score) {
+    if(!scoring || !Array.isArray(scoring.bands)) return null;
+    for(var i=0;i<scoring.bands.length;i++){
+      var band = scoring.bands[i];
+      var min = Number(band.min);
+      var max = Number(band.max);
+      if(!isFinite(min) || !isFinite(max)) continue;
+      if(score >= min && score <= max) return band;
+    }
+    return null;
+  }
+
+  function getScoreOutcome(score) {
+    if(!scoring || !Array.isArray(scoring.outcomes)) return null;
+    for(var i=0;i<scoring.outcomes.length;i++){
+      var outcome = scoring.outcomes[i];
+      var min = Number(outcome.min);
+      var max = Number(outcome.max);
+      if(!isFinite(min) || !isFinite(max)) continue;
+      if(score >= min && score <= max) return outcome;
+    }
+    return null;
   }
 
   // Safe expression evaluator — NO eval/new Function.
@@ -339,8 +550,67 @@ function buildWizardScript(config: WizardConfig): string {
         cardsEl.appendChild(card);
       }
     });
+    var scoreValue = null;
+    var scoreBand = null;
+    if(enableScoreUi){
+      scoreValue = computeScore();
+      scoreBand = getScoreBand(scoreValue);
+    }
     if(cardsEl.children.length===0){
-      cardsEl.innerHTML='<div class="wizard-result-card"><h4>No matching results</h4><p>Please try different answers.</p></div>';
+      var scoreOutcome = scoreValue!==null ? getScoreOutcome(scoreValue) : null;
+      if(scoreOutcome){
+        var outcomeCard = document.createElement('div');
+        outcomeCard.className = 'wizard-result-card result-' + resultType;
+        outcomeCard.innerHTML = '<h4>'+scoreOutcome.title+'</h4><p>'+scoreOutcome.body+'</p>' +
+          (scoreOutcome.cta ? '<a href="'+scoreOutcome.cta.url+'" class="cta-button">'+scoreOutcome.cta.text+'</a>' : '');
+        cardsEl.appendChild(outcomeCard);
+      } else {
+        cardsEl.innerHTML='<div class="wizard-result-card"><h4>'+emptyTitle+'</h4><p>'+emptyBody+'</p></div>';
+      }
+    }
+    function findFieldLabel(fieldId){
+      for(var si=0;si<steps.length;si++){
+        var fields = steps[si].fieldIds || [];
+        for(var fi=0;fi<fields.length;fi++){
+          if(fields[fi].id===fieldId) return fields[fi].label || fieldId;
+        }
+      }
+      return fieldId;
+    }
+    var summaryEl = container.querySelector('.wizard-answer-summary');
+    if(summaryEl){
+      var listEl = summaryEl.querySelector('.wizard-answer-list');
+      if(listEl){
+        listEl.innerHTML = '';
+        Object.keys(answers).forEach(function(key){
+          var item = document.createElement('li');
+          var value = answers[key];
+          var text = Array.isArray(value) ? value.join(', ') : String(value || '(none)');
+          item.textContent = findFieldLabel(key) + ': ' + text;
+          listEl.appendChild(item);
+        });
+      }
+      summaryEl.style.display = '';
+    }
+    var scoreEl = container.querySelector('.wizard-quiz-score');
+    if(scoreEl){
+      var pct = scoreValue!==null ? scoreValue : computeScore();
+      var band = scoreBand || getScoreBand(pct);
+      var prefix = wizardMode === 'quiz' ? 'Quiz Score: ' : 'Assessment Score: ';
+      var suffix = band && band.label ? (' - ' + band.label) : '';
+      var details = band && band.description ? (' (' + band.description + ')') : '';
+      scoreEl.textContent = prefix + pct + '%' + suffix;
+      if(details){
+        var detailEl = document.createElement('div');
+        detailEl.className = 'wizard-score-detail';
+        detailEl.textContent = details;
+        scoreEl.innerHTML = '';
+        var textSpan = document.createElement('span');
+        textSpan.textContent = prefix + pct + '%' + suffix;
+        scoreEl.appendChild(textSpan);
+        scoreEl.appendChild(detailEl);
+      }
+      scoreEl.style.display = '';
     }
     resultsEl.style.display='';
     var leadForm = container.querySelector('.wizard-lead-form');
@@ -375,6 +645,10 @@ function buildWizardScript(config: WizardConfig): string {
       answers={};
       history=[0];
       container.querySelector('.wizard-results').style.display='none';
+      var summaryEl = container.querySelector('.wizard-answer-summary');
+      if(summaryEl) summaryEl.style.display='none';
+      var scoreEl = container.querySelector('.wizard-quiz-score');
+      if(scoreEl) scoreEl.style.display='none';
       container.querySelectorAll('input,select').forEach(function(el){
         if(el.type==='checkbox'||el.type==='radio') el.checked=false;
         else el.value='';
@@ -386,12 +660,13 @@ function buildWizardScript(config: WizardConfig): string {
 </script>`;
 }
 
-export async function generateWizardPage(
+async function generateWizardLikePage(
   article: Article,
   domain: string,
   disclosure: DisclosureInfo | null | undefined,
   articleDatasetInfo: ArticleDatasetInfo[],
   pageShell: import('./shared').PageShell,
+  mode: WizardMode,
 ): Promise<string> {
   const config = article.wizardConfig as WizardConfig | null;
   if (!config?.steps?.length) {
@@ -407,14 +682,14 @@ export async function generateWizardPage(
   const ogTags = buildOpenGraphTags(article, domain);
 
   const progressBar = buildProgressBar(config.steps);
-  const stepsHtml = config.steps.map((step, i) => renderStep(step, i, config.steps.length)).join('\n');
-  const resultsHtml = buildResultsTemplate(config);
+  const stepsHtml = config.steps.map((step, i) => renderStep(step, i, config.steps.length, mode)).join('\n');
+  const resultsHtml = buildResultsTemplate(config, mode);
 
   const body = `${disclaimerHtml}
   ${schemaLd}
   <article>
     <h1>${escapeHtml(article.title)}</h1>
-    <div class="wizard-container">
+    <div class="wizard-container wizard-mode-${escapeAttr(mode)}" data-wizard-mode="${escapeAttr(mode)}">
       ${progressBar}
       ${stepsHtml}
       ${resultsHtml}
@@ -422,7 +697,58 @@ export async function generateWizardPage(
   </article>
   ${dataSourcesHtml}
   ${trustHtml}
-  ${buildWizardScript(config)}`;
+  ${buildWizardScript(config, mode)}`;
 
   return wrapInHtmlPage(article.title, article.metaDescription || '', body, pageShell, ogTags);
+}
+
+export async function generateWizardPage(
+  article: Article,
+  domain: string,
+  disclosure: DisclosureInfo | null | undefined,
+  articleDatasetInfo: ArticleDatasetInfo[],
+  pageShell: import('./shared').PageShell,
+): Promise<string> {
+  const mode = getWizardModeFromContentType(article.contentType);
+  return generateWizardLikePage(article, domain, disclosure, articleDatasetInfo, pageShell, mode);
+}
+
+export async function generateConfiguratorPage(
+  article: Article,
+  domain: string,
+  disclosure: DisclosureInfo | null | undefined,
+  articleDatasetInfo: ArticleDatasetInfo[],
+  pageShell: import('./shared').PageShell,
+): Promise<string> {
+  return generateWizardLikePage(article, domain, disclosure, articleDatasetInfo, pageShell, 'configurator');
+}
+
+export async function generateQuizPage(
+  article: Article,
+  domain: string,
+  disclosure: DisclosureInfo | null | undefined,
+  articleDatasetInfo: ArticleDatasetInfo[],
+  pageShell: import('./shared').PageShell,
+): Promise<string> {
+  return generateWizardLikePage(article, domain, disclosure, articleDatasetInfo, pageShell, 'quiz');
+}
+
+export async function generateSurveyPage(
+  article: Article,
+  domain: string,
+  disclosure: DisclosureInfo | null | undefined,
+  articleDatasetInfo: ArticleDatasetInfo[],
+  pageShell: import('./shared').PageShell,
+): Promise<string> {
+  return generateWizardLikePage(article, domain, disclosure, articleDatasetInfo, pageShell, 'survey');
+}
+
+export async function generateAssessmentPage(
+  article: Article,
+  domain: string,
+  disclosure: DisclosureInfo | null | undefined,
+  articleDatasetInfo: ArticleDatasetInfo[],
+  pageShell: import('./shared').PageShell,
+): Promise<string> {
+  return generateWizardLikePage(article, domain, disclosure, articleDatasetInfo, pageShell, 'assessment');
 }

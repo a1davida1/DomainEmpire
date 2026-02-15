@@ -8,6 +8,7 @@ import { requireAuth, requireRole, getRequestUser } from '@/lib/auth';
 import { db, articles, contentRevisions, domains, users } from '@/lib/db';
 import { eq, and, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
+import { isInternalLinkingEnabled } from '@/lib/content/link-policy';
 
 const batchSchema = z.object({
     domainId: z.string().uuid(),
@@ -16,6 +17,13 @@ const batchSchema = z.object({
 export async function POST(request: NextRequest) {
     const authError = await requireAuth(request);
     if (authError) return authError;
+
+    if (!isInternalLinkingEnabled()) {
+        return NextResponse.json(
+            { error: 'Automated interlinking is disabled by policy' },
+            { status: 403 },
+        );
+    }
 
     const roleError = await requireRole(request, 'editor');
     if (roleError) return roleError;

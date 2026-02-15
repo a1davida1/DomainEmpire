@@ -45,12 +45,15 @@ export async function POST(
             );
         }
 
-        const [asset] = await db.select({ id: mediaAssets.id })
+        const [asset] = await db.select({ id: mediaAssets.id, userId: mediaAssets.userId })
             .from(mediaAssets)
             .where(eq(mediaAssets.id, id))
             .limit(1);
         if (!asset) {
             return NextResponse.json({ error: 'Media asset not found' }, { status: 404 });
+        }
+        if (asset.userId && asset.userId !== user.id) {
+            return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
         }
 
         const [campaign] = await db.select({ id: promotionCampaigns.id })
@@ -74,22 +77,34 @@ export async function POST(
             }
         }
 
-        const [usage] = await db.insert(mediaAssetUsage).values({
-            assetId: id,
-            campaignId: parsed.data.campaignId,
-            jobId: parsed.data.jobId ?? null,
-        }).returning({ id: mediaAssetUsage.id });
+        const txResult = await db.transaction(async (tx) => {
+            const [usage] = await tx.insert(mediaAssetUsage).values({
+                assetId: id,
+                campaignId: parsed.data.campaignId,
+                jobId: parsed.data.jobId ?? null,
+            }).returning({ id: mediaAssetUsage.id });
 
-        const [updated] = await db.update(mediaAssets).set({
-            usageCount: sql`${mediaAssets.usageCount} + 1`,
-        })
-            .where(eq(mediaAssets.id, id))
-            .returning({ usageCount: mediaAssets.usageCount });
+            if (!usage) {
+                throw new Error('Failed to insert media asset usage record');
+            }
+
+            const [updated] = await tx.update(mediaAssets).set({
+                usageCount: sql`COALESCE(${mediaAssets.usageCount}, 0) + 1`,
+            })
+                .where(eq(mediaAssets.id, id))
+                .returning({ usageCount: mediaAssets.usageCount });
+
+            if (!updated) {
+                throw new Error('Failed to update media asset usage count');
+            }
+
+            return { usageId: usage.id, usageCount: updated.usageCount };
+        });
 
         return NextResponse.json({
             success: true,
-            usageId: usage?.id ?? null,
-            usageCount: updated?.usageCount ?? null,
+            usageId: txResult.usageId,
+            usageCount: txResult.usageCount,
         }, { status: 201 });
     } catch (error) {
         console.error('Failed to track media asset usage:', error);

@@ -8,6 +8,7 @@ import { requireAuth } from '@/lib/auth';
 import { db, articles, contentRevisions } from '@/lib/db';
 import { eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
+import { isInternalLinkingEnabled } from '@/lib/content/link-policy';
 
 const applySchema = z.object({
     suggestions: z.array(z.object({
@@ -22,6 +23,13 @@ export async function POST(
 ) {
     const authError = await requireAuth(request);
     if (authError) return authError;
+
+    if (!isInternalLinkingEnabled()) {
+        return NextResponse.json(
+            { error: 'Automated interlinking is disabled by policy' },
+            { status: 403 },
+        );
+    }
 
     try {
         const { id } = await params;

@@ -81,11 +81,21 @@ export const domains = pgTable('domains', {
             timeOfDay: 'morning' | 'evening' | 'random';
             wordCountRange: [number, number];
         };
-        contentTypeMix?: {
-            article: number;
-            comparison: number;
-            tool: number;
-            guide: number;
+        contentTypeMix?: Record<string, number>;
+        writingWorkflow?: {
+            outlineTemplate?: string;
+            draftTemplate?: string;
+            humanizeTemplate?: string;
+            seoTemplate?: string;
+            metaTemplate?: string;
+            reviewTemplate?: string;
+        };
+        branding?: {
+            colorScheme?: string;
+            primaryColor?: string;
+            secondaryColor?: string;
+            accentColor?: string;
+            typographyPreset?: string;
         };
     }>().default({}),
 
@@ -210,7 +220,24 @@ export const articles = pgTable('articles', {
 
     // Content Type & Structured Config
     contentType: text('content_type', {
-        enum: ['article', 'comparison', 'calculator', 'cost_guide', 'lead_capture', 'health_decision', 'checklist', 'faq', 'review', 'wizard']
+        enum: [
+            'article',
+            'comparison',
+            'calculator',
+            'cost_guide',
+            'lead_capture',
+            'health_decision',
+            'checklist',
+            'faq',
+            'review',
+            'wizard',
+            'configurator',
+            'quiz',
+            'survey',
+            'assessment',
+            'interactive_infographic',
+            'interactive_map',
+        ]
     }).default('article'),
     calculatorConfig: jsonb('calculator_config').$type<{
         inputs: Array<{ id: string; label: string; type: 'number' | 'select' | 'range'; default?: number; min?: number; max?: number; step?: number; options?: Array<{ label: string; value: number }> }>;
@@ -265,6 +292,24 @@ export const articles = pgTable('articles', {
             fields: string[];
             consentText: string;
             endpoint: string;
+        };
+        scoring?: {
+            method?: 'completion' | 'weighted';
+            weights?: Record<string, number>;
+            valueMap?: Record<string, Record<string, number>>;
+            bands?: Array<{
+                min: number;
+                max: number;
+                label: string;
+                description?: string;
+            }>;
+            outcomes?: Array<{
+                min: number;
+                max: number;
+                title: string;
+                body: string;
+                cta?: { text: string; url: string };
+            }>;
         };
     }>(),
 
@@ -362,7 +407,10 @@ export const contentQueue = pgTable('content_queue', {
             'refresh_research_cache',
             // Growth channel pipeline
             'create_promotion_plan', 'generate_short_script', 'render_short_video',
-            'publish_pinterest_pin', 'publish_youtube_short', 'sync_campaign_metrics'
+            'publish_pinterest_pin', 'publish_youtube_short', 'sync_campaign_metrics',
+            'run_media_review_escalations',
+            // Integration marketplace sync automation
+            'run_integration_connection_sync',
         ]
     }).notNull(),
 
@@ -422,8 +470,8 @@ export const domainResearch = pgTable('domain_research', {
 
     // Availability
     isAvailable: boolean('is_available'),
-    registrationPrice: real('registration_price'),
-    aftermarketPrice: real('aftermarket_price'),
+    registrationPrice: numeric('registration_price', { precision: 12, scale: 2, mode: 'number' }),
+    aftermarketPrice: numeric('aftermarket_price', { precision: 12, scale: 2, mode: 'number' }),
 
     // Scoring
     keywordVolume: integer('keyword_volume'),
@@ -510,7 +558,7 @@ export const promotionCampaigns = pgTable('promotion_campaigns', {
     id: uuid('id').primaryKey().defaultRandom(),
     domainResearchId: uuid('domain_research_id').notNull().references(() => domainResearch.id, { onDelete: 'cascade' }),
     channels: jsonb('channels').$type<string[]>().default([]).notNull(), // e.g. ["pinterest", "youtube_shorts"]
-    budget: real('budget').default(0).notNull(),
+    budget: numeric('budget', { precision: 12, scale: 2, mode: 'number' }).default(0).notNull(),
     status: text('status', {
         enum: ['draft', 'active', 'paused', 'completed', 'cancelled'],
     }).default('draft').notNull(),
@@ -580,8 +628,129 @@ export const growthChannelCredentials = pgTable('growth_channel_credentials', {
     revokedIdx: index('growth_credential_revoked_idx').on(t.revokedAt),
 }));
 
+export const integrationConnections = pgTable('integration_connections', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    domainId: uuid('domain_id').references(() => domains.id, { onDelete: 'set null' }),
+    provider: text('provider', {
+        enum: [
+            'godaddy',
+            'namecheap',
+            'sedo',
+            'bodis',
+            'cloudflare',
+            'cpanel',
+            'google_analytics',
+            'google_search_console',
+            'semrush',
+            'mailchimp',
+            'convertkit',
+            'figma',
+            'impact',
+            'cj',
+            'awin',
+            'rakuten',
+            'custom',
+        ],
+    }).notNull(),
+    category: text('category', {
+        enum: ['registrar', 'parking', 'affiliate_network', 'analytics', 'email', 'design', 'hosting', 'seo', 'other'],
+    }).notNull(),
+    displayName: text('display_name'),
+    status: text('status', {
+        enum: ['pending', 'connected', 'error', 'disabled'],
+    }).notNull().default('pending'),
+    encryptedCredential: text('encrypted_credential'),
+    config: jsonb('config').$type<Record<string, unknown>>().default({}).notNull(),
+    lastSyncAt: timestamp('last_sync_at'),
+    lastSyncStatus: text('last_sync_status', {
+        enum: ['never', 'success', 'failed', 'partial'],
+    }).notNull().default('never'),
+    lastSyncError: text('last_sync_error'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+    userProviderDomainUidx: uniqueIndex('integration_connection_user_provider_domain_uidx').on(t.userId, t.provider, t.domainId),
+    userIdx: index('integration_connection_user_idx').on(t.userId),
+    domainIdx: index('integration_connection_domain_idx').on(t.domainId),
+    providerIdx: index('integration_connection_provider_idx').on(t.provider),
+    categoryIdx: index('integration_connection_category_idx').on(t.category),
+    statusIdx: index('integration_connection_status_idx').on(t.status),
+    createdAtIdx: index('integration_connection_created_at_idx').on(t.createdAt),
+}));
+
+export const integrationSyncRuns = pgTable('integration_sync_runs', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    connectionId: uuid('connection_id').notNull().references(() => integrationConnections.id, { onDelete: 'cascade' }),
+    runType: text('run_type', {
+        enum: ['manual', 'scheduled', 'webhook'],
+    }).notNull().default('manual'),
+    status: text('status', {
+        enum: ['running', 'success', 'failed', 'partial'],
+    }).notNull().default('running'),
+    startedAt: timestamp('started_at').defaultNow().notNull(),
+    completedAt: timestamp('completed_at'),
+    recordsProcessed: integer('records_processed').notNull().default(0),
+    recordsUpserted: integer('records_upserted').notNull().default(0),
+    recordsFailed: integer('records_failed').notNull().default(0),
+    errorMessage: text('error_message'),
+    details: jsonb('details').$type<Record<string, unknown>>().default({}).notNull(),
+    triggeredBy: uuid('triggered_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (t) => ({
+    nonNegativeCountsCheck: check(
+        'integration_sync_runs_non_negative_counts_check',
+        sql`${t.recordsProcessed} >= 0 AND ${t.recordsUpserted} >= 0 AND ${t.recordsFailed} >= 0`,
+    ),
+    connectionIdx: index('integration_sync_run_connection_idx').on(t.connectionId),
+    statusIdx: index('integration_sync_run_status_idx').on(t.status),
+    startedAtIdx: index('integration_sync_run_started_at_idx').on(t.startedAt),
+    completedAtIdx: index('integration_sync_run_completed_at_idx').on(t.completedAt),
+    createdAtIdx: index('integration_sync_run_created_at_idx').on(t.createdAt),
+}));
+
+export const domainChannelProfiles = pgTable('domain_channel_profiles', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    domainId: uuid('domain_id').notNull().references(() => domains.id, { onDelete: 'cascade' }),
+    channel: text('channel', {
+        enum: ['pinterest', 'youtube_shorts'],
+    }).notNull(),
+    enabled: boolean('enabled').notNull().default(true),
+    compatibility: text('compatibility', {
+        enum: ['supported', 'limited', 'blocked'],
+    }).notNull().default('supported'),
+    accountRef: text('account_ref'),
+    dailyCap: integer('daily_cap'),
+    quietHoursStart: integer('quiet_hours_start'),
+    quietHoursEnd: integer('quiet_hours_end'),
+    minJitterMinutes: integer('min_jitter_minutes').notNull().default(15),
+    maxJitterMinutes: integer('max_jitter_minutes').notNull().default(90),
+    notes: text('notes'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}).notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+    domainChannelUidx: uniqueIndex('domain_channel_profile_domain_channel_uidx').on(t.domainId, t.channel),
+    domainIdx: index('domain_channel_profile_domain_idx').on(t.domainId),
+    channelIdx: index('domain_channel_profile_channel_idx').on(t.channel),
+    jitterCheck: check(
+        'domain_channel_profile_jitter_check',
+        sql`${t.minJitterMinutes} >= 0 AND ${t.maxJitterMinutes} >= ${t.minJitterMinutes}`,
+    ),
+    quietHoursStartCheck: check(
+        'domain_channel_profile_quiet_start_check',
+        sql`${t.quietHoursStart} IS NULL OR (${t.quietHoursStart} >= 0 AND ${t.quietHoursStart} <= 23)`,
+    ),
+    quietHoursEndCheck: check(
+        'domain_channel_profile_quiet_end_check',
+        sql`${t.quietHoursEnd} IS NULL OR (${t.quietHoursEnd} >= 0 AND ${t.quietHoursEnd} <= 23)`,
+    ),
+}));
+
 export const mediaAssets = pgTable('media_assets', {
     id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
     type: text('type', {
         enum: ['image', 'video', 'script', 'voiceover'],
     }).notNull(),
@@ -592,8 +761,10 @@ export const mediaAssets = pgTable('media_assets', {
     usageCount: integer('usage_count').default(0).notNull(),
     createdAt: timestamp('created_at').defaultNow(),
 }, (t) => ({
+    userIdx: index('media_asset_user_idx').on(t.userId),
     typeIdx: index('media_asset_type_idx').on(t.type),
     folderIdx: index('media_asset_folder_idx').on(t.folder),
+    urlUidx: uniqueIndex('media_asset_url_uidx').on(t.url),
     usageCountIdx: index('media_asset_usage_count_idx').on(t.usageCount),
     createdIdx: index('media_asset_created_idx').on(t.createdAt),
 }));
@@ -609,6 +780,61 @@ export const mediaAssetUsage = pgTable('media_asset_usage', {
     campaignIdx: index('media_asset_usage_campaign_idx').on(t.campaignId),
     jobIdx: index('media_asset_usage_job_idx').on(t.jobId),
     createdIdx: index('media_asset_usage_created_idx').on(t.createdAt),
+}));
+
+export const mediaModerationTasks = pgTable('media_moderation_tasks', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    assetId: uuid('asset_id').notNull().references(() => mediaAssets.id, { onDelete: 'cascade' }),
+    status: text('status', {
+        enum: ['pending', 'approved', 'rejected', 'needs_changes', 'cancelled'],
+    }).notNull().default('pending'),
+    slaHours: integer('sla_hours').notNull().default(24),
+    escalateAfterHours: integer('escalate_after_hours').notNull().default(48),
+    dueAt: timestamp('due_at'),
+    reviewerId: uuid('reviewer_id').references(() => users.id, { onDelete: 'set null' }),
+    backupReviewerId: uuid('backup_reviewer_id').references(() => users.id, { onDelete: 'set null' }),
+    reviewedBy: uuid('reviewed_by').references(() => users.id, { onDelete: 'set null' }),
+    reviewedAt: timestamp('reviewed_at'),
+    reviewNotes: text('review_notes'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}).notNull(),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+}, (t) => ({
+    slaWindowCheck: check(
+        'media_moderation_tasks_sla_window_check',
+        sql`${t.escalateAfterHours} >= ${t.slaHours}`,
+    ),
+    userIdx: index('media_moderation_task_user_idx').on(t.userId),
+    assetIdx: index('media_moderation_task_asset_idx').on(t.assetId),
+    statusIdx: index('media_moderation_task_status_idx').on(t.status),
+    reviewerIdx: index('media_moderation_task_reviewer_idx').on(t.reviewerId),
+    dueAtIdx: index('media_moderation_task_due_at_idx').on(t.dueAt),
+    createdIdx: index('media_moderation_task_created_idx').on(t.createdAt),
+}));
+
+export const mediaModerationEvents = pgTable('media_moderation_events', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    taskId: uuid('task_id').notNull().references(() => mediaModerationTasks.id, { onDelete: 'cascade' }),
+    assetId: uuid('asset_id').notNull().references(() => mediaAssets.id, { onDelete: 'cascade' }),
+    actorId: uuid('actor_id').references(() => users.id, { onDelete: 'set null' }),
+    eventType: text('event_type', {
+        enum: ['created', 'assigned', 'escalated', 'approved', 'rejected', 'needs_changes', 'cancelled', 'exported'],
+    }).notNull(),
+    payload: jsonb('payload').$type<Record<string, unknown>>().default({}).notNull(),
+    prevEventHash: text('prev_event_hash'),
+    eventHash: text('event_hash').notNull(),
+    createdAt: timestamp('created_at').defaultNow(),
+}, (t) => ({
+    eventHashUidx: uniqueIndex('media_moderation_event_hash_uidx').on(t.eventHash),
+    taskPrevHashUidx: uniqueIndex('media_moderation_event_task_prev_hash_uidx').on(t.taskId, t.prevEventHash),
+    userIdx: index('media_moderation_event_user_idx').on(t.userId),
+    taskIdx: index('media_moderation_event_task_idx').on(t.taskId),
+    assetIdx: index('media_moderation_event_asset_idx').on(t.assetId),
+    typeIdx: index('media_moderation_event_type_idx').on(t.eventType),
+    createdIdx: index('media_moderation_event_created_idx').on(t.createdAt),
 }));
 
 // ===========================================
@@ -731,7 +957,7 @@ export const notifications = pgTable('notifications', {
 
     type: text('type', {
         enum: ['renewal_warning', 'job_failed', 'deploy_failed', 'traffic_drop',
-            'revenue_milestone', 'content_stale', 'domain_expiring', 'backlink_lost', 'info']
+            'revenue_milestone', 'content_stale', 'domain_expiring', 'backlink_lost', 'search_quality', 'info']
     }).notNull(),
     severity: text('severity', {
         enum: ['info', 'warning', 'critical']
@@ -815,6 +1041,7 @@ export const backlinkSnapshots = pgTable('backlink_snapshots', {
 }, (t) => ({
     domainIdx: index('backlink_snapshot_domain_idx').on(t.domainId),
     dateIdx: index('backlink_snapshot_date_idx').on(t.snapshotDate),
+    domainDateUnq: unique('backlink_snapshot_domain_date_unq').on(t.domainId, t.snapshotDate),
 }));
 
 // ===========================================
@@ -1213,7 +1440,7 @@ export const subscribers = pgTable('subscribers', {
     }).notNull().default('active'),
 
     // Value tracking
-    estimatedValue: real('estimated_value'),
+    estimatedValue: numeric('estimated_value', { precision: 12, scale: 2, mode: 'number' }),
     convertedAt: timestamp('converted_at'),
 
     // Metadata
@@ -1280,6 +1507,7 @@ export const competitorSnapshots = pgTable('competitor_snapshots', {
 }, (t) => ({
     competitorIdx: index('comp_snapshot_competitor_idx').on(t.competitorId),
     dateIdx: index('comp_snapshot_date_idx').on(t.snapshotDate),
+    competitorDateUnq: unique('comp_snapshot_competitor_date_unq').on(t.competitorId, t.snapshotDate),
 }));
 
 // ===========================================
@@ -1317,6 +1545,8 @@ export const domainsRelations = relations(domains, ({ many, one }) => ({
     complianceSnapshots: many(complianceSnapshots),
     datasets: many(datasets),
     subscribers: many(subscribers),
+    channelProfiles: many(domainChannelProfiles),
+    integrationConnections: many(integrationConnections),
     redirectTarget: one(domains, {
         fields: [domains.redirectTargetId],
         references: [domains.id],
@@ -1392,6 +1622,17 @@ export const usersRelations = relations(users, ({ many }) => ({
     backupReviewTasks: many(reviewTasks, { relationName: 'review_task_backup_reviewer' }),
     createdPreviewBuilds: many(previewBuilds, { relationName: 'preview_build_creator' }),
     growthChannelCredentials: many(growthChannelCredentials),
+    mediaAssets: many(mediaAssets),
+    mediaModerationTasksOwned: many(mediaModerationTasks, { relationName: 'media_moderation_task_owner' }),
+    mediaModerationTasksCreated: many(mediaModerationTasks, { relationName: 'media_moderation_task_creator' }),
+    mediaModerationTasksReviewer: many(mediaModerationTasks, { relationName: 'media_moderation_task_reviewer' }),
+    mediaModerationTasksBackupReviewer: many(mediaModerationTasks, { relationName: 'media_moderation_task_backup_reviewer' }),
+    mediaModerationTasksReviewedBy: many(mediaModerationTasks, { relationName: 'media_moderation_task_reviewed_by' }),
+    mediaModerationEventsOwned: many(mediaModerationEvents, { relationName: 'media_moderation_event_owner' }),
+    mediaModerationEventsActor: many(mediaModerationEvents, { relationName: 'media_moderation_event_actor' }),
+    integrationConnectionsOwned: many(integrationConnections, { relationName: 'integration_connection_owner' }),
+    integrationConnectionsCreated: many(integrationConnections, { relationName: 'integration_connection_creator' }),
+    integrationSyncRunsTriggered: many(integrationSyncRuns, { relationName: 'integration_sync_run_triggered_by' }),
 }));
 
 export const sessionsRelations = relations(sessions, ({ one }) => ({
@@ -1457,6 +1698,7 @@ export const domainResearchRelations = relations(domainResearch, ({ one, many })
     acquisitionEvents: many(acquisitionEvents),
     reviewTasks: many(reviewTasks),
     previewBuilds: many(previewBuilds),
+    promotionCampaigns: many(promotionCampaigns),
 }));
 
 export const acquisitionEventsRelations = relations(acquisitionEvents, ({ one }) => ({
@@ -1560,6 +1802,29 @@ export const articleDatasetsRelations = relations(articleDatasets, ({ one }) => 
     }),
 }));
 
+export const promotionCampaignsRelations = relations(promotionCampaigns, ({ one, many }) => ({
+    domainResearch: one(domainResearch, {
+        fields: [promotionCampaigns.domainResearchId],
+        references: [domainResearch.id],
+    }),
+    promotionJobs: many(promotionJobs),
+    promotionEvents: many(promotionEvents),
+}));
+
+export const promotionJobsRelations = relations(promotionJobs, ({ one }) => ({
+    campaign: one(promotionCampaigns, {
+        fields: [promotionJobs.campaignId],
+        references: [promotionCampaigns.id],
+    }),
+}));
+
+export const promotionEventsRelations = relations(promotionEvents, ({ one }) => ({
+    campaign: one(promotionCampaigns, {
+        fields: [promotionEvents.campaignId],
+        references: [promotionCampaigns.id],
+    }),
+}));
+
 export const clickEventsRelations = relations(clickEvents, ({ one, many }) => ({
     campaign: one(promotionCampaigns, {
         fields: [clickEvents.campaignId],
@@ -1594,6 +1859,122 @@ export const growthChannelCredentialsRelations = relations(growthChannelCredenti
     }),
 }));
 
+export const integrationConnectionsRelations = relations(integrationConnections, ({ one, many }) => ({
+    user: one(users, {
+        fields: [integrationConnections.userId],
+        references: [users.id],
+        relationName: 'integration_connection_owner',
+    }),
+    domain: one(domains, {
+        fields: [integrationConnections.domainId],
+        references: [domains.id],
+    }),
+    creator: one(users, {
+        fields: [integrationConnections.createdBy],
+        references: [users.id],
+        relationName: 'integration_connection_creator',
+    }),
+    syncRuns: many(integrationSyncRuns),
+}));
+
+export const integrationSyncRunsRelations = relations(integrationSyncRuns, ({ one }) => ({
+    connection: one(integrationConnections, {
+        fields: [integrationSyncRuns.connectionId],
+        references: [integrationConnections.id],
+    }),
+    triggeredByUser: one(users, {
+        fields: [integrationSyncRuns.triggeredBy],
+        references: [users.id],
+        relationName: 'integration_sync_run_triggered_by',
+    }),
+}));
+
+export const domainChannelProfilesRelations = relations(domainChannelProfiles, ({ one }) => ({
+    domain: one(domains, {
+        fields: [domainChannelProfiles.domainId],
+        references: [domains.id],
+    }),
+}));
+
+export const mediaAssetsRelations = relations(mediaAssets, ({ one, many }) => ({
+    user: one(users, {
+        fields: [mediaAssets.userId],
+        references: [users.id],
+    }),
+    usages: many(mediaAssetUsage),
+    moderationTasks: many(mediaModerationTasks),
+    moderationEvents: many(mediaModerationEvents),
+}));
+
+export const mediaAssetUsageRelations = relations(mediaAssetUsage, ({ one }) => ({
+    asset: one(mediaAssets, {
+        fields: [mediaAssetUsage.assetId],
+        references: [mediaAssets.id],
+    }),
+    campaign: one(promotionCampaigns, {
+        fields: [mediaAssetUsage.campaignId],
+        references: [promotionCampaigns.id],
+    }),
+    job: one(promotionJobs, {
+        fields: [mediaAssetUsage.jobId],
+        references: [promotionJobs.id],
+    }),
+}));
+
+export const mediaModerationTasksRelations = relations(mediaModerationTasks, ({ one, many }) => ({
+    user: one(users, {
+        fields: [mediaModerationTasks.userId],
+        references: [users.id],
+        relationName: 'media_moderation_task_owner',
+    }),
+    asset: one(mediaAssets, {
+        fields: [mediaModerationTasks.assetId],
+        references: [mediaAssets.id],
+    }),
+    creator: one(users, {
+        fields: [mediaModerationTasks.createdBy],
+        references: [users.id],
+        relationName: 'media_moderation_task_creator',
+    }),
+    reviewer: one(users, {
+        fields: [mediaModerationTasks.reviewerId],
+        references: [users.id],
+        relationName: 'media_moderation_task_reviewer',
+    }),
+    backupReviewer: one(users, {
+        fields: [mediaModerationTasks.backupReviewerId],
+        references: [users.id],
+        relationName: 'media_moderation_task_backup_reviewer',
+    }),
+    reviewedByUser: one(users, {
+        fields: [mediaModerationTasks.reviewedBy],
+        references: [users.id],
+        relationName: 'media_moderation_task_reviewed_by',
+    }),
+    events: many(mediaModerationEvents),
+}));
+
+export const mediaModerationEventsRelations = relations(mediaModerationEvents, ({ one }) => ({
+    user: one(users, {
+        fields: [mediaModerationEvents.userId],
+        references: [users.id],
+        relationName: 'media_moderation_event_owner',
+    }),
+    task: one(mediaModerationTasks, {
+        fields: [mediaModerationEvents.taskId],
+        references: [mediaModerationTasks.id],
+    }),
+    asset: one(mediaAssets, {
+        fields: [mediaModerationEvents.assetId],
+        references: [mediaAssets.id],
+    }),
+    actor: one(users, {
+        fields: [mediaModerationEvents.actorId],
+        references: [users.id],
+        relationName: 'media_moderation_event_actor',
+    }),
+}));
+
 export const abTestsRelations = relations(abTests, ({ one }) => ({
     article: one(articles, {
         fields: [abTests.articleId],
@@ -1623,11 +2004,18 @@ export type DomainResearch = typeof domainResearch.$inferSelect;
 export type AcquisitionEvent = typeof acquisitionEvents.$inferSelect;
 export type ResearchCache = typeof researchCache.$inferSelect;
 export type PromotionCampaign = typeof promotionCampaigns.$inferSelect;
+export type DomainChannelProfile = typeof domainChannelProfiles.$inferSelect;
 export type PromotionJob = typeof promotionJobs.$inferSelect;
 export type PromotionEvent = typeof promotionEvents.$inferSelect;
 export type GrowthChannelCredential = typeof growthChannelCredentials.$inferSelect;
+export type IntegrationConnection = typeof integrationConnections.$inferSelect;
+export type NewIntegrationConnection = typeof integrationConnections.$inferInsert;
+export type IntegrationSyncRun = typeof integrationSyncRuns.$inferSelect;
+export type NewIntegrationSyncRun = typeof integrationSyncRuns.$inferInsert;
 export type MediaAsset = typeof mediaAssets.$inferSelect;
 export type MediaAssetUsage = typeof mediaAssetUsage.$inferSelect;
+export type MediaModerationTask = typeof mediaModerationTasks.$inferSelect;
+export type MediaModerationEvent = typeof mediaModerationEvents.$inferSelect;
 export type RevenueSnapshot = typeof revenueSnapshots.$inferSelect;
 export type ApiCallLog = typeof apiCallLogs.$inferSelect;
 export type Expense = typeof expenses.$inferSelect;

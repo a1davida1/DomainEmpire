@@ -52,6 +52,7 @@ export async function POST(
             status: promotionCampaigns.status,
             domainResearchId: promotionCampaigns.domainResearchId,
             channels: promotionCampaigns.channels,
+            metrics: promotionCampaigns.metrics,
         })
             .from(promotionCampaigns)
             .where(eq(promotionCampaigns.id, id))
@@ -59,6 +60,11 @@ export async function POST(
 
         if (!campaign) {
             return NextResponse.json({ error: 'Campaign not found' }, { status: 404 });
+        }
+
+        const campaignOwner = (campaign.metrics as Record<string, unknown> | null)?.createdBy;
+        if (campaignOwner && campaignOwner !== user.id) {
+            return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
         }
 
         const force = parsedBody.data.force ?? false;
@@ -120,25 +126,6 @@ export async function POST(
             }
         }
 
-        const existingQueueRows = await db.select({
-            id: contentQueue.id,
-        })
-            .from(contentQueue)
-            .where(and(
-                eq(contentQueue.jobType, 'create_promotion_plan'),
-                inArray(contentQueue.status, ['pending', 'processing']),
-                sql`${contentQueue.payload} ->> 'campaignId' = ${id}`,
-            ))
-            .limit(1);
-
-        if (existingQueueRows.length > 0) {
-            return NextResponse.json({
-                queued: true,
-                deduped: true,
-                jobId: existingQueueRows[0].id,
-            }, { status: 202 });
-        }
-
         const promotionJobPayload = {
             launchedBy: user.id,
             force,
@@ -146,44 +133,74 @@ export async function POST(
             requestedAt: new Date().toISOString(),
         };
 
-        const [promotionJob] = await db.insert(promotionJobs).values({
-            campaignId: id,
-            jobType: 'create_promotion_plan',
-            status: 'pending',
-            payload: promotionJobPayload,
-        }).returning({ id: promotionJobs.id });
+        const txResult = await db.transaction(async (tx) => {
+            // Advisory lock keyed on campaign id to prevent TOCTOU races
+            await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${id}))`);
 
-        if (!promotionJob) {
-            throw new Error('Failed to create launch promotion job');
-        }
+            const existingQueueRows = await tx.select({
+                id: contentQueue.id,
+            })
+                .from(contentQueue)
+                .where(and(
+                    eq(contentQueue.jobType, 'create_promotion_plan'),
+                    inArray(contentQueue.status, ['pending', 'processing']),
+                    sql`${contentQueue.payload} ->> 'campaignId' = ${id}`,
+                ))
+                .limit(1);
 
-        const queuePayload = {
-            campaignId: id,
-            promotionJobId: promotionJob.id,
-            launchedBy: user.id,
-            force,
-            metadata: parsedBody.data.metadata ?? {},
-        };
+            if (existingQueueRows.length > 0) {
+                return {
+                    deduped: true as const,
+                    jobId: existingQueueRows[0].id,
+                    promotionJobId: null as string | null,
+                };
+            }
 
-        const queueJobId = await enqueueContentJob({
-            jobType: 'create_promotion_plan',
-            status: 'pending',
-            priority: parsedBody.data.priority ?? 3,
-            payload: queuePayload,
+            const [promotionJob] = await tx.insert(promotionJobs).values({
+                campaignId: id,
+                jobType: 'create_promotion_plan',
+                status: 'pending',
+                payload: promotionJobPayload,
+            }).returning({ id: promotionJobs.id });
+
+            if (!promotionJob) {
+                throw new Error('Failed to create launch promotion job');
+            }
+
+            const queuePayload = {
+                campaignId: id,
+                promotionJobId: promotionJob.id,
+                launchedBy: user.id,
+                force,
+                metadata: parsedBody.data.metadata ?? {},
+            };
+
+            const queueJobId = await enqueueContentJob({
+                jobType: 'create_promotion_plan',
+                status: 'pending',
+                priority: parsedBody.data.priority ?? 3,
+                payload: queuePayload,
+            }, tx);
+
+            await tx.update(promotionJobs).set({
+                payload: {
+                    ...promotionJobPayload,
+                    contentQueueJobId: queueJobId,
+                },
+            }).where(eq(promotionJobs.id, promotionJob.id));
+
+            return {
+                deduped: false as const,
+                jobId: queueJobId,
+                promotionJobId: promotionJob.id as string | null,
+            };
         });
-
-        await db.update(promotionJobs).set({
-            payload: {
-                ...promotionJobPayload,
-                contentQueueJobId: queueJobId,
-            },
-        }).where(eq(promotionJobs.id, promotionJob.id));
 
         return NextResponse.json({
             queued: true,
-            deduped: false,
-            jobId: queueJobId,
-            promotionJobId: promotionJob.id,
+            deduped: txResult.deduped,
+            jobId: txResult.jobId,
+            ...(txResult.promotionJobId ? { promotionJobId: txResult.promotionJobId } : {}),
         }, { status: 202 });
     } catch (error) {
         console.error('Failed to launch growth campaign:', error);

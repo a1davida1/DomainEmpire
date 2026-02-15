@@ -73,6 +73,7 @@ interface FormData {
     niche: string;
     subNiche: string;
     siteTemplate: string;
+    themeStyle: string;
     notes: string;
     tags: string[];
 }
@@ -96,6 +97,7 @@ export default function NewDomainPage() {
         niche: '',
         subNiche: '',
         siteTemplate: 'authority',
+        themeStyle: '',
         notes: '',
         tags: [],
     });
@@ -140,6 +142,7 @@ export default function NewDomainPage() {
                 niche: formData.niche || undefined,
                 subNiche: formData.subNiche || undefined,
                 siteTemplate: formData.siteTemplate,
+                themeStyle: formData.themeStyle || undefined,
                 notes: formData.notes || undefined,
                 tags: formData.tags,
             };
@@ -275,6 +278,17 @@ export default function NewDomainPage() {
                                         ))}
                                     </SelectContent>
                                 </Select>
+                            </div>
+
+                            <div className="space-y-2 sm:col-span-2">
+                                <Label htmlFor="themeStyle">Theme Style</Label>
+                                <Input
+                                    id="themeStyle"
+                                    placeholder="e.g., navy-serif or insurance-clean"
+                                    value={formData.themeStyle}
+                                    onChange={(e) => updateField('themeStyle', e.target.value)}
+                                    disabled={loading}
+                                />
                             </div>
                         </div>
                     </CardContent>

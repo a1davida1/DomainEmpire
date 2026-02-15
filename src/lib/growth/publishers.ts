@@ -127,27 +127,35 @@ async function postJsonWithAuth(
     token: string,
     body: Record<string, unknown>,
     label: string,
+    options: { idempotencyKey?: string; allowRetries?: boolean } = {},
 ): Promise<Record<string, unknown>> {
-    return withHttpRetry(
-        async () => {
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(body),
-                signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
-            });
-            const parsed = await parseJsonResponse(response);
-            if (!response.ok) {
-                throwApiError(label, response.status, response.statusText, parsed);
-            }
-            return parsed;
-        },
-        label,
-        { maxRetries: 1, baseDelayMs: 750 },
-    );
+    const { idempotencyKey, allowRetries = false } = options;
+    const doFetch = async () => {
+        const headers: Record<string, string> = {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+        };
+        if (idempotencyKey) {
+            headers['Idempotency-Key'] = idempotencyKey;
+        }
+        const response = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+        });
+        const parsed = await parseJsonResponse(response);
+        if (!response.ok) {
+            throwApiError(label, response.status, response.statusText, parsed);
+        }
+        return parsed;
+    };
+
+    if (!allowRetries) {
+        return doFetch();
+    }
+
+    return withHttpRetry(doFetch, label, { maxRetries: 1, baseDelayMs: 750 });
 }
 
 async function postMultipartWithAuth(
@@ -234,11 +242,21 @@ async function publishPinterest(
         token,
         requestBody,
         'pinterest-publish',
+        { idempotencyKey: payload.creativeHash },
     );
 
-    const externalPostId = typeof response.id === 'string'
-        ? response.id
-        : buildMockId('pinterest', payload.creativeHash);
+    if (typeof response.id !== 'string') {
+        console.error('Pinterest publish returned no post id:', {
+            creativeHash: payload.creativeHash,
+            hasId: 'id' in response,
+            errorCode: response.code ?? response.error_code ?? undefined,
+            errorMessage: typeof response.message === 'string' ? truncate(response.message, 200) : undefined,
+        });
+        throw new Error(
+            `Missing Pinterest post id for creativeHash=${payload.creativeHash}`,
+        );
+    }
+    const externalPostId = response.id;
 
     return {
         externalPostId,
@@ -312,9 +330,21 @@ async function publishYouTubeShort(
         'youtube-publish',
     );
 
-    const externalPostId = typeof response.id === 'string'
-        ? response.id
-        : buildMockId('youtube_shorts', payload.creativeHash);
+    if (typeof response.id !== 'string') {
+        const errorInfo = isObject(response.error) ? response.error : {};
+        console.error('YouTube upload returned no video id:', {
+            creativeHash: payload.creativeHash,
+            hasId: 'id' in response,
+            errorCode: (errorInfo as Record<string, unknown>).code ?? undefined,
+            errorMessage: typeof (errorInfo as Record<string, unknown>).message === 'string'
+                ? truncate((errorInfo as Record<string, unknown>).message as string, 200)
+                : undefined,
+        });
+        throw new Error(
+            `Missing YouTube video id for creativeHash=${payload.creativeHash}`,
+        );
+    }
+    const externalPostId = response.id;
 
     return {
         externalPostId,

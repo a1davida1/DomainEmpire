@@ -14,6 +14,7 @@ Safely rotate Pinterest and YouTube growth credentials with zero surprise publis
    - `YOUTUBE_OAUTH_TOKEN_URL`
    - `GROWTH_CREDENTIAL_REFRESH_TIMEOUT_MS`
    - `GROWTH_CREDENTIAL_AUDIT_LOOKAHEAD_MS`
+   - `GROWTH_PUBLISH_MOCK` (set `true` to suppress live publish side-effects)
 
 ## Pre-Flight
 
@@ -28,7 +29,7 @@ Safely rotate Pinterest and YouTube growth credentials with zero surprise publis
 1. Freeze launch of new growth campaigns during rotation window.
 2. Revoke old provider tokens in Pinterest/Google consoles.
 3. Force reconnect requirement in app:
-   - `POST /api/growth/channel-credentials/reconnect` with `{ "channel": "pinterest" }` (repeat for YouTube or run all).
+   - `POST /api/growth/channel-credentials/reconnect` with `{ "channel": "pinterest" }` (repeat for `youtube_shorts` or run all).
 4. Reconnect channel credentials in app using the latest provider tokens.
 5. Trigger manual refresh verification:
    - `POST /api/growth/channel-credentials` with `{ "channel": "pinterest", "force": true }`

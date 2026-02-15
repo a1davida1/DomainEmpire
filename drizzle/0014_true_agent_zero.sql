@@ -19,7 +19,7 @@ CREATE TABLE "promotion_campaigns" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"domain_research_id" uuid NOT NULL,
 	"channels" jsonb DEFAULT '[]'::jsonb NOT NULL,
-	"budget" real DEFAULT 0 NOT NULL,
+	"budget" numeric(12,2) DEFAULT 0 NOT NULL,
 	"status" text DEFAULT 'draft' NOT NULL,
 	"daily_cap" integer DEFAULT 0 NOT NULL,
 	"metrics" jsonb DEFAULT '{}'::jsonb NOT NULL,

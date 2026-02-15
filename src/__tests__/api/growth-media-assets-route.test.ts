@@ -8,6 +8,7 @@ const mockSelect = vi.fn();
 const mockFrom = vi.fn();
 const mockInsert = vi.fn();
 const mockValues = vi.fn();
+const mockTransaction = vi.fn();
 
 const mockMediaAssetsTable = {
     id: 'id',
@@ -51,6 +52,7 @@ vi.mock('@/lib/db', () => ({
             mockInsert(...args);
             return { values: mockValues };
         },
+        transaction: (...args: unknown[]) => mockTransaction(...args),
     },
     mediaAssets: mockMediaAssetsTable,
 }));
@@ -97,7 +99,24 @@ describe('growth media-assets route', () => {
         });
 
         mockValues.mockImplementation(() => ({
+            onConflictDoNothing: () => ({
+                returning: async () => insertedRows,
+            }),
             returning: async () => insertedRows,
+        }));
+
+        mockTransaction.mockImplementation(async (callback: (tx: {
+            insert: (...args: unknown[]) => { values: (...args: unknown[]) => { onConflictDoNothing: () => { returning: () => Promise<Array<Record<string, unknown>>> }; returning: () => Promise<Array<Record<string, unknown>>> } };
+            select: (...args: unknown[]) => { from: (...args: unknown[]) => { where: () => { limit: () => Promise<Array<Record<string, unknown>>> } } };
+        }) => Promise<{ created: boolean; asset: Record<string, unknown> | null }>) => callback({
+            insert: (...args: unknown[]) => {
+                mockInsert(...args);
+                return { values: mockValues };
+            },
+            select: (...args: unknown[]) => {
+                mockSelect(...args);
+                return { from: mockFrom };
+            },
         }));
     });
 
@@ -126,7 +145,7 @@ describe('growth media-assets route', () => {
         const body = await response.json();
         expect(body.created).toBe(false);
         expect(body.asset.id).toBe('asset-1');
-        expect(mockInsert).not.toHaveBeenCalled();
+        expect(mockInsert).toHaveBeenCalled();
     });
 
     it('creates asset when URL is new', async () => {

@@ -107,7 +107,9 @@ export function evaluateGrowthPublishPolicy(
 
     const loweredCopy = punctuationNormalized.output.toLowerCase();
     for (const term of parseBannedTerms()) {
-        if (loweredCopy.includes(term)) {
+        const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const pattern = new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'iu');
+        if (pattern.test(loweredCopy)) {
             blockReasons.push(`Copy contains banned policy term: "${term}"`);
         }
     }

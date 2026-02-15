@@ -10,7 +10,7 @@ import { eq, and, desc, sql } from 'drizzle-orm';
 import { sendNotificationEmail } from './email';
 
 type NotificationType = 'renewal_warning' | 'job_failed' | 'deploy_failed' | 'traffic_drop' |
-    'revenue_milestone' | 'content_stale' | 'domain_expiring' | 'backlink_lost' | 'info';
+    'revenue_milestone' | 'content_stale' | 'domain_expiring' | 'backlink_lost' | 'search_quality' | 'info';
 type Severity = 'info' | 'warning' | 'critical';
 
 interface CreateNotificationOptions {
@@ -18,9 +18,11 @@ interface CreateNotificationOptions {
     severity?: Severity;
     title: string;
     message: string;
+    userId?: string;
     domainId?: string;
     actionUrl?: string;
     sendEmail?: boolean;
+    metadata?: Record<string, unknown>;
 }
 
 /**
@@ -30,9 +32,11 @@ export async function createNotification(options: CreateNotificationOptions): Pr
     const {
         type, title, message,
         severity = 'info',
+        userId,
         domainId,
         actionUrl,
         sendEmail = false,
+        metadata = {},
     } = options;
 
     // Deduplicate: skip if same type+title+domainId exists unread in last 24h
@@ -62,6 +66,10 @@ export async function createNotification(options: CreateNotificationOptions): Pr
         domainId: domainId ?? null,
         actionUrl,
         emailSent: false,
+        metadata: {
+            ...metadata,
+            ...(userId ? { userId } : {}),
+        },
     }).returning({ id: notifications.id });
 
     if (sendEmail && (severity === 'critical' || severity === 'warning')) {

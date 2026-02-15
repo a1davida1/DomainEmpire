@@ -50,20 +50,28 @@ export async function GET(request: NextRequest) {
     const url = new URL(request.url);
     const channelRaw = url.searchParams.get('channel');
 
-    if (channelRaw) {
-        const channelParsed = channelEnum.safeParse(channelRaw);
-        if (!channelParsed.success) {
-            return NextResponse.json({ error: 'Invalid channel filter' }, { status: 400 });
+    try {
+        if (channelRaw) {
+            const channelParsed = channelEnum.safeParse(channelRaw);
+            if (!channelParsed.success) {
+                return NextResponse.json({ error: 'Invalid channel filter' }, { status: 400 });
+            }
+
+            const credential = await getGrowthChannelCredentialStatus(user.id, channelParsed.data);
+            return NextResponse.json({
+                credentials: credential ? [credential] : [],
+            });
         }
 
-        const credential = await getGrowthChannelCredentialStatus(user.id, channelParsed.data);
-        return NextResponse.json({
-            credentials: credential ? [credential] : [],
-        });
+        const credentials = await listGrowthChannelCredentialStatus(user.id);
+        return NextResponse.json({ credentials });
+    } catch (error) {
+        console.error('Failed to fetch growth channel credentials:', error);
+        return NextResponse.json(
+            { error: 'Failed to fetch credentials' },
+            { status: 500 },
+        );
     }
-
-    const credentials = await listGrowthChannelCredentialStatus(user.id);
-    return NextResponse.json({ credentials });
 }
 
 export async function PUT(request: NextRequest) {
@@ -201,10 +209,10 @@ export async function POST(request: NextRequest) {
             credential: result.credential,
         });
     } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown error';
+        console.error('Failed to refresh growth channel credential:', error);
         return NextResponse.json(
-            { error: 'Failed to refresh credential', message },
-            { status: 400 },
+            { error: 'Failed to refresh credential' },
+            { status: 500 },
         );
     }
 }

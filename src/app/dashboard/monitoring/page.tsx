@@ -7,7 +7,7 @@ import { inArray, desc } from 'drizzle-orm';
 
 export const dynamic = 'force-dynamic';
 
-const MONITORING_TYPES = ['traffic_drop', 'deploy_failed', 'backlink_lost', 'revenue_milestone'] as const;
+const MONITORING_TYPES = ['traffic_drop', 'deploy_failed', 'backlink_lost', 'revenue_milestone', 'search_quality'] as const;
 
 const SEVERITY_COLORS: Record<string, string> = {
     critical: 'destructive',

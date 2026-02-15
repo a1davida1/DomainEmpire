@@ -14,6 +14,8 @@ export const responsiveStyles = `
   .comparison-table{font-size:0.8rem;min-width:600px}
   .wizard-progress-label{display:none}
   .wizard-progress-dot{width:1.5rem;height:1.5rem;font-size:0.7rem}
+  .infographic-grid{grid-template-columns:1fr 1fr}
+  .imap-map-grid{grid-template-columns:repeat(auto-fill,minmax(36px,1fr))}
 }
 /* Mobile */
 @media(max-width:480px){
@@ -26,10 +28,15 @@ export const responsiveStyles = `
   .faq-question{padding:0.75rem}
   .cta-button{display:block;text-align:center;padding:0.5rem}
   .wizard-radio,.wizard-checkbox{padding:0.75rem}
+  .infographic-grid{grid-template-columns:1fr}
+  .infographic-toolbar,.imap-controls{display:block}
+  .infographic-toolbar label,.imap-controls label{display:block;margin-top:0.5rem}
+  .imap-region-buttons{margin-bottom:0.5rem}
+  .imap-map-grid{grid-template-columns:repeat(auto-fill,minmax(34px,1fr))}
 }
 /* Print */
 @media print{
-  header,footer,.cta-button,.lead-form,.print-btn,.scroll-cta,.wizard-nav,.wizard-progress,.geo-adaptive{display:none!important}
+  header,footer,.cta-button,.lead-form,.print-btn,.scroll-cta,.wizard-nav,.wizard-progress,.geo-adaptive,.infographic-toolbar,.imap-controls{display:none!important}
   body{max-width:100%;padding:0;color:#000;background:#fff}
   .site-container{max-width:100%;padding:0}
   .layout-wrap{display:block}.sidebar{display:none}

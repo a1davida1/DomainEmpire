@@ -167,7 +167,7 @@ export async function generateCostGuidePage(
     datasets: ArticleDatasetInfo[],
     pageShell: import('./shared').PageShell,
 ): Promise<string> {
-    const contentHtml = await renderMarkdownToHtml(article.contentMarkdown || '');
+    const contentHtml = await renderMarkdownToHtml(article.contentMarkdown || '', { currentDomain: domain });
     const { disclaimerHtml, trustHtml } = await buildTrustElements(article, disclosure);
     const dataSourcesHtml = generateDataSourcesSection(datasets);
     const schemaLd = buildSchemaJsonLd(article, domain, 'Article');

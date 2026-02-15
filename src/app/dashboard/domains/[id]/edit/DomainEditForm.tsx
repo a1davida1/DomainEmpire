@@ -72,6 +72,7 @@ export default function DomainEditForm({ domain }: Props) {
         niche: domain.niche || '',
         subNiche: domain.subNiche || '',
         siteTemplate: domain.siteTemplate || 'authority',
+        themeStyle: domain.themeStyle || '',
         notes: domain.notes || '',
         tags: domain.tags || [],
     });
@@ -110,6 +111,7 @@ export default function DomainEditForm({ domain }: Props) {
                 niche: formData.niche || undefined,
                 subNiche: formData.subNiche || undefined,
                 siteTemplate: formData.siteTemplate,
+                themeStyle: formData.themeStyle || undefined,
                 notes: formData.notes || undefined,
                 tags: formData.tags,
             };
@@ -219,6 +221,17 @@ export default function DomainEditForm({ domain }: Props) {
                                     ))}
                                 </SelectContent>
                             </Select>
+                        </div>
+
+                        <div className="space-y-2 sm:col-span-2">
+                            <Label htmlFor="themeStyle">Theme Style</Label>
+                            <Input
+                                id="themeStyle"
+                                placeholder="e.g., navy-serif or insurance-clean"
+                                value={formData.themeStyle}
+                                onChange={(e) => updateField('themeStyle', e.target.value)}
+                                disabled={loading}
+                            />
                         </div>
                     </div>
                 </CardContent>

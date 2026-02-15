@@ -12,12 +12,24 @@ const originalEnv = {
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
-    process.env.GROWTH_PUBLISH_MOCK = originalEnv.growthPublishMock;
-    process.env.PINTEREST_ACCESS_TOKEN = originalEnv.pinterestToken;
-    process.env.PINTEREST_BOARD_ID = originalEnv.pinterestBoard;
-    process.env.PINTEREST_API_BASE = originalEnv.pinterestApiBase;
-    process.env.YOUTUBE_ACCESS_TOKEN = originalEnv.youtubeToken;
-    process.env.YOUTUBE_CHANNEL_ID = originalEnv.youtubeChannel;
+    if (originalEnv.growthPublishMock === undefined) delete process.env.GROWTH_PUBLISH_MOCK;
+    else process.env.GROWTH_PUBLISH_MOCK = originalEnv.growthPublishMock;
+
+    if (originalEnv.pinterestToken === undefined) delete process.env.PINTEREST_ACCESS_TOKEN;
+    else process.env.PINTEREST_ACCESS_TOKEN = originalEnv.pinterestToken;
+
+    if (originalEnv.pinterestBoard === undefined) delete process.env.PINTEREST_BOARD_ID;
+    else process.env.PINTEREST_BOARD_ID = originalEnv.pinterestBoard;
+
+    if (originalEnv.pinterestApiBase === undefined) delete process.env.PINTEREST_API_BASE;
+    else process.env.PINTEREST_API_BASE = originalEnv.pinterestApiBase;
+
+    if (originalEnv.youtubeToken === undefined) delete process.env.YOUTUBE_ACCESS_TOKEN;
+    else process.env.YOUTUBE_ACCESS_TOKEN = originalEnv.youtubeToken;
+
+    if (originalEnv.youtubeChannel === undefined) delete process.env.YOUTUBE_CHANNEL_ID;
+    else process.env.YOUTUBE_CHANNEL_ID = originalEnv.youtubeChannel;
+
     globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
 });

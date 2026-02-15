@@ -19,6 +19,10 @@ const DEFAULT_AFFILIATE_DISCLOSURE = 'This site may contain affiliate links. We 
 
 const DEFAULT_NOT_ADVICE = 'The information provided on this page is for educational and informational purposes only. It should not be considered professional advice. Always consult with a qualified professional before making any decisions based on this content.';
 
+const DEFAULT_ABOUT_PAGE = 'We build practical, evidence-based guides to help readers make better decisions. Our content is written with a user-first standard: clarity, transparency, and actionability.';
+const DEFAULT_EDITORIAL_POLICY_PAGE = 'Our editorial process prioritizes factual accuracy, clear sourcing, and practical usefulness. We separate editorial judgment from monetization relationships and regularly review content for freshness and quality.';
+const DEFAULT_HOW_WE_MAKE_MONEY_PAGE = 'We may earn revenue through advertising and affiliate partnerships. These partnerships do not control our recommendations. We disclose monetization clearly and prioritize user outcomes over commission potential.';
+
 export async function getDisclosureConfig(domainId: string): Promise<DisclosureConfig & { id?: string }> {
     const [config] = await db.select()
         .from(disclosureConfigs)
@@ -30,9 +34,9 @@ export async function getDisclosureConfig(domainId: string): Promise<DisclosureC
             affiliateDisclosure: DEFAULT_AFFILIATE_DISCLOSURE,
             adDisclosure: null,
             notAdviceDisclaimer: DEFAULT_NOT_ADVICE,
-            howWeMoneyPage: null,
-            editorialPolicyPage: null,
-            aboutPage: null,
+            howWeMoneyPage: DEFAULT_HOW_WE_MAKE_MONEY_PAGE,
+            editorialPolicyPage: DEFAULT_EDITORIAL_POLICY_PAGE,
+            aboutPage: DEFAULT_ABOUT_PAGE,
             showReviewedBy: true,
             showLastUpdated: true,
             showChangeLog: false,
@@ -45,9 +49,9 @@ export async function getDisclosureConfig(domainId: string): Promise<DisclosureC
         affiliateDisclosure: config.affiliateDisclosure || DEFAULT_AFFILIATE_DISCLOSURE,
         adDisclosure: config.adDisclosure,
         notAdviceDisclaimer: config.notAdviceDisclaimer || DEFAULT_NOT_ADVICE,
-        howWeMoneyPage: config.howWeMoneyPage,
-        editorialPolicyPage: config.editorialPolicyPage,
-        aboutPage: config.aboutPage,
+        howWeMoneyPage: config.howWeMoneyPage || DEFAULT_HOW_WE_MAKE_MONEY_PAGE,
+        editorialPolicyPage: config.editorialPolicyPage || DEFAULT_EDITORIAL_POLICY_PAGE,
+        aboutPage: config.aboutPage || DEFAULT_ABOUT_PAGE,
         showReviewedBy: config.showReviewedBy ?? true,
         showLastUpdated: config.showLastUpdated ?? true,
         showChangeLog: config.showChangeLog ?? false,

@@ -6,14 +6,33 @@ import { logReviewEvent } from '@/lib/audit/events';
 import { eq, and, ne } from 'drizzle-orm';
 import { z } from 'zod';
 
-import { calculatorConfigSchema, comparisonDataSchema, leadGenConfigSchema } from '@/lib/validation/articles';
+import { calculatorConfigSchema, comparisonDataSchema, leadGenConfigSchema, wizardConfigSchema, geoDataSchema } from '@/lib/validation/articles';
 
-const VALID_CONTENT_TYPES = ['article', 'comparison', 'calculator', 'cost_guide', 'lead_capture', 'health_decision', 'checklist', 'faq', 'review'];
+const VALID_CONTENT_TYPES = [
+    'article',
+    'comparison',
+    'calculator',
+    'cost_guide',
+    'lead_capture',
+    'health_decision',
+    'checklist',
+    'faq',
+    'review',
+    'wizard',
+    'configurator',
+    'quiz',
+    'survey',
+    'assessment',
+    'interactive_infographic',
+    'interactive_map',
+];
 
 const jsonbSchemas: Record<string, z.ZodType> = {
     calculatorConfig: calculatorConfigSchema,
     comparisonData: comparisonDataSchema,
     leadGenConfig: leadGenConfigSchema,
+    wizardConfig: wizardConfigSchema,
+    geoData: geoDataSchema,
 };
 
 /** Validate optional JSONB fields, returning a 400 response on failure or null on success. */

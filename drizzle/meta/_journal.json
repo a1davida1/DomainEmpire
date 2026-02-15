@@ -127,6 +127,34 @@
       "when": 1771111200000,
       "tag": "0017_steady_shehulk",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1771111800000,
+      "tag": "0018_majestic_deathbird",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1771112400000,
+      "tag": "0019_melodic_arclight",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1771113000000,
+      "tag": "0020_subscribers_rls_policies",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1771113600000,
+      "tag": "0021_windy_marketplace",
+      "breakpoints": true
     }
   ]
 }

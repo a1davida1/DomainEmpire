@@ -4,10 +4,29 @@
  * Designed to be called from the worker's hourly loop.
  */
 
-import { db, domains, revenueSnapshots, backlinkSnapshots } from '@/lib/db';
+import { db, domains, revenueSnapshots, backlinkSnapshots, articles } from '@/lib/db';
 import { eq, and, gte, desc, isNull, sql } from 'drizzle-orm';
 import { createNotification } from '@/lib/notifications';
 import { safeFetch } from '@/lib/tpilot/core/ssrf';
+
+const THIN_CONTENT_WORD_THRESHOLD = 500;
+const THIN_CONTENT_SHARE_THRESHOLD = 0.35;
+const INDEXING_LOW_IMPRESSIONS_THRESHOLD = 20;
+const INDEXING_MIN_DOMAIN_AGE_DAYS = 21;
+const MANUAL_ACTION_SUSPECT_DROP_RATIO = 0.1;
+
+function isLongFormContentType(contentType: string | null | undefined): boolean {
+    return ![
+        'calculator',
+        'wizard',
+        'configurator',
+        'quiz',
+        'survey',
+        'assessment',
+        'interactive_infographic',
+        'interactive_map',
+    ].includes(contentType || 'article');
+}
 
 /**
  * Check for traffic drops across all active domains.
@@ -208,6 +227,171 @@ export async function checkBacklinkLosses() {
 }
 
 /**
+ * Search quality guardrail checks:
+ * - Indexing weakness / suspected de-indexing
+ * - Thin long-form content ratio
+ * - Intra-domain duplicate fingerprints
+ */
+export async function checkSearchQualityHealth() {
+    try {
+        const now = new Date();
+        const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+
+        const activeDomains = await db
+            .select({ id: domains.id, domain: domains.domain, createdAt: domains.createdAt })
+            .from(domains)
+            .where(and(eq(domains.isDeployed, true), isNull(domains.deletedAt)));
+
+        for (const domain of activeDomains) {
+            const [publishedRows, recentTraffic, previousTraffic] = await Promise.all([
+                db
+                    .select({
+                        id: articles.id,
+                        contentType: articles.contentType,
+                        wordCount: articles.wordCount,
+                        contentFingerprint: articles.contentFingerprint,
+                    })
+                    .from(articles)
+                    .where(and(
+                        eq(articles.domainId, domain.id),
+                        eq(articles.status, 'published'),
+                        isNull(articles.deletedAt),
+                    )),
+                db
+                    .select({
+                        impressions: sql<number>`COALESCE(SUM(${revenueSnapshots.impressions}), 0)::int`,
+                        clicks: sql<number>`COALESCE(SUM(${revenueSnapshots.clicks}), 0)::int`,
+                        pageviews: sql<number>`COALESCE(SUM(${revenueSnapshots.pageviews}), 0)::int`,
+                    })
+                    .from(revenueSnapshots)
+                    .where(and(
+                        eq(revenueSnapshots.domainId, domain.id),
+                        gte(revenueSnapshots.snapshotDate, thirtyDaysAgo),
+                    )),
+                db
+                    .select({
+                        impressions: sql<number>`COALESCE(SUM(${revenueSnapshots.impressions}), 0)::int`,
+                        clicks: sql<number>`COALESCE(SUM(${revenueSnapshots.clicks}), 0)::int`,
+                        pageviews: sql<number>`COALESCE(SUM(${revenueSnapshots.pageviews}), 0)::int`,
+                    })
+                    .from(revenueSnapshots)
+                    .where(and(
+                        eq(revenueSnapshots.domainId, domain.id),
+                        gte(revenueSnapshots.snapshotDate, sixtyDaysAgo),
+                        sql`${revenueSnapshots.snapshotDate} < ${thirtyDaysAgo}`,
+                    )),
+            ]);
+
+            if (publishedRows.length === 0) {
+                continue;
+            }
+
+            const longFormRows = publishedRows.filter((row) => isLongFormContentType(row.contentType));
+            const thinLongFormCount = longFormRows.filter((row) => {
+                const words = row.wordCount ?? 0;
+                return words > 0 && words < THIN_CONTENT_WORD_THRESHOLD;
+            }).length;
+            const thinShare = longFormRows.length > 0 ? thinLongFormCount / longFormRows.length : 0;
+
+            if (longFormRows.length >= 4 && thinShare >= THIN_CONTENT_SHARE_THRESHOLD) {
+                await createNotification({
+                    type: 'search_quality',
+                    severity: 'warning',
+                    domainId: domain.id,
+                    title: `Thin content risk on ${domain.domain}`,
+                    message: `${thinLongFormCount}/${longFormRows.length} long-form pages are under ${THIN_CONTENT_WORD_THRESHOLD} words.`,
+                    actionUrl: `/dashboard/content/duplicates`,
+                    metadata: {
+                        signal: 'thin_content',
+                        thinCount: thinLongFormCount,
+                        totalLongForm: longFormRows.length,
+                        threshold: THIN_CONTENT_WORD_THRESHOLD,
+                    },
+                });
+            }
+
+            const fingerprintCounts = new Map<string, number>();
+            for (const row of publishedRows) {
+                const fingerprint = row.contentFingerprint?.trim();
+                if (!fingerprint) continue;
+                fingerprintCounts.set(fingerprint, (fingerprintCounts.get(fingerprint) || 0) + 1);
+            }
+            const duplicateArticles = [...fingerprintCounts.values()]
+                .filter((count) => count > 1)
+                .reduce((sum, count) => sum + count, 0);
+            const duplicateGroups = [...fingerprintCounts.values()].filter((count) => count > 1).length;
+
+            if (duplicateArticles >= 2) {
+                await createNotification({
+                    type: 'search_quality',
+                    severity: 'warning',
+                    domainId: domain.id,
+                    title: `Duplicate content signal on ${domain.domain}`,
+                    message: `${duplicateArticles} published pages share duplicate content fingerprints across ${duplicateGroups} groups.`,
+                    actionUrl: `/dashboard/content/duplicates`,
+                    metadata: {
+                        signal: 'duplicate_fingerprint',
+                        duplicateArticles,
+                        duplicateGroups,
+                    },
+                });
+            }
+
+            const domainAgeDays = domain.createdAt
+                ? (now.getTime() - new Date(domain.createdAt).getTime()) / (24 * 60 * 60 * 1000)
+                : 0;
+            const recentImpressions = recentTraffic[0]?.impressions ?? 0;
+            const previousImpressions = previousTraffic[0]?.impressions ?? 0;
+            const recentClicks = recentTraffic[0]?.clicks ?? 0;
+
+            if (
+                domainAgeDays >= INDEXING_MIN_DOMAIN_AGE_DAYS
+                && publishedRows.length >= 3
+                && recentImpressions <= INDEXING_LOW_IMPRESSIONS_THRESHOLD
+            ) {
+                await createNotification({
+                    type: 'search_quality',
+                    severity: 'warning',
+                    domainId: domain.id,
+                    title: `Indexing weakness on ${domain.domain}`,
+                    message: `Last 30d impressions (${recentImpressions}) are below expected baseline for ${publishedRows.length} published pages.`,
+                    actionUrl: `/dashboard/monitoring`,
+                    metadata: {
+                        signal: 'indexing_low',
+                        impressions30d: recentImpressions,
+                        clicks30d: recentClicks,
+                        publishedPages: publishedRows.length,
+                    },
+                });
+            }
+
+            if (
+                previousImpressions >= 1000
+                && recentImpressions <= Math.floor(previousImpressions * MANUAL_ACTION_SUSPECT_DROP_RATIO)
+            ) {
+                await createNotification({
+                    type: 'search_quality',
+                    severity: 'critical',
+                    domainId: domain.id,
+                    title: `Search visibility collapse on ${domain.domain}`,
+                    message: `Impressions dropped from ${previousImpressions} to ${recentImpressions} vs prior 30-day window; investigate indexing/manual-action status.`,
+                    actionUrl: `/dashboard/monitoring`,
+                    metadata: {
+                        signal: 'visibility_collapse',
+                        impressionsPrev30d: previousImpressions,
+                        impressions30d: recentImpressions,
+                        dropRatio: previousImpressions > 0 ? recentImpressions / previousImpressions : 0,
+                    },
+                });
+            }
+        }
+    } catch (error) {
+        console.error('Search quality check failed:', error);
+    }
+}
+
+/**
  * Run all monitoring checks. Call from the worker's hourly loop.
  */
 export async function runAllMonitoringChecks() {
@@ -217,6 +401,7 @@ export async function runAllMonitoringChecks() {
         checkRevenueAnomalies(),
         checkSiteHealth(),
         checkBacklinkLosses(),
+        checkSearchQualityHealth(),
     ]);
     console.log('[Monitoring] All checks complete.');
 }

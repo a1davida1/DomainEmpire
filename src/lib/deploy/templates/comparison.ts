@@ -156,7 +156,7 @@ export async function generateComparisonPage(
   pageShell: import('./shared').PageShell,
 ): Promise<string> {
   const data = article.comparisonData as ComparisonData | null;
-  const contentHtml = await renderMarkdownToHtml(article.contentMarkdown || '');
+  const contentHtml = await renderMarkdownToHtml(article.contentMarkdown || '', { currentDomain: domain });
   const { disclaimerHtml, trustHtml } = await buildTrustElements(article, disclosure);
   const dataSourcesHtml = generateDataSourcesSection(datasets);
 

@@ -3,6 +3,7 @@ import {
     escapeHtml,
     escapeAttr,
     buildSchemaJsonLd,
+    buildPrintButton,
     generateDataSourcesSection,
 } from '@/lib/deploy/templates/shared';
 import type { Article, Dataset } from '@/lib/db/schema';
@@ -178,5 +179,15 @@ describe('generateDataSourcesSection', () => {
         const result = generateDataSourcesSection(datasets);
         expect(result).not.toContain('<script>');
         expect(result).toContain('&lt;script&gt;');
+    });
+});
+
+describe('buildPrintButton', () => {
+    it('supports interactive infographic pages', () => {
+        expect(buildPrintButton('interactive_infographic')).toContain('Save as PDF');
+    });
+
+    it('supports interactive map pages', () => {
+        expect(buildPrintButton('interactive_map')).toContain('Save as PDF');
     });
 });

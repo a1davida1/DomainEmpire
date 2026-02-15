@@ -22,9 +22,10 @@
  * - keyword_research: Research keywords for domain
  * - bulk_seed: Seed articles for domain
  * - fetch_analytics: Pull analytics data
+ * - run_integration_connection_sync: Execute scheduled integration sync
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, randomInt } from 'node:crypto';
 import {
     db,
     contentQueue,
@@ -40,6 +41,8 @@ import {
     promotionEvents,
     mediaAssets,
     mediaAssetUsage,
+    mediaModerationTasks,
+    domainChannelProfiles,
 } from '@/lib/db';
 import { eq, and, lte, gt, gte, isNull, or, sql, asc, desc, count, inArray } from 'drizzle-orm';
 import { processOutlineJob, processDraftJob, processHumanizeJob, processSeoOptimizeJob, processMetaJob, processKeywordResearchJob, processResearchJob } from './pipeline';
@@ -62,6 +65,9 @@ import { refreshResearchCacheEntry } from '@/lib/ai/research-cache';
 import { publishToGrowthChannel } from '@/lib/growth/publishers';
 import { refreshExpiringGrowthCredentialsAudit, resolveGrowthPublishCredential } from '@/lib/growth/channel-credentials';
 import { evaluateGrowthPublishPolicy } from '@/lib/growth/policy';
+import { runMediaReviewEscalationSweep } from '@/lib/growth/media-review-escalation';
+import { runIntegrationConnectionSync } from '@/lib/integrations/executor';
+import { scheduleIntegrationConnectionSyncJobs } from '@/lib/integrations/scheduler';
 
 const LOCK_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 const JOB_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes max per job
@@ -450,7 +456,8 @@ type GrowthExecutionJobType =
     | 'render_short_video'
     | 'publish_pinterest_pin'
     | 'publish_youtube_short'
-    | 'sync_campaign_metrics';
+    | 'sync_campaign_metrics'
+    | 'run_media_review_escalations';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const GROWTH_COOLDOWN_HOURS = Number.isFinite(Number.parseInt(process.env.GROWTH_CHANNEL_COOLDOWN_HOURS || '', 10))
@@ -459,6 +466,21 @@ const GROWTH_COOLDOWN_HOURS = Number.isFinite(Number.parseInt(process.env.GROWTH
 const GROWTH_DEFAULT_DAILY_CAP = Number.isFinite(Number.parseInt(process.env.GROWTH_DEFAULT_DAILY_CAP || '', 10))
     ? Math.max(1, Number.parseInt(process.env.GROWTH_DEFAULT_DAILY_CAP || '', 10))
     : 2;
+const GROWTH_DEFAULT_MIN_JITTER_MINUTES = Number.isFinite(Number.parseInt(process.env.GROWTH_DEFAULT_MIN_JITTER_MINUTES || '', 10))
+    ? Math.max(0, Number.parseInt(process.env.GROWTH_DEFAULT_MIN_JITTER_MINUTES || '', 10))
+    : 15;
+const GROWTH_DEFAULT_MAX_JITTER_MINUTES = Number.isFinite(Number.parseInt(process.env.GROWTH_DEFAULT_MAX_JITTER_MINUTES || '', 10))
+    ? Math.max(GROWTH_DEFAULT_MIN_JITTER_MINUTES, Number.parseInt(process.env.GROWTH_DEFAULT_MAX_JITTER_MINUTES || '', 10))
+    : 90;
+const GROWTH_DEFAULT_QUIET_HOURS_START = Number.isFinite(Number.parseInt(process.env.GROWTH_DEFAULT_QUIET_HOURS_START || '', 10))
+    ? clamp(Number.parseInt(process.env.GROWTH_DEFAULT_QUIET_HOURS_START || '', 10), 0, 23)
+    : 23;
+const GROWTH_DEFAULT_QUIET_HOURS_END = Number.isFinite(Number.parseInt(process.env.GROWTH_DEFAULT_QUIET_HOURS_END || '', 10))
+    ? clamp(Number.parseInt(process.env.GROWTH_DEFAULT_QUIET_HOURS_END || '', 10), 0, 23)
+    : 6;
+const MEDIA_REVIEW_ESCALATION_SWEEP_USER_LIMIT = Number.isFinite(Number.parseInt(process.env.MEDIA_REVIEW_ESCALATION_SWEEP_USER_LIMIT || '', 10))
+    ? Math.max(1, Math.min(Number.parseInt(process.env.MEDIA_REVIEW_ESCALATION_SWEEP_USER_LIMIT || '', 10), 500))
+    : 100;
 
 function toUuid(value: unknown): string | undefined {
     if (typeof value !== 'string') return undefined;
@@ -479,6 +501,147 @@ function normalizeGrowthChannels(value: unknown): GrowthChannel[] {
         .map((item) => toGrowthChannel(item))
         .filter((item): item is GrowthChannel => item !== null);
     return [...new Set(normalized)];
+}
+
+type GrowthChannelCompatibility = 'supported' | 'limited' | 'blocked';
+
+interface GrowthChannelProfileSettings {
+    channel: GrowthChannel;
+    enabled: boolean;
+    compatibility: GrowthChannelCompatibility;
+    dailyCap: number | null;
+    quietHoursStart: number | null;
+    quietHoursEnd: number | null;
+    minJitterMinutes: number;
+    maxJitterMinutes: number;
+}
+
+interface GrowthSchedulePlan {
+    scheduledFor: Date;
+    jitterMinutes: number;
+    movedOutOfQuietHours: boolean;
+    quietHoursStart: number | null;
+    quietHoursEnd: number | null;
+}
+
+function randomIntInclusive(minValue: number, maxValue: number): number {
+    const min = Math.floor(Math.min(minValue, maxValue));
+    const max = Math.floor(Math.max(minValue, maxValue));
+    if (min === max) return min;
+    return randomInt(min, max + 1);
+}
+
+function isWithinQuietHoursUtc(date: Date, startHour: number, endHour: number): boolean {
+    if (startHour === endHour) {
+        return false;
+    }
+    const hour = date.getUTCHours();
+    if (startHour < endHour) {
+        return hour >= startHour && hour < endHour;
+    }
+    return hour >= startHour || hour < endHour;
+}
+
+function computeGrowthPublishSchedule(profile: GrowthChannelProfileSettings): GrowthSchedulePlan {
+    const now = new Date();
+    const minJitterMinutes = clamp(profile.minJitterMinutes, 0, 24 * 60);
+    const maxJitterMinutes = clamp(profile.maxJitterMinutes, minJitterMinutes, 24 * 60);
+    const jitterMinutes = randomIntInclusive(minJitterMinutes, maxJitterMinutes);
+    const scheduled = new Date(now.getTime() + jitterMinutes * 60 * 1000);
+
+    const quietHoursStart = profile.quietHoursStart;
+    const quietHoursEnd = profile.quietHoursEnd;
+    if (
+        typeof quietHoursStart !== 'number'
+        || typeof quietHoursEnd !== 'number'
+        || !isWithinQuietHoursUtc(scheduled, quietHoursStart, quietHoursEnd)
+    ) {
+        return {
+            scheduledFor: scheduled,
+            jitterMinutes,
+            movedOutOfQuietHours: false,
+            quietHoursStart: quietHoursStart ?? null,
+            quietHoursEnd: quietHoursEnd ?? null,
+        };
+    }
+
+    const adjusted = new Date(scheduled);
+    adjusted.setUTCHours(quietHoursEnd, 0, 0, 0);
+    if (adjusted.getTime() <= scheduled.getTime()) {
+        adjusted.setUTCDate(adjusted.getUTCDate() + 1);
+    }
+    adjusted.setUTCMinutes(randomIntInclusive(5, 35));
+
+    return {
+        scheduledFor: adjusted,
+        jitterMinutes,
+        movedOutOfQuietHours: true,
+        quietHoursStart,
+        quietHoursEnd,
+    };
+}
+
+async function getGrowthChannelProfilesByDomainId(domainId: string | null | undefined): Promise<Map<GrowthChannel, GrowthChannelProfileSettings>> {
+    if (!domainId) {
+        return new Map<GrowthChannel, GrowthChannelProfileSettings>();
+    }
+
+    const rows = await db
+        .select({
+            channel: domainChannelProfiles.channel,
+            enabled: domainChannelProfiles.enabled,
+            compatibility: domainChannelProfiles.compatibility,
+            dailyCap: domainChannelProfiles.dailyCap,
+            quietHoursStart: domainChannelProfiles.quietHoursStart,
+            quietHoursEnd: domainChannelProfiles.quietHoursEnd,
+            minJitterMinutes: domainChannelProfiles.minJitterMinutes,
+            maxJitterMinutes: domainChannelProfiles.maxJitterMinutes,
+        })
+        .from(domainChannelProfiles)
+        .where(eq(domainChannelProfiles.domainId, domainId));
+
+    const map = new Map<GrowthChannel, GrowthChannelProfileSettings>();
+    for (const row of rows) {
+        const channel = toGrowthChannel(row.channel);
+        if (!channel) continue;
+        map.set(channel, {
+            channel,
+            enabled: row.enabled ?? true,
+            compatibility: (row.compatibility as GrowthChannelCompatibility) || 'supported',
+            dailyCap: row.dailyCap ?? null,
+            quietHoursStart: row.quietHoursStart ?? null,
+            quietHoursEnd: row.quietHoursEnd ?? null,
+            minJitterMinutes: row.minJitterMinutes ?? GROWTH_DEFAULT_MIN_JITTER_MINUTES,
+            maxJitterMinutes: row.maxJitterMinutes ?? GROWTH_DEFAULT_MAX_JITTER_MINUTES,
+        });
+    }
+
+    return map;
+}
+
+function resolveGrowthChannelProfile(
+    profilesByChannel: Map<GrowthChannel, GrowthChannelProfileSettings>,
+    channel: GrowthChannel,
+): GrowthChannelProfileSettings {
+    const fromDb = profilesByChannel.get(channel);
+    if (fromDb) {
+        return {
+            ...fromDb,
+            minJitterMinutes: clamp(fromDb.minJitterMinutes, 0, 24 * 60),
+            maxJitterMinutes: clamp(fromDb.maxJitterMinutes, clamp(fromDb.minJitterMinutes, 0, 24 * 60), 24 * 60),
+        };
+    }
+
+    return {
+        channel,
+        enabled: true,
+        compatibility: 'supported',
+        dailyCap: null,
+        quietHoursStart: GROWTH_DEFAULT_QUIET_HOURS_START,
+        quietHoursEnd: GROWTH_DEFAULT_QUIET_HOURS_END,
+        minJitterMinutes: GROWTH_DEFAULT_MIN_JITTER_MINUTES,
+        maxJitterMinutes: GROWTH_DEFAULT_MAX_JITTER_MINUTES,
+    };
 }
 
 function getGrowthPayload(value: unknown): Record<string, unknown> {
@@ -544,53 +707,57 @@ async function enqueueGrowthExecutionJob(opts: {
     jobType: GrowthExecutionJobType;
     priority: number;
     payload?: Record<string, unknown>;
+    scheduledFor?: Date | null;
 }): Promise<boolean> {
-    const existing = await db
-        .select({ id: contentQueue.id })
-        .from(contentQueue)
-        .where(and(
-            eq(contentQueue.jobType, opts.jobType),
-            inArray(contentQueue.status, ['pending', 'processing']),
-            sql`${contentQueue.payload} ->> 'campaignId' = ${opts.campaignId}`,
-        ))
-        .limit(1);
+    return db.transaction(async (tx) => {
+        const existing = await tx
+            .select({ id: contentQueue.id })
+            .from(contentQueue)
+            .where(and(
+                eq(contentQueue.jobType, opts.jobType),
+                inArray(contentQueue.status, ['pending', 'processing']),
+                sql`${contentQueue.payload} ->> 'campaignId' = ${opts.campaignId}`,
+            ))
+            .limit(1);
 
-    if (existing.length > 0) {
-        return false;
-    }
+        if (existing.length > 0) {
+            return false;
+        }
 
-    const [promotionJob] = await db.insert(promotionJobs).values({
-        campaignId: opts.campaignId,
-        jobType: opts.jobType,
-        status: 'pending',
-        payload: opts.payload ?? {},
-    }).returning({ id: promotionJobs.id });
+        const [promotionJob] = await tx.insert(promotionJobs).values({
+            campaignId: opts.campaignId,
+            jobType: opts.jobType,
+            status: 'pending',
+            payload: opts.payload ?? {},
+        }).returning({ id: promotionJobs.id });
 
-    if (!promotionJob) {
-        throw new Error(`Failed to create promotion_jobs row for ${opts.jobType}`);
-    }
+        if (!promotionJob) {
+            throw new Error(`Failed to create promotion_jobs row for ${opts.jobType}`);
+        }
 
-    const jobPayload = {
-        ...(opts.payload ?? {}),
-        campaignId: opts.campaignId,
-        promotionJobId: promotionJob.id,
-    };
+        const jobPayload = {
+            ...(opts.payload ?? {}),
+            campaignId: opts.campaignId,
+            promotionJobId: promotionJob.id,
+        };
 
-    const queueJobId = await enqueueContentJob({
-        jobType: opts.jobType,
-        status: 'pending',
-        priority: opts.priority,
-        payload: jobPayload,
+        const queueJobId = await enqueueContentJob({
+            jobType: opts.jobType,
+            status: 'pending',
+            priority: opts.priority,
+            payload: jobPayload,
+            scheduledFor: opts.scheduledFor ?? null,
+        }, tx);
+
+        await tx.update(promotionJobs).set({
+            payload: {
+                ...jobPayload,
+                contentQueueJobId: queueJobId,
+            },
+        }).where(eq(promotionJobs.id, promotionJob.id));
+
+        return true;
     });
-
-    await db.update(promotionJobs).set({
-        payload: {
-            ...jobPayload,
-            contentQueueJobId: queueJobId,
-        },
-    }).where(eq(promotionJobs.id, promotionJob.id));
-
-    return true;
 }
 
 async function countCampaignPublishesToday(campaignId: string): Promise<number> {
@@ -601,6 +768,19 @@ async function countCampaignPublishesToday(campaignId: string): Promise<number> 
             eq(promotionEvents.campaignId, campaignId),
             eq(promotionEvents.eventType, 'published'),
             gte(promotionEvents.occurredAt, today),
+        ));
+    return Number(row?.value ?? 0);
+}
+
+async function countCampaignPublishesTodayByChannel(campaignId: string, channel: GrowthChannel): Promise<number> {
+    const today = getUtcDayStart();
+    const [row] = await db.select({ value: count() })
+        .from(promotionEvents)
+        .where(and(
+            eq(promotionEvents.campaignId, campaignId),
+            eq(promotionEvents.eventType, 'published'),
+            gte(promotionEvents.occurredAt, today),
+            sql`${promotionEvents.attributes} ->> 'channel' = ${channel}`,
         ));
     return Number(row?.value ?? 0);
 }
@@ -732,12 +912,21 @@ function resolveCampaignDailyCap(campaign: typeof promotionCampaigns.$inferSelec
 function resolveCampaignChannels(
     campaign: typeof promotionCampaigns.$inferSelect,
     payload: Record<string, unknown>,
+    channelProfiles?: Map<GrowthChannel, GrowthChannelProfileSettings>,
 ): GrowthChannel[] {
     const payloadChannels = normalizeGrowthChannels(payload.channels);
-    if (payloadChannels.length > 0) {
-        return payloadChannels;
+    const requested = payloadChannels.length > 0
+        ? payloadChannels
+        : normalizeGrowthChannels(campaign.channels);
+
+    if (!channelProfiles) {
+        return requested;
     }
-    return normalizeGrowthChannels(campaign.channels);
+
+    return requested.filter((channel) => {
+        const profile = resolveGrowthChannelProfile(channelProfiles, channel);
+        return profile.enabled && profile.compatibility !== 'blocked';
+    });
 }
 
 function resolveCreativeHashForPublish(opts: {
@@ -886,9 +1075,22 @@ async function runPublishJob(
     channel: GrowthChannel,
 ): Promise<string> {
     const context = await resolvePromotionContext(job.payload);
+    const scheduledPublishFor = toOptionalString(context.payload.scheduledPublishFor);
+    const channelProfiles = await getGrowthChannelProfilesByDomainId(context.research.domainId);
+    const channelProfile = resolveGrowthChannelProfile(channelProfiles, channel);
 
     if (context.campaign.status !== 'active') {
         return `Skipped publish: campaign ${context.campaign.id} is ${context.campaign.status}`;
+    }
+
+    if (!channelProfile.enabled || channelProfile.compatibility === 'blocked') {
+        await recordPromotionEvent(context.campaign.id, 'publish_skipped', {
+            channel,
+            reason: channelProfile.enabled ? 'channel_blocked_for_domain' : 'channel_disabled_for_domain',
+            compatibility: channelProfile.compatibility,
+            scheduledPublishFor,
+        });
+        return `Skipped publish: ${channel} is disabled/blocked for this domain`;
     }
 
     const dailyCap = resolveCampaignDailyCap(context.campaign);
@@ -899,8 +1101,23 @@ async function runPublishJob(
             reason: 'daily_cap_reached',
             dailyCap,
             publishesToday,
+            scheduledPublishFor,
         });
         return `Skipped publish: daily cap reached (${publishesToday}/${dailyCap})`;
+    }
+
+    if (channelProfile.dailyCap && channelProfile.dailyCap > 0) {
+        const channelPublishesToday = await countCampaignPublishesTodayByChannel(context.campaign.id, channel);
+        if (channelPublishesToday >= channelProfile.dailyCap) {
+            await recordPromotionEvent(context.campaign.id, 'publish_skipped', {
+                channel,
+                reason: 'channel_daily_cap_reached',
+                channelDailyCap: channelProfile.dailyCap,
+                channelPublishesToday,
+                scheduledPublishFor,
+            });
+            return `Skipped publish: channel daily cap reached (${channelPublishesToday}/${channelProfile.dailyCap})`;
+        }
     }
 
     const creativeHash = resolveCreativeHashForPublish({
@@ -922,6 +1139,7 @@ async function runPublishJob(
             creativeHash,
             reason: suppressed.duplicate ? 'duplicate_creative' : 'domain_cooldown',
             cooldownHours: GROWTH_COOLDOWN_HOURS,
+            scheduledPublishFor,
         });
         return suppressed.duplicate
             ? 'Skipped publish: duplicate creative inside cooldown window'
@@ -958,6 +1176,7 @@ async function runPublishJob(
             blockReasons: policyCheck.blockReasons,
             policyWarnings: policyCheck.warnings,
             policyChanges: policyCheck.changes,
+            scheduledPublishFor,
         });
 
         await enqueueGrowthExecutionJob({
@@ -1001,6 +1220,7 @@ async function runPublishJob(
         publishMetadata: publishResult.metadata,
         policyWarnings: policyCheck.warnings,
         policyChanges: policyCheck.changes,
+        scheduledPublishFor,
         launchedBy,
         credentialSource: credential ? 'stored' : 'env',
     });
@@ -1052,6 +1272,75 @@ async function enqueueAcquisitionStageJobIfMissing(
     });
 
     return true;
+}
+
+async function enqueueMediaReviewEscalationJobIfMissing(
+    userId: string,
+    opts: {
+        priority?: number;
+        source?: string;
+    } = {},
+): Promise<boolean> {
+    const existing = await db
+        .select({ id: contentQueue.id })
+        .from(contentQueue)
+        .where(and(
+            eq(contentQueue.jobType, 'run_media_review_escalations'),
+            inArray(contentQueue.status, ['pending', 'processing']),
+            sql`${contentQueue.payload} ->> 'userId' = ${userId}`,
+        ))
+        .limit(1);
+
+    if (existing.length > 0) {
+        return false;
+    }
+
+    await enqueueContentJob({
+        jobType: 'run_media_review_escalations',
+        payload: {
+            userId,
+            dryRun: false,
+            actorId: null,
+            source: opts.source ?? 'maintenance',
+        },
+        status: 'pending',
+        priority: opts.priority ?? 1,
+    });
+
+    return true;
+}
+
+async function scheduleMediaReviewEscalationSweeps(limit = MEDIA_REVIEW_ESCALATION_SWEEP_USER_LIMIT): Promise<{
+    consideredUsers: number;
+    queuedJobs: number;
+    alreadyQueued: number;
+}> {
+    const rows = await db
+        .select({ userId: mediaModerationTasks.userId })
+        .from(mediaModerationTasks)
+        .where(eq(mediaModerationTasks.status, 'pending'))
+        .groupBy(mediaModerationTasks.userId)
+        .limit(limit);
+
+    let queuedJobs = 0;
+    let alreadyQueued = 0;
+    for (const row of rows) {
+        const queued = await enqueueMediaReviewEscalationJobIfMissing(row.userId, {
+            source: 'hourly_maintenance',
+            priority: 1,
+        });
+        if (queued) {
+            queuedJobs += 1;
+        } else {
+            alreadyQueued += 1;
+        }
+    }
+
+    return {
+        consideredUsers: rows.length,
+        queuedJobs,
+        alreadyQueued,
+    };
 }
 
 async function syncDomainBuyReviewTask(opts: {
@@ -2221,10 +2510,9 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
             }
 
             const context = await resolvePromotionContext(job.payload, { allowCreateCampaign: true });
-            const channels = resolveCampaignChannels(context.campaign, context.payload);
-            if (channels.length === 0) {
-                throw new Error('Promotion campaign has no valid channels');
-            }
+            const channelProfiles = await getGrowthChannelProfilesByDomainId(context.research.domainId);
+            const requestedChannels = resolveCampaignChannels(context.campaign, context.payload);
+            const channels = resolveCampaignChannels(context.campaign, context.payload, channelProfiles);
 
             if (context.campaign.status === 'cancelled' || context.campaign.status === 'completed') {
                 await markJobComplete(
@@ -2234,6 +2522,18 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
                 break;
             }
 
+            if (channels.length === 0) {
+                await recordPromotionEvent(context.campaign.id, 'plan_skipped', {
+                    reason: 'no_enabled_channels',
+                    requestedChannels,
+                    sourceJobId: job.id,
+                });
+                await markJobComplete(job.id, `Skipped: no enabled channels for campaign ${context.campaign.id}`);
+                break;
+            }
+
+            const blockedChannels = requestedChannels.filter((channel) => !channels.includes(channel));
+
             await db.update(promotionCampaigns).set({
                 status: 'active',
                 updatedAt: new Date(),
@@ -2241,6 +2541,7 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
 
             await recordPromotionEvent(context.campaign.id, 'plan_created', {
                 channels,
+                blockedChannels,
                 budget: context.campaign.budget,
                 dailyCap: resolveCampaignDailyCap(context.campaign),
                 sourceJobId: job.id,
@@ -2251,6 +2552,8 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
                 ?? null;
             let queued = 0;
             for (const channel of channels) {
+                const profile = resolveGrowthChannelProfile(channelProfiles, channel);
+                const schedulePlan = computeGrowthPublishSchedule(profile);
                 if (channel === 'youtube_shorts') {
                     const didQueue = await enqueueGrowthExecutionJob({
                         campaignId: context.campaign.id,
@@ -2262,6 +2565,13 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
                             domain: context.research.domain,
                             destinationUrl: `https://${context.research.domain}`,
                             launchedBy,
+                            scheduledPublishFor: schedulePlan.scheduledFor.toISOString(),
+                            scheduleMetadata: {
+                                jitterMinutes: schedulePlan.jitterMinutes,
+                                movedOutOfQuietHours: schedulePlan.movedOutOfQuietHours,
+                                quietHoursStart: schedulePlan.quietHoursStart,
+                                quietHoursEnd: schedulePlan.quietHoursEnd,
+                            },
                         },
                     });
                     if (didQueue) queued += 1;
@@ -2273,12 +2583,20 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
                         campaignId: context.campaign.id,
                         jobType: 'publish_pinterest_pin',
                         priority: job.priority ?? 2,
+                        scheduledFor: schedulePlan.scheduledFor,
                         payload: {
                             channel,
                             domainResearchId: context.research.id,
                             domain: context.research.domain,
                             destinationUrl: `https://${context.research.domain}`,
                             launchedBy,
+                            scheduledPublishFor: schedulePlan.scheduledFor.toISOString(),
+                            scheduleMetadata: {
+                                jitterMinutes: schedulePlan.jitterMinutes,
+                                movedOutOfQuietHours: schedulePlan.movedOutOfQuietHours,
+                                quietHoursStart: schedulePlan.quietHoursStart,
+                                quietHoursEnd: schedulePlan.quietHoursEnd,
+                            },
                         },
                     });
                     if (didQueue) queued += 1;
@@ -2342,17 +2660,21 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
                 campaignId: context.campaign.id,
                 jobType: 'render_short_video',
                 priority: job.priority ?? 2,
-                payload: {
-                    channel,
-                    script,
-                    creativeHash,
-                    domainResearchId: context.research.id,
-                    destinationUrl: toOptionalString(context.payload.destinationUrl) || `https://${context.research.domain}`,
-                    launchedBy: toUuid(context.payload.launchedBy)
-                        ?? toUuid(context.payload.requestedBy)
-                        ?? null,
-                },
-            });
+                    payload: {
+                        channel,
+                        script,
+                        creativeHash,
+                        domainResearchId: context.research.id,
+                        destinationUrl: toOptionalString(context.payload.destinationUrl) || `https://${context.research.domain}`,
+                        launchedBy: toUuid(context.payload.launchedBy)
+                            ?? toUuid(context.payload.requestedBy)
+                            ?? null,
+                        scheduledPublishFor: toOptionalString(context.payload.scheduledPublishFor),
+                        scheduleMetadata: isPlainObject(context.payload.scheduleMetadata)
+                            ? context.payload.scheduleMetadata
+                            : {},
+                    },
+                });
 
             await markJobComplete(
                 job.id,
@@ -2402,10 +2724,12 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
                 scriptWordCount: script.split(/\s+/).filter(Boolean).length,
             });
 
+            const scheduledPublishFor = toOptionalDate(context.payload.scheduledPublishFor);
             const queuedPublish = await enqueueGrowthExecutionJob({
                 campaignId: context.campaign.id,
                 jobType: 'publish_youtube_short',
                 priority: job.priority ?? 2,
+                scheduledFor: scheduledPublishFor ?? null,
                 payload: {
                     channel: 'youtube_shorts',
                     creativeHash,
@@ -2416,6 +2740,10 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
                     launchedBy: toUuid(context.payload.launchedBy)
                         ?? toUuid(context.payload.requestedBy)
                         ?? null,
+                    scheduledPublishFor: scheduledPublishFor?.toISOString() ?? null,
+                    scheduleMetadata: isPlainObject(context.payload.scheduleMetadata)
+                        ? context.payload.scheduleMetadata
+                        : {},
                 },
             });
 
@@ -2467,6 +2795,84 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
             await markJobComplete(
                 job.id,
                 `Metrics synced: ${metrics.published} published, ${metrics.clicks} clicks, ${metrics.leads} leads`,
+            );
+            break;
+        }
+        case 'run_media_review_escalations': {
+            if (!isFeatureEnabled('growth_channels_v1')) {
+                await markJobComplete(job.id, 'Skipped: growth_channels_v1 disabled');
+                break;
+            }
+
+            const payload = getGrowthPayload(job.payload);
+            const userId = toUuid(payload.userId);
+            if (!userId) {
+                await markJobFailed(job.id, 'run_media_review_escalations requires payload.userId (uuid)');
+                break;
+            }
+
+            const dryRun = toOptionalBoolean(payload.dryRun) ?? false;
+            const parsedLimit = toOptionalNumber(payload.limit);
+            const limit = typeof parsedLimit === 'number'
+                ? Math.floor(clamp(parsedLimit, 1, 500))
+                : 100;
+            const actorId = toUuid(payload.actorId) ?? null;
+
+            const result = await runMediaReviewEscalationSweep({
+                userId,
+                actorId,
+                dryRun,
+                limit,
+            });
+
+            await markJobComplete(
+                job.id,
+                `${dryRun ? 'Dry run' : 'Sweep'} scanned ${result.scanned}; `
+                + `${result.eligible} eligible, ${result.escalated} escalated, `
+                + `${result.opsNotified} ops-notified, ${result.skipped} skipped`,
+            );
+            break;
+        }
+        case 'run_integration_connection_sync': {
+            const payload = isPlainObject(job.payload) ? job.payload : {};
+            const connectionId = toUuid(payload.connectionId);
+            if (!connectionId) {
+                await markJobFailed(job.id, 'run_integration_connection_sync requires payload.connectionId (uuid)');
+                break;
+            }
+
+            const actorUserId = toUuid(payload.actorUserId) ?? toUuid(payload.userId);
+            if (!actorUserId) {
+                await markJobFailed(job.id, 'run_integration_connection_sync requires payload.actorUserId (uuid)');
+                break;
+            }
+
+            const runTypeRaw = toOptionalString(payload.runType);
+            const runType = runTypeRaw === 'manual' || runTypeRaw === 'webhook' ? runTypeRaw : 'scheduled';
+            const parsedDays = toOptionalNumber(payload.days);
+            const days = typeof parsedDays === 'number'
+                ? Math.floor(clamp(parsedDays, 1, 365))
+                : 30;
+
+            const result = await runIntegrationConnectionSync(
+                connectionId,
+                { userId: actorUserId, role: 'admin' },
+                { runType, days },
+            );
+
+            if ('error' in result) {
+                await markJobFailed(
+                    job.id,
+                    result.error === 'not_found'
+                        ? 'Integration connection not found'
+                        : 'Forbidden to run integration sync',
+                );
+                break;
+            }
+
+            await markJobComplete(
+                job.id,
+                `Sync ${result.connection.provider}:${result.connection.id} -> ${result.run.status}`,
             );
             break;
         }
@@ -2662,6 +3068,28 @@ export async function runWorkerContinuously(options: WorkerOptions = {}): Promis
                         }
                     })
                     .catch((err: unknown) => console.error('[GrowthCredentialAudit] Error:', err));
+                await scheduleMediaReviewEscalationSweeps()
+                    .then((summary) => {
+                        if (summary.consideredUsers > 0) {
+                            console.log(
+                                `[MediaReviewEscalationScheduler] users=${summary.consideredUsers} ` +
+                                `queued=${summary.queuedJobs} alreadyQueued=${summary.alreadyQueued}`,
+                            );
+                        }
+                    })
+                    .catch((err: unknown) => console.error('[MediaReviewEscalationScheduler] Error:', err));
+                await scheduleIntegrationConnectionSyncJobs()
+                    .then((summary) => {
+                        if (summary.consideredConnections > 0) {
+                            console.log(
+                                `[IntegrationSyncScheduler] connections=${summary.consideredConnections} ` +
+                                `queued=${summary.queuedJobs} alreadyQueued=${summary.alreadyQueued} ` +
+                                `running=${summary.runningSyncs} disabled=${summary.skippedDisabled} ` +
+                                `notDue=${summary.skippedNotDue} invalidConfig=${summary.skippedInvalidConfig}`,
+                            );
+                        }
+                    })
+                    .catch((err: unknown) => console.error('[IntegrationSyncScheduler] Error:', err));
                 await runAllMonitoringChecks().catch((err: unknown) => console.error('[Monitoring] Error:', err));
                 lastSchedulerCheck = now;
             }

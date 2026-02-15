@@ -4,6 +4,8 @@ import type { NextRequest } from 'next/server';
 const mockRequireAuth = vi.fn();
 const mockGetRequestUser = vi.fn();
 const mockIsFeatureEnabled = vi.fn();
+const mockSelect = vi.fn();
+const mockFrom = vi.fn();
 const mockUpdate = vi.fn();
 const mockSet = vi.fn();
 const mockDelete = vi.fn();
@@ -16,6 +18,7 @@ const mockMediaAssetsTable = {
 
 let updatedRows: Array<Record<string, unknown>> = [];
 let deletedRows: Array<Record<string, unknown>> = [];
+let currentRows: Array<Record<string, unknown>> = [];
 
 vi.mock('@/lib/auth', () => ({
     requireAuth: mockRequireAuth,
@@ -27,11 +30,16 @@ vi.mock('@/lib/feature-flags', () => ({
 }));
 
 vi.mock('drizzle-orm', () => ({
+    and: vi.fn((...args: unknown[]) => ({ type: 'and', args })),
     eq: vi.fn((...args: unknown[]) => ({ type: 'eq', args })),
 }));
 
 vi.mock('@/lib/db', () => ({
     db: {
+        select: (...args: unknown[]) => {
+            mockSelect(...args);
+            return { from: mockFrom };
+        },
         update: (...args: unknown[]) => {
             mockUpdate(...args);
             return { set: mockSet };
@@ -62,6 +70,10 @@ describe('growth media-asset by id route', () => {
 
         updatedRows = [];
         deletedRows = [];
+        currentRows = [{
+            id: 'asset-1',
+            metadata: {},
+        }];
 
         mockWhere.mockImplementation(() => ({
             returning: async () => updatedRows,
@@ -72,9 +84,18 @@ describe('growth media-asset by id route', () => {
         mockWhereDelete.mockImplementation(() => ({
             returning: async () => deletedRows,
         }));
+        mockFrom.mockImplementation(() => ({
+            where: () => ({
+                limit: async () => currentRows,
+            }),
+        }));
     });
 
     it('updates media asset fields', async () => {
+        currentRows = [{
+            id: 'asset-1',
+            metadata: {},
+        }];
         updatedRows = [{
             id: 'asset-1',
             folder: 'pinterest',
@@ -94,6 +115,7 @@ describe('growth media-asset by id route', () => {
     });
 
     it('returns 404 when patch target does not exist', async () => {
+        currentRows = [];
         updatedRows = [];
 
         const response = await PATCH(

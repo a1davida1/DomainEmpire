@@ -21,6 +21,8 @@ import {
     ClipboardCheck,
     ShieldCheck,
     Gauge,
+    Megaphone,
+    PlugZap,
 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -34,6 +36,8 @@ const navigation = [
     { name: 'Revenue', href: '/dashboard/revenue', icon: DollarSign },
     { name: 'Finances', href: '/dashboard/finances', icon: Wallet },
     { name: 'Competitors', href: '/dashboard/competitors', icon: Swords },
+    { name: 'Growth', href: '/dashboard/growth', icon: Megaphone },
+    { name: 'Integrations', href: '/dashboard/integrations', icon: PlugZap },
     { name: 'Review', href: '/dashboard/review', icon: ClipboardCheck },
     { name: 'Compliance', href: '/dashboard/compliance', icon: ShieldCheck },
     { name: 'KPIs', href: '/dashboard/kpis', icon: Gauge },

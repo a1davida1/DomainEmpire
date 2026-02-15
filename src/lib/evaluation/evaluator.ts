@@ -517,9 +517,9 @@ async function logApiCall(
         fallbackUsed: result.fallbackUsed === true,
         inputTokens: result.inputTokens,
         outputTokens: result.outputTokens,
-        cost: result.cost.toFixed(4),
+        cost: Number(result.cost.toFixed(4)),
         durationMs: result.durationMs,
-    }).catch(() => { }); // Don't fail on log error
+    }).catch((err) => { console.warn('logApiCall insert failed', err); });
 }
 
 // ─── Signal Builders (with fallbacks) ───────────────────────

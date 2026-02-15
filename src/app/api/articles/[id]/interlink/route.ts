@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db, articles } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
 import { eq, ne, and } from 'drizzle-orm';
+import { isInternalLinkingEnabled } from '@/lib/content/link-policy';
 
 function escapeRegExp(string: string) {
     return string.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -12,6 +13,13 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
     const params = await props.params;
     const authError = await requireAuth(request);
     if (authError) return authError;
+
+    if (!isInternalLinkingEnabled()) {
+        return NextResponse.json(
+            { error: 'Automated interlinking is disabled by policy' },
+            { status: 403 },
+        );
+    }
 
     const { id } = params;
 

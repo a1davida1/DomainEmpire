@@ -1,8 +1,164 @@
 
 import { db, domains, contentQueue, articles } from '@/lib/db';
 import { eq, and, inArray, sql, isNull } from 'drizzle-orm';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { enqueueContentJob } from '@/lib/queue/content-queue';
+
+type ScheduleFrequency = 'daily' | 'weekly' | 'sporadic';
+type ScheduleTimeOfDay = 'morning' | 'evening' | 'random';
+type DomainBucket = 'build' | 'redirect' | 'park' | 'defensive';
+
+type BucketCadenceProfile = {
+    fallbackFrequency: ScheduleFrequency;
+    timeWindows: Array<{ startHour: number; endHour: number; weight: number }>;
+    gapMultiplier: number;
+    phaseShiftHours: number;
+};
+
+const BUCKET_CADENCE_PROFILES: Record<DomainBucket, BucketCadenceProfile> = {
+    build: {
+        fallbackFrequency: 'sporadic',
+        timeWindows: [
+            { startHour: 6, endHour: 10, weight: 0.35 },
+            { startHour: 11, endHour: 15, weight: 0.4 },
+            { startHour: 18, endHour: 22, weight: 0.25 },
+        ],
+        gapMultiplier: 1,
+        phaseShiftHours: 0,
+    },
+    redirect: {
+        fallbackFrequency: 'weekly',
+        timeWindows: [
+            { startHour: 7, endHour: 10, weight: 0.45 },
+            { startHour: 16, endHour: 20, weight: 0.55 },
+        ],
+        gapMultiplier: 1.4,
+        phaseShiftHours: 2,
+    },
+    park: {
+        fallbackFrequency: 'sporadic',
+        timeWindows: [
+            { startHour: 8, endHour: 11, weight: 0.5 },
+            { startHour: 17, endHour: 21, weight: 0.5 },
+        ],
+        gapMultiplier: 1.9,
+        phaseShiftHours: 4,
+    },
+    defensive: {
+        fallbackFrequency: 'weekly',
+        timeWindows: [
+            { startHour: 9, endHour: 12, weight: 0.55 },
+            { startHour: 19, endHour: 22, weight: 0.45 },
+        ],
+        gapMultiplier: 2.4,
+        phaseShiftHours: 6,
+    },
+};
+
+function clamp(value: number, min: number, max: number): number {
+    return Math.min(max, Math.max(min, value));
+}
+
+function normalizeBucket(value: unknown): DomainBucket {
+    if (value === 'build' || value === 'redirect' || value === 'park' || value === 'defensive') {
+        return value;
+    }
+    return 'build';
+}
+
+function stableRandom(seed: string, offset = 0): number {
+    const hash = createHash('sha256').update(seed).digest();
+    const value = hash.readUInt32BE(offset % (hash.length - 4));
+    return value / 0xffffffff;
+}
+
+function resolveScheduleFromConfig(
+    config: unknown,
+    fallbackFrequency: ScheduleFrequency,
+): {
+    frequency: ScheduleFrequency;
+    timeOfDay: ScheduleTimeOfDay;
+} {
+    const defaultSchedule = {
+        frequency: fallbackFrequency,
+        timeOfDay: 'random' as ScheduleTimeOfDay,
+    };
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+        return defaultSchedule;
+    }
+
+    const schedule = (config as Record<string, unknown>).schedule;
+    if (!schedule || typeof schedule !== 'object' || Array.isArray(schedule)) {
+        return defaultSchedule;
+    }
+
+    const frequencyRaw = (schedule as Record<string, unknown>).frequency;
+    const timeOfDayRaw = (schedule as Record<string, unknown>).timeOfDay;
+
+    const frequency: ScheduleFrequency =
+        frequencyRaw === 'daily' || frequencyRaw === 'weekly' || frequencyRaw === 'sporadic'
+            ? frequencyRaw
+            : fallbackFrequency;
+    const timeOfDay: ScheduleTimeOfDay =
+        timeOfDayRaw === 'morning' || timeOfDayRaw === 'evening' || timeOfDayRaw === 'random'
+            ? timeOfDayRaw
+            : 'random';
+
+    return { frequency, timeOfDay };
+}
+
+function computeGapDays(
+    frequency: ScheduleFrequency,
+    bucketProfile: BucketCadenceProfile,
+    seed: string,
+): number {
+    const random = stableRandom(`${seed}:gap`);
+    let baseDays: number;
+
+    if (frequency === 'daily') {
+        baseDays = 0.75 + random * 0.9;
+    } else if (frequency === 'weekly') {
+        baseDays = 5.5 + random * 3.5;
+    } else {
+        baseDays = 1.5 + random * 4.5;
+    }
+
+    // Bucket multiplier keeps different portfolio buckets naturally desynchronized.
+    return baseDays * bucketProfile.gapMultiplier;
+}
+
+function pickWeightedWindow(
+    windows: BucketCadenceProfile['timeWindows'],
+    seed: string,
+): { startHour: number; endHour: number } {
+    const totalWeight = windows.reduce((sum, window) => sum + window.weight, 0);
+    const ticket = stableRandom(`${seed}:window`) * totalWeight;
+    let running = 0;
+    for (const window of windows) {
+        running += window.weight;
+        if (ticket <= running) {
+            return window;
+        }
+    }
+    return windows[0];
+}
+
+function resolveTargetHour(
+    timeOfDay: ScheduleTimeOfDay,
+    bucketProfile: BucketCadenceProfile,
+    seed: string,
+): number {
+    if (timeOfDay === 'morning') {
+        return 6 + Math.floor(stableRandom(`${seed}:morning`) * 5); // 6-10
+    }
+    if (timeOfDay === 'evening') {
+        return 17 + Math.floor(stableRandom(`${seed}:evening`) * 6); // 17-22
+    }
+
+    const window = pickWeightedWindow(bucketProfile.timeWindows, seed);
+    const width = Math.max(1, window.endHour - window.startHour + 1);
+    return window.startHour + Math.floor(stableRandom(`${seed}:random-hour`) * width);
+}
 
 /**
  * Check for domains that need new content and schedule jobs based on "human-like" patterns.
@@ -52,49 +208,33 @@ export async function checkContentSchedule() {
         const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
         const baseDate = lastDate < thirtyDaysAgo ? new Date() : lastDate;
 
-        // Determine schedule config (use defaults if missing)
-        const config = domain.contentConfig?.schedule || {
-            frequency: 'sporadic',
-            timeOfDay: 'random',
-            wordCountRange: [800, 1500]
-        };
+        const bucket = normalizeBucket(domain.bucket);
+        const bucketProfile = BUCKET_CADENCE_PROFILES[bucket];
+        const config = resolveScheduleFromConfig(domain.contentConfig, bucketProfile.fallbackFrequency);
+        const seedBase = `${domain.id}:${domain.domain}:${bucket}:${baseDate.toISOString().slice(0, 10)}`;
 
-        // Calculate Target Post Date
-        let gapDays = 0;
-        switch (config.frequency) {
-            case 'daily':
-                gapDays = 0.8 + Math.random() * 0.4;
-                break;
-            case 'weekly':
-                gapDays = 6 + Math.random() * 2;
-                break;
-            case 'sporadic':
-            default:
-                gapDays = 1 + Math.random() * 4;
-                break;
-        }
+        // Calculate target publish gap using bucket-specific multipliers.
+        const gapDays = computeGapDays(config.frequency, bucketProfile, seedBase);
 
         const nextPostDate = new Date(baseDate.getTime() + gapDays * 24 * 60 * 60 * 1000);
 
-        // Adjust Time of Day
-        const hour = nextPostDate.getHours();
-        let targetHour = hour;
+        const rawHour = resolveTargetHour(config.timeOfDay, bucketProfile, seedBase) + bucketProfile.phaseShiftHours;
+        const targetHour = ((rawHour % 24) + 24) % 24;
+        const targetMinute = Math.floor(stableRandom(`${seedBase}:minute`) * 60);
+        const targetSecond = Math.floor(stableRandom(`${seedBase}:second`) * 50);
 
-        if (config.timeOfDay === 'morning') {
-            targetHour = 7 + Math.floor(Math.random() * 3);
-        } else if (config.timeOfDay === 'evening') {
-            targetHour = 19 + Math.floor(Math.random() * 4);
-        } else {
-            const r = Math.random();
-            if (r < 0.33) targetHour = 7 + Math.floor(Math.random() * 3);
-            else if (r < 0.66) targetHour = 11 + Math.floor(Math.random() * 3);
-            else targetHour = 19 + Math.floor(Math.random() * 4);
+        nextPostDate.setHours(targetHour, targetMinute, targetSecond, 0);
+
+        // Ensure scheduled timestamp is not in the immediate past after hour/day adjustments.
+        if (nextPostDate.getTime() <= Date.now() + 60_000) {
+            nextPostDate.setMinutes(nextPostDate.getMinutes() + clamp(Math.floor(stableRandom(`${seedBase}:backoff`) * 45), 5, 45));
         }
 
-        nextPostDate.setHours(targetHour, Math.floor(Math.random() * 60), 0, 0);
-
         // Queue the Job
-        console.log(`[Scheduler] Scheduling content for ${domain.domain} at ${nextPostDate.toISOString()}`);
+        console.log(
+            `[Scheduler] Scheduling content for ${domain.domain} at ${nextPostDate.toISOString()} `
+            + `(bucket=${bucket}, frequency=${config.frequency}, timeOfDay=${config.timeOfDay})`,
+        );
 
         await enqueueContentJob({
             id: randomUUID(),

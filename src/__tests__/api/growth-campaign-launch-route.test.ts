@@ -98,6 +98,42 @@ vi.mock('@/lib/db', () => ({
             mockUpdate(...args);
             return { set: mockSet };
         },
+        transaction: async (callback: (tx: {
+            execute: (query: unknown) => Promise<unknown>;
+            select: (...args: unknown[]) => { from: (table: unknown) => unknown };
+            insert: (...args: unknown[]) => { values: typeof mockValues };
+            update: (...args: unknown[]) => { set: typeof mockSet };
+        }) => Promise<unknown>) => callback({
+            execute: async () => undefined,
+            select: (...args: unknown[]) => {
+                mockSelect(...args);
+                return {
+                    from: (table: unknown) => {
+                        if (table === mockContentQueueTable) {
+                            return {
+                                where: () => ({
+                                    limit: async () => queueRows,
+                                }),
+                            };
+                        }
+                        return {
+                            where: () => ({
+                                limit: async () => [],
+                            }),
+                        };
+                    },
+                };
+            },
+            insert: (...args: unknown[]) => {
+                mockInsert(...args);
+                lastInsertTable = args[0];
+                return { values: mockValues };
+            },
+            update: (...args: unknown[]) => {
+                mockUpdate(...args);
+                return { set: mockSet };
+            },
+        }),
     },
     promotionCampaigns: mockPromotionCampaignsTable,
     contentQueue: mockContentQueueTable,
@@ -215,7 +251,7 @@ describe('growth campaign launch route', () => {
             jobType: 'create_promotion_plan',
             status: 'pending',
             priority: 4,
-        }));
+        }), expect.any(Object));
     });
 
     it('blocks completed campaigns unless force=true', async () => {

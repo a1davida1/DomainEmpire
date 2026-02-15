@@ -44,6 +44,8 @@ export async function GET(request: NextRequest) {
         const url = new URL(request.url);
         const limitParam = Number.parseInt(url.searchParams.get('limit') || '50', 10);
         const limit = Number.isFinite(limitParam) ? Math.max(1, Math.min(limitParam, 200)) : 50;
+        const offsetParam = Number.parseInt(url.searchParams.get('offset') || '0', 10);
+        const offset = Number.isFinite(offsetParam) && offsetParam >= 0 ? offsetParam : 0;
         const statusRaw = url.searchParams.get('status');
         const domainResearchIdRaw = url.searchParams.get('domainResearchId');
         const includeResearch = parseBoolean(url.searchParams.get('includeResearch'));
@@ -70,7 +72,8 @@ export async function GET(request: NextRequest) {
 
         const campaigns = await query
             .orderBy(desc(promotionCampaigns.createdAt))
-            .limit(limit);
+            .limit(limit)
+            .offset(offset);
 
         if (!includeResearch || campaigns.length === 0) {
             return NextResponse.json({ count: campaigns.length, campaigns });
@@ -151,7 +154,7 @@ export async function POST(request: NextRequest) {
             domainResearchId: payload.domainResearchId,
             channels: payload.channels,
             budget: payload.budget ?? 0,
-            dailyCap: payload.dailyCap ?? 0,
+            dailyCap: payload.dailyCap ?? 1,
             status: payload.status ?? 'draft',
             metrics: {
                 createdBy: user.id,

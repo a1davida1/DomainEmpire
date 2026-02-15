@@ -1,11 +1,33 @@
 import { describe, it, expect } from 'vitest';
 
 // Mirror the getContentType function from pipeline.ts (word-boundary version)
-type ContentType = 'article' | 'comparison' | 'calculator' | 'cost_guide' | 'lead_capture' | 'health_decision' | 'checklist' | 'faq' | 'review';
+type ContentType =
+    | 'article'
+    | 'comparison'
+    | 'calculator'
+    | 'cost_guide'
+    | 'lead_capture'
+    | 'health_decision'
+    | 'checklist'
+    | 'faq'
+    | 'review'
+    | 'wizard'
+    | 'quiz'
+    | 'survey'
+    | 'assessment'
+    | 'configurator'
+    | 'interactive_infographic'
+    | 'interactive_map';
 
 type Rule = { type: ContentType; match: RegExp; reject?: RegExp };
 
 const RULES: Rule[] = [
+    { type: 'quiz', match: /\bquiz\b|knowledge check|test yourself/ },
+    { type: 'survey', match: /\bsurvey\b|\bquestionnaire\b|\bpoll\b/ },
+    { type: 'assessment', match: /\bassessment\b|\bself[- ]assessment\b|score yourself/ },
+    { type: 'configurator', match: /\bconfigurator\b|build your own|customize/ },
+    { type: 'interactive_infographic', match: /\binfographic\b|data visualization|visual breakdown/ },
+    { type: 'interactive_map', match: /\binteractive map\b|map by state|regional map/ },
     { type: 'comparison', match: /\bvs\b|\bversus\b|compared to/ },
     { type: 'calculator', match: /\bcalculator\b|\bestimator\b|\bcompute\b/ },
     { type: 'calculator', match: /\btool\b/, reject: /\btoolkit\b|\btoolbox\b/ },
@@ -36,6 +58,36 @@ describe('getContentType', () => {
         expect(getContentType('term life vs whole life insurance')).toBe('comparison');
         expect(getContentType('roth versus traditional IRA')).toBe('comparison');
         expect(getContentType('medicare advantage compared to medigap')).toBe('comparison');
+    });
+
+    it('detects quiz keywords', () => {
+        expect(getContentType('retirement readiness quiz')).toBe('quiz');
+        expect(getContentType('medicare knowledge check')).toBe('quiz');
+    });
+
+    it('detects survey keywords', () => {
+        expect(getContentType('small business owner survey')).toBe('survey');
+        expect(getContentType('insurance questionnaire')).toBe('survey');
+    });
+
+    it('detects assessment keywords', () => {
+        expect(getContentType('risk tolerance assessment')).toBe('assessment');
+        expect(getContentType('self-assessment for debt')).toBe('assessment');
+    });
+
+    it('detects configurator keywords', () => {
+        expect(getContentType('solar plan configurator')).toBe('configurator');
+        expect(getContentType('build your own insurance plan')).toBe('configurator');
+    });
+
+    it('detects interactive infographic keywords', () => {
+        expect(getContentType('mortgage fee infographic')).toBe('interactive_infographic');
+        expect(getContentType('visual breakdown of treatment costs')).toBe('interactive_infographic');
+    });
+
+    it('detects interactive map keywords', () => {
+        expect(getContentType('benefits map by state')).toBe('interactive_map');
+        expect(getContentType('interactive map for tax rates')).toBe('interactive_map');
     });
 
     it('detects calculator keywords', () => {

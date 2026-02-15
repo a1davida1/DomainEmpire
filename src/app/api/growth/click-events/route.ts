@@ -96,10 +96,17 @@ export async function POST(request: NextRequest) {
             ipHash: payload.ipHash ?? null,
         }).returning({ id: clickEvents.id, campaignId: clickEvents.campaignId });
 
+        if (!event) {
+            return NextResponse.json(
+                { success: false, error: 'Click event was not persisted' },
+                { status: 502, headers: { ...corsHeaders(), ...limit.headers } },
+            );
+        }
+
         return NextResponse.json({
             success: true,
-            clickId: event?.id,
-            campaignId: event?.campaignId ?? null,
+            clickId: event.id,
+            campaignId: event.campaignId ?? null,
         }, { status: 201, headers: { ...corsHeaders(), ...limit.headers } });
     } catch (error) {
         console.error('Failed to capture click event:', error);
