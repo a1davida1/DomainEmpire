@@ -42,6 +42,9 @@ export const MODEL_CONFIG = {
 
     // Deep Research (Online)
     research: RESEARCH_MODEL,
+
+    // v2 Block content generation
+    blockContent: QUALITY_MODEL,
 } as const;
 
 export type AIModelTask = keyof typeof MODEL_CONFIG;
@@ -66,6 +69,7 @@ const MODEL_ROUTING_REGISTRY: Record<AIModelTask, RoutingProfile> = {
     voiceSeedGeneration: { fallbackTasks: ['draftGeneration', 'seoOptimize'], promptVersion: 'voice-seed.v1' },
     aiReview: { fallbackTasks: ['humanization', 'seoOptimize'], promptVersion: 'ai-review.v1' },
     research: { fallbackTasks: ['seoOptimize'], promptVersion: 'research.v1' },
+    blockContent: { fallbackTasks: ['draftGeneration', 'humanization'], promptVersion: 'block-content.v1' },
 };
 
 // Pricing per 1K tokens (approximate, check OpenRouter for current)

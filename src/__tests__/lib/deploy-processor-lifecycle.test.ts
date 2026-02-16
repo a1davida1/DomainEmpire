@@ -32,6 +32,10 @@ const mockDomainsTable = {
 const mockArticlesTable = {
     domainId: 'domain_id',
 };
+const mockPageDefinitionsTable = {
+    domainId: 'domain_id',
+    isPublished: 'is_published',
+};
 
 vi.mock('@/lib/deploy/cloudflare', () => ({
     createDirectUploadProject: mockCreateDirectUploadProject,
@@ -61,6 +65,7 @@ vi.mock('@/lib/domain/lifecycle-sync', () => ({
 
 vi.mock('drizzle-orm', () => ({
     eq: vi.fn((...args: unknown[]) => ({ type: 'eq', args })),
+    and: vi.fn((...args: unknown[]) => ({ type: 'and', args })),
     count: vi.fn(() => ({ type: 'count' })),
 }));
 
@@ -103,6 +108,11 @@ vi.mock('@/lib/db', () => ({
                             where: async () => [{ count: 1 }],
                         };
                     }
+                    if (table === mockPageDefinitionsTable) {
+                        return {
+                            where: async () => [{ count: 0 }],
+                        };
+                    }
                     return {
                         where: () => ({
                             limit: async () => [],
@@ -129,6 +139,7 @@ vi.mock('@/lib/db', () => ({
     domains: mockDomainsTable,
     contentQueue: mockContentQueueTable,
     articles: mockArticlesTable,
+    pageDefinitions: mockPageDefinitionsTable,
 }));
 
 const { processDeployJob } = await import('@/lib/deploy/processor');

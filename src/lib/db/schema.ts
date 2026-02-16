@@ -51,6 +51,7 @@ export const domains = pgTable('domains', {
 
     // Design & Strategy
     themeStyle: text('theme_style'), // 'navy-serif', 'green-modern', 'medical-clean'
+    skin: text('skin').default('slate'), // v2 color skin: 'ocean', 'forest', 'ember', 'slate', 'midnight', 'coral'
     monetizationModel: text('monetization_model'), // 'Lead gen', 'Display + affiliate', etc.
     monetizationTier: integer('monetization_tier').default(3), // 1=Lead Gen Only, 2=Affiliate Pri, 3=Display Pri, 4=Brand
 
@@ -113,6 +114,37 @@ export const domains = pgTable('domains', {
     bucketIdx: index('domain_bucket_idx').on(t.bucket), // Note: This references operational bucket
     verticalIdx: index('domain_vertical_idx').on(t.vertical),
 }));
+
+// ===========================================
+// PAGE DEFINITIONS: Block-based page composition for Template System v2
+// ===========================================
+export const pageDefinitions = pgTable('page_definitions', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    domainId: uuid('domain_id').notNull().references(() => domains.id, { onDelete: 'cascade' }),
+    route: text('route').notNull().default('/'),
+    title: text('title'),
+    metaDescription: text('meta_description'),
+    theme: text('theme').notNull().default('clean'),
+    skin: text('skin').notNull().default('slate'),
+    blocks: jsonb('blocks').$type<Array<{
+        id: string;
+        type: string;
+        variant?: string;
+        content?: Record<string, unknown>;
+        config?: Record<string, unknown>;
+    }>>().notNull().default([]),
+    isPublished: boolean('is_published').notNull().default(false),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+}, (t) => ({
+    domainRouteUnq: uniqueIndex('page_def_domain_route_uidx').on(t.domainId, t.route),
+    domainIdx: index('page_def_domain_idx').on(t.domainId),
+    publishedIdx: index('page_def_published_idx').on(t.isPublished),
+}));
+
+export type PageDefinition = typeof pageDefinitions.$inferSelect;
+export type NewPageDefinition = typeof pageDefinitions.$inferInsert;
 
 // ===========================================
 // DOMAIN LIFECYCLE EVENTS: Canonical lifecycle transition audit trail
@@ -530,6 +562,8 @@ export const contentQueue = pgTable('content_queue', {
             'run_integration_connection_sync',
             // Launch freeze recovery
             'campaign_launch_recovery',
+            // Template System v2 block content generation
+            'generate_block_content',
         ]
     }).notNull(),
 

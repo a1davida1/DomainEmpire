@@ -37,8 +37,13 @@ import { generateInteractiveMapPage } from './templates/interactive-map';
 import { generateEmbedPage } from './templates/embed';
 import { generateGeoBlocks } from './templates/geo-content';
 import { generateScrollCta } from './templates/scroll-cta';
-import { generateGlobalStyles, resolveDomainTheme } from './themes';
+import { generateGlobalStyles, generateV2GlobalStyles, resolveDomainTheme } from './themes';
 import { getLayoutConfig, type LayoutConfig } from './layouts';
+import { pageDefinitions } from '@/lib/db';
+import { assemblePageFromBlocks, type RenderContext } from './blocks/assembler';
+import type { BlockEnvelope } from './blocks/schemas';
+// Side-effect: register interactive block renderers
+import './blocks/renderers-interactive';
 import { marked } from 'marked';
 import sanitizeHtml from 'sanitize-html';
 
@@ -128,6 +133,16 @@ export async function generateSiteFiles(domainId: string): Promise<GeneratedFile
         datasetsByArticle.set(link.articleId, list);
     }
 
+    // ---- v2 block-based path ----
+    // If the domain has published page_definitions, use the block assembler.
+    const pageDefs = await db.select().from(pageDefinitions)
+        .where(and(eq(pageDefinitions.domainId, domainId), eq(pageDefinitions.isPublished, true)));
+
+    if (pageDefs.length > 0) {
+        return generateV2SiteFiles(domain, pageDefs, publishedArticles, scripts, datasetsByArticle);
+    }
+
+    // ---- v1 template-based path (unchanged) ----
     const resolvedTheme = resolveDomainTheme({
         themeStyle: domain.themeStyle,
         vertical: domain.vertical,
@@ -206,6 +221,106 @@ export async function generateSiteFiles(domainId: string): Promise<GeneratedFile
     }
 
     return files;
+}
+
+// ============================================================
+// v2 Block-based site generation
+// ============================================================
+
+type PageDefinitionRow = typeof pageDefinitions.$inferSelect;
+
+/**
+ * Generate all site files using the v2 block assembler.
+ * Each published page_definition row becomes an HTML file.
+ * The CSS uses the token-based theme + skin system.
+ */
+async function generateV2SiteFiles(
+    domain: typeof domains.$inferSelect,
+    pageDefs: PageDefinitionRow[],
+    publishedArticles: (typeof articles.$inferSelect)[],
+    scripts: { head: string; body: string },
+    _datasetsByArticle: Map<string, ArticleDatasetInfo[]>,
+): Promise<GeneratedFile[]> {
+    const siteTitle = extractSiteTitle(domain.domain);
+
+    // Use the first page definition's theme/skin as the site-wide default
+    const homeDef = pageDefs.find(p => p.route === '/') || pageDefs[0];
+    const themeName = homeDef.theme || 'clean';
+    const skinName = homeDef.skin || domain.skin || 'slate';
+
+    const files: GeneratedFile[] = [];
+
+    // Generate HTML for each page definition
+    for (const pageDef of pageDefs) {
+        const ctx: RenderContext = {
+            domain: domain.domain,
+            siteTitle,
+            route: pageDef.route,
+            theme: pageDef.theme || themeName,
+            skin: pageDef.skin || skinName,
+            pageTitle: pageDef.title || undefined,
+            pageDescription: pageDef.metaDescription || undefined,
+            headScripts: scripts.head,
+            bodyScripts: scripts.body,
+        };
+
+        const blocks = (pageDef.blocks || []) as BlockEnvelope[];
+        const html = assemblePageFromBlocks(blocks, ctx);
+
+        // Determine file path from route
+        const route = pageDef.route || '/';
+        const filePath = route === '/'
+            ? 'index.html'
+            : `${route.replace(/^\//, '').replace(/\/$/, '')}/index.html`;
+
+        files.push({ path: filePath, content: html });
+    }
+
+    // Generate CSS with v2 token system
+    files.push({
+        path: 'styles.css',
+        content: generateV2GlobalStyles(themeName, skinName, domain.siteTemplate || 'authority', domain.domain),
+    });
+
+    // Static files (same as v1)
+    const niche = domain.niche || 'general';
+    files.push(
+        { path: '404.html', content: generateV2ErrorPage(siteTitle, themeName, skinName) },
+        { path: 'robots.txt', content: `User-agent: *\nAllow: /\nSitemap: https://${domain.domain}/sitemap.xml` },
+        { path: 'favicon.svg', content: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${niche === 'health' ? '\u2695' : '\u{1F310}'}</text></svg>` },
+        { path: '_headers', content: generateHeaders() },
+        {
+            path: 'sitemap.xml',
+            content: generateSitemap(
+                { domainId: domain.id, domain: domain.domain, title: siteTitle, description: `Expert guides about ${niche}`, niche, template: domain.siteTemplate || 'authority', scripts },
+                publishedArticles,
+                [],
+            ),
+        },
+    );
+
+    return files;
+}
+
+/** Simple 404 page for v2 block-based sites */
+function generateV2ErrorPage(siteTitle: string, theme: string, skin: string): string {
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex">
+  <title>Page Not Found | ${escapeHtml(siteTitle)}</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body data-theme="${escapeAttr(theme)}" data-skin="${escapeAttr(skin)}">
+  <div class="site-container" style="text-align:center;padding:4rem 0">
+    <h1>404</h1>
+    <p>The page you're looking for doesn't exist.</p>
+    <a href="/" class="cta-button" style="display:inline-block;margin-top:1rem">Go Home</a>
+  </div>
+</body>
+</html>`;
 }
 
 /**

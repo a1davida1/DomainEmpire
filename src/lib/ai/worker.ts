@@ -3108,6 +3108,28 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
             );
             break;
         }
+        case 'generate_block_content': {
+            const { generatePageBlockContent } = await import('./block-pipeline');
+            const blockPayload = job.payload as { pageDefinitionId?: string } | undefined;
+            const pageDefId = blockPayload?.pageDefinitionId;
+            if (!pageDefId) {
+                await markJobFailed(job.id, 'Failed: missing pageDefinitionId in payload');
+                break;
+            }
+            const blockResult = await generatePageBlockContent(pageDefId);
+            if (blockResult.failureCount > 0 && blockResult.successCount === 0) {
+                await markJobFailed(
+                    job.id,
+                    `All ${blockResult.failureCount} block(s) failed to generate`,
+                );
+            } else {
+                await markJobComplete(
+                    job.id,
+                    `Generated ${blockResult.successCount} block(s), ${blockResult.failureCount} failed, ${blockResult.skippedCount} skipped. Cost: $${blockResult.totalCost.toFixed(4)}`,
+                );
+            }
+            break;
+        }
         default:
             throw new Error(`Unknown job type: ${job.jobType}`);
     }

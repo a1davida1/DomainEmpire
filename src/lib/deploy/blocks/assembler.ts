@@ -1,0 +1,511 @@
+/**
+ * Block Assembler — renders a PageDefinition (block sequence) into complete HTML.
+ *
+ * This is the v2 equivalent of generator.ts's per-template dispatch.
+ * It iterates the block sequence, delegates to per-block renderers,
+ * and wraps the result in a complete HTML document.
+ */
+
+import type { BlockEnvelope, BlockType } from './schemas';
+import {
+    escapeHtml,
+    escapeAttr,
+} from '../templates/shared';
+
+// ============================================================
+// Render Context — passed to every block renderer
+// ============================================================
+
+export interface RenderContext {
+    domain: string;
+    siteTitle: string;
+    route: string;
+    theme: string;
+    skin: string;
+    pageTitle?: string;
+    pageDescription?: string;
+    headScripts: string;
+    bodyScripts: string;
+}
+
+// ============================================================
+// Block Renderer Registry
+// ============================================================
+
+type BlockRenderer = (block: BlockEnvelope, ctx: RenderContext) => string;
+
+const renderers: Partial<Record<BlockType, BlockRenderer>> = {};
+
+/**
+ * Register a renderer for a block type. Called by renderer modules at import time.
+ */
+export function registerBlockRenderer(type: BlockType, renderer: BlockRenderer): void {
+    renderers[type] = renderer;
+}
+
+/**
+ * Render a single block. Returns empty string if no renderer is registered.
+ */
+export function renderBlock(block: BlockEnvelope, ctx: RenderContext): string {
+    const renderer = renderers[block.type as BlockType];
+    if (!renderer) {
+        console.warn(`[assembler] No renderer registered for block type: ${block.type}`);
+        return `<!-- unknown block: ${escapeHtml(block.type)} -->`;
+    }
+    try {
+        return renderer(block, ctx);
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[assembler] Error rendering block ${block.id} (${block.type}): ${msg}`);
+        return `<!-- render error: ${escapeHtml(block.type)} -->`;
+    }
+}
+
+// ============================================================
+// Page Assembly
+// ============================================================
+
+/**
+ * Assemble a complete HTML page from a block sequence.
+ *
+ * The block sequence is rendered in order. Header and Footer blocks
+ * are special-cased to wrap the main content, matching the v1 PageShell pattern.
+ */
+export function assemblePageFromBlocks(
+    blocks: BlockEnvelope[],
+    ctx: RenderContext,
+    cssHref: string = '/styles.css',
+): string {
+    // Separate structural blocks from content blocks
+    let headerHtml = '';
+    let footerHtml = '';
+    const contentBlocks: string[] = [];
+
+    for (const block of blocks) {
+        const html = renderBlock(block, ctx);
+        if (block.type === 'Header') {
+            headerHtml = html;
+        } else if (block.type === 'Footer') {
+            footerHtml = html;
+        } else {
+            contentBlocks.push(html);
+        }
+    }
+
+    const title = ctx.pageTitle || ctx.siteTitle;
+    const description = ctx.pageDescription || '';
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="${escapeAttr(description)}">
+  <meta name="robots" content="index, follow">
+  <title>${escapeHtml(title)} | ${escapeHtml(ctx.siteTitle)}</title>
+  <link rel="stylesheet" href="${escapeAttr(cssHref)}">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  ${ctx.headScripts}
+</head>
+<body data-theme="${escapeAttr(ctx.theme)}" data-skin="${escapeAttr(ctx.skin)}">
+${headerHtml}
+<div class="site-container">
+  <main>
+${contentBlocks.join('\n')}
+  </main>
+</div>
+${footerHtml}
+${ctx.bodyScripts}
+</body>
+</html>`;
+}
+
+// ============================================================
+// Built-in Renderers (structural blocks)
+// ============================================================
+
+// --- Header ---
+registerBlockRenderer('Header', (block, ctx) => {
+    const content = (block.content || {}) as Record<string, unknown>;
+    const config = (block.config || {}) as Record<string, unknown>;
+    const variant = block.variant || config.variant || 'topbar';
+    const sticky = config.sticky ? ' style="position:sticky;top:0;z-index:50"' : '';
+    const siteName = (content.siteName as string) || ctx.siteTitle;
+    const navLinks = (content.navLinks as Array<{ label: string; href: string }>) || [];
+
+    const nav = navLinks.length > 0
+        ? `<nav>${navLinks.map(l => `<a href="${escapeAttr(l.href)}">${escapeHtml(l.label)}</a>`).join(' ')}</nav>`
+        : '';
+
+    return `<header class="header header--${escapeAttr(String(variant))}"${sticky}>
+  <div class="site-container">
+    <a href="/" class="logo">${escapeHtml(siteName)}</a>
+    ${nav}
+  </div>
+</header>`;
+});
+
+// --- Footer ---
+registerBlockRenderer('Footer', (block, ctx) => {
+    const content = (block.content || {}) as Record<string, unknown>;
+    const config = (block.config || {}) as Record<string, unknown>;
+    const variant = block.variant || config.variant || 'minimal';
+    const siteName = (content.siteName as string) || ctx.siteTitle;
+    const year = (content.copyrightYear as number) || new Date().getFullYear();
+    const disclaimer = (content.disclaimerText as string) || '';
+    const columns = (content.columns as Array<{ title: string; links: Array<{ label: string; href: string }> }>) || [];
+
+    let inner = '';
+
+    if (variant === 'multi-column' && columns.length > 0) {
+        const cols = columns.map(col => {
+            const links = col.links.map(l =>
+                `<li><a href="${escapeAttr(l.href)}">${escapeHtml(l.label)}</a></li>`
+            ).join('');
+            return `<div class="footer-col"><h4>${escapeHtml(col.title)}</h4><ul>${links}</ul></div>`;
+        }).join('');
+        inner = `<div class="footer-columns">${cols}</div>`;
+    }
+
+    if (variant === 'newsletter') {
+        const endpoint = (content.newsletterEndpoint as string) || '';
+        const headline = (content.newsletterHeadline as string) || 'Stay updated';
+        if (endpoint) {
+            inner += `<div class="footer-newsletter">
+  <h4>${escapeHtml(headline)}</h4>
+  <form action="${escapeAttr(endpoint)}" method="POST" class="newsletter-form">
+    <input type="email" name="email" placeholder="your@email.com" required>
+    <button type="submit">Subscribe</button>
+  </form>
+</div>`;
+        }
+    }
+
+    const disclaimerHtml = disclaimer
+        ? `<div class="footer-disclaimer">${escapeHtml(disclaimer)}</div>`
+        : '';
+
+    return `<footer class="footer footer--${escapeAttr(String(variant))}">
+  <div class="site-container">
+    ${inner}
+    ${disclaimerHtml}
+    <p>&copy; ${year} ${escapeHtml(siteName)}. All rights reserved.</p>
+  </div>
+</footer>`;
+});
+
+// --- Hero ---
+registerBlockRenderer('Hero', (block, ctx) => {
+    const content = (block.content || {}) as Record<string, unknown>;
+    const config = (block.config || {}) as Record<string, unknown>;
+    const variant = block.variant || config.variant || 'centered';
+    const heading = (content.heading as string) || ctx.siteTitle;
+    const subheading = (content.subheading as string) || '';
+    const ctaText = (content.ctaText as string) || '';
+    const ctaUrl = (content.ctaUrl as string) || '';
+    const badge = (content.badge as string) || '';
+
+    const badgeHtml = badge ? `<span class="hero-badge">${escapeHtml(badge)}</span>` : '';
+    const subHtml = subheading ? `<p class="hero-sub">${escapeHtml(subheading)}</p>` : '';
+    const ctaHtml = ctaText && ctaUrl
+        ? `<a href="${escapeAttr(ctaUrl)}" class="cta-button hero-cta">${escapeHtml(ctaText)}</a>`
+        : '';
+
+    return `<section class="hero hero--${escapeAttr(String(variant))}">
+  <div class="site-container">
+    ${badgeHtml}
+    <h1>${escapeHtml(heading)}</h1>
+    ${subHtml}
+    ${ctaHtml}
+  </div>
+</section>`;
+});
+
+// --- ArticleBody ---
+registerBlockRenderer('ArticleBody', (block, _ctx) => {
+    const content = (block.content || {}) as Record<string, unknown>;
+    const markdown = (content.markdown as string) || '';
+    const title = (content.title as string) || '';
+
+    // For now, render markdown as pre-rendered HTML (the pipeline will provide contentHtml)
+    const titleHtml = title ? `<h1>${escapeHtml(title)}</h1>` : '';
+
+    return `<article class="article-body">
+  ${titleHtml}
+  ${markdown}
+</article>`;
+});
+
+// --- FAQ ---
+registerBlockRenderer('FAQ', (block, _ctx) => {
+    const content = (block.content || {}) as Record<string, unknown>;
+    const config = (block.config || {}) as Record<string, unknown>;
+    const items = (content.items as Array<{ question: string; answer: string }>) || [];
+
+    if (items.length === 0) return '';
+
+    const openFirst = config.openFirst === true;
+    const emitJsonLd = config.emitJsonLd !== false;
+
+    const faqHtml = items.map((item, i) => {
+        const open = i === 0 && openFirst ? ' open' : '';
+        return `<details class="faq-item"${open}>
+  <summary class="faq-question">${escapeHtml(item.question)}</summary>
+  <div class="faq-answer">${item.answer}</div>
+</details>`;
+    }).join('\n');
+
+    let jsonLd = '';
+    if (emitJsonLd) {
+        const faqSchema = {
+            '@context': 'https://schema.org',
+            '@type': 'FAQPage',
+            mainEntity: items.map(item => ({
+                '@type': 'Question',
+                name: item.question,
+                acceptedAnswer: {
+                    '@type': 'Answer',
+                    text: item.answer,
+                },
+            })),
+        };
+        jsonLd = `<script type="application/ld+json">${JSON.stringify(faqSchema)}</script>`;
+    }
+
+    return `<section class="faq-section">
+  <h2>Frequently Asked Questions</h2>
+  <div class="faq-list">
+${faqHtml}
+  </div>
+  ${jsonLd}
+</section>`;
+});
+
+// --- CTABanner / ScrollCTA ---
+registerBlockRenderer('CTABanner', (block, _ctx) => {
+    const content = (block.content || {}) as Record<string, unknown>;
+    const config = (block.config || {}) as Record<string, unknown>;
+    const text = (content.text as string) || '';
+    const buttonLabel = (content.buttonLabel as string) || 'Learn More';
+    const buttonUrl = (content.buttonUrl as string) || '#';
+    const style = (config.style as string) || 'bar';
+    const trigger = (config.trigger as string) || 'immediate';
+
+    if (!text) return '';
+
+    if (trigger === 'scroll') {
+        // Delegate to scroll CTA pattern
+        return `<div class="scroll-cta-sentinel" aria-hidden="true"></div>
+<div class="scroll-cta scroll-cta-${escapeAttr(style)}" id="scroll-cta" role="complementary" aria-label="Call to action" style="display:none">
+  <div class="scroll-cta-inner">
+    <p class="scroll-cta-text">${escapeHtml(text)}</p>
+    <a href="${escapeAttr(buttonUrl)}" class="scroll-cta-btn">${escapeHtml(buttonLabel)}</a>
+    <button class="scroll-cta-dismiss" aria-label="Dismiss" type="button">&times;</button>
+  </div>
+</div>
+<script>
+(function(){
+  var cta=document.getElementById('scroll-cta');
+  if(!cta)return;
+  var sentinel=document.querySelector('.scroll-cta-sentinel');
+  if(!sentinel)return;
+  var shown=false;
+  var observer=new IntersectionObserver(function(entries){
+    if(entries[0].isIntersecting&&!shown){
+      shown=true;cta.style.display='';
+      requestAnimationFrame(function(){cta.classList.add('scroll-cta-visible')});
+      observer.disconnect();
+    }
+  },{threshold:0.1});
+  observer.observe(sentinel);
+  cta.querySelector('.scroll-cta-dismiss').addEventListener('click',function(){
+    cta.classList.remove('scroll-cta-visible');
+    setTimeout(function(){cta.style.display='none'},300);
+  });
+})();
+</script>`;
+    }
+
+    return `<section class="cta-section cta-section--${escapeAttr(style)}">
+  <div class="site-container">
+    <p class="cta-text">${escapeHtml(text)}</p>
+    <a href="${escapeAttr(buttonUrl)}" class="cta-button">${escapeHtml(buttonLabel)}</a>
+  </div>
+</section>`;
+});
+
+registerBlockRenderer('ScrollCTA', (block, ctx) => {
+    // ScrollCTA is just CTABanner with trigger=scroll
+    const merged = { ...block, config: { ...block.config, trigger: 'scroll' } };
+    return renderBlock(merged, ctx);
+});
+
+// --- CitationBlock ---
+registerBlockRenderer('CitationBlock', (block, _ctx) => {
+    const content = (block.content || {}) as Record<string, unknown>;
+    const sources = (content.sources as Array<{
+        title: string;
+        url?: string;
+        publisher?: string;
+        retrievedAt?: string;
+        usage?: string;
+    }>) || [];
+
+    if (sources.length === 0) return '';
+
+    const items = sources.map(s => {
+        const url = s.url ? ` href="${escapeAttr(s.url)}" rel="nofollow noopener" target="_blank"` : '';
+        const publisher = s.publisher ? ` — ${escapeHtml(s.publisher)}` : '';
+        const retrieved = s.retrievedAt ? ` <small>(Retrieved ${escapeHtml(s.retrievedAt)})</small>` : '';
+        const usage = s.usage ? ` <span class="data-usage">${escapeHtml(s.usage)}</span>` : '';
+        return `<li class="data-source-item"><a${url}>${escapeHtml(s.title)}</a>${publisher}${retrieved}${usage}</li>`;
+    }).join('\n');
+
+    return `<section class="data-sources">
+  <h2>Data Sources</h2>
+  <ul>${items}</ul>
+</section>`;
+});
+
+// --- LastUpdated ---
+registerBlockRenderer('LastUpdated', (block, _ctx) => {
+    const content = (block.content || {}) as Record<string, unknown>;
+    const date = (content.date as string) || '';
+    const reviewedBy = (content.reviewedBy as string) || '';
+    const status = (content.status as string) || 'fresh';
+
+    if (!date) return '';
+
+    const badgeClass = status === 'stale' ? 'freshness-red'
+        : status === 'review-pending' ? 'freshness-yellow'
+        : 'freshness-green';
+
+    const badgeText = status === 'stale' ? 'Needs update'
+        : status === 'review-pending' ? 'Review pending'
+        : `Verified ${escapeHtml(date)}`;
+
+    const reviewer = reviewedBy
+        ? `<span class="reviewed-by">Reviewed by ${escapeHtml(reviewedBy)}</span>`
+        : '';
+
+    return `<div class="freshness-badge ${badgeClass}"><span class="freshness-dot"></span>${badgeText}</div>${reviewer}`;
+});
+
+// --- TrustBadges ---
+registerBlockRenderer('TrustBadges', (block, _ctx) => {
+    const content = (block.content || {}) as Record<string, unknown>;
+    const badges = (content.badges as Array<{ label: string; description?: string }>) || [];
+
+    if (badges.length === 0) return '';
+
+    const items = badges.map(b => {
+        const desc = b.description ? `<p>${escapeHtml(b.description)}</p>` : '';
+        return `<div class="trust-badge"><strong>${escapeHtml(b.label)}</strong>${desc}</div>`;
+    }).join('');
+
+    return `<section class="trust-badges"><div class="trust-badges-row">${items}</div></section>`;
+});
+
+// --- MedicalDisclaimer ---
+registerBlockRenderer('MedicalDisclaimer', (block, _ctx) => {
+    const content = (block.content || {}) as Record<string, unknown>;
+    const config = (block.config || {}) as Record<string, unknown>;
+    const text = (content.disclaimerText as string) ||
+        'This content is for informational purposes only and is not a substitute for professional medical advice, diagnosis, or treatment. Always seek the advice of your physician or other qualified health provider.';
+    const showDoctorCta = config.showDoctorCta !== false;
+
+    const disclaimerHtml = `<div class="medical-disclaimer" role="alert">
+  <strong>Medical Disclaimer:</strong> ${escapeHtml(text)}
+</div>`;
+
+    const ctaHtml = showDoctorCta ? `<div class="cta-doctor">
+  <h2>Talk to Your Doctor</h2>
+  <p>The information on this page is not a substitute for professional medical guidance. Please consult a qualified healthcare provider before making any health-related decisions.</p>
+</div>` : '';
+
+    return disclaimerHtml + ctaHtml;
+});
+
+// --- Checklist / StepByStep ---
+function renderChecklist(block: BlockEnvelope, _ctx: RenderContext): string {
+    const content = (block.content || {}) as Record<string, unknown>;
+    const config = (block.config || {}) as Record<string, unknown>;
+    const steps = (content.steps as Array<{ heading: string; body: string }>) || [];
+    const showProgress = config.showProgress !== false;
+    const interactive = config.interactive !== false;
+
+    if (steps.length === 0) return '';
+
+    const progressHtml = showProgress
+        ? `<div class="checklist-progress" id="checklist-progress">0 of ${steps.length} completed</div>`
+        : '';
+
+    const stepsHtml = steps.map((step, i) => {
+        const checkboxId = `check-${i}`;
+        const checkbox = interactive
+            ? `<input type="checkbox" id="${checkboxId}" class="checklist-checkbox">`
+            : `<span class="checklist-number">${i + 1}</span>`;
+        return `<li class="checklist-item">
+  <label for="${checkboxId}">
+    ${checkbox}
+    <div class="checklist-content">
+      <h3>${escapeHtml(step.heading)}</h3>
+      <div>${step.body}</div>
+    </div>
+  </label>
+</li>`;
+    }).join('\n');
+
+    const script = interactive ? `<script>
+(function(){
+  var checks=document.querySelectorAll('.checklist-checkbox');
+  var progress=document.getElementById('checklist-progress');
+  function update(){
+    var done=0;checks.forEach(function(c){if(c.checked)done++});
+    if(progress)progress.textContent=done+' of '+checks.length+' completed';
+  }
+  checks.forEach(function(c){c.addEventListener('change',update)});
+})();
+</script>` : '';
+
+    return `<section class="checklist-section">
+  ${progressHtml}
+  <ol class="checklist-list">${stepsHtml}</ol>
+  ${script}
+</section>`;
+}
+
+registerBlockRenderer('Checklist', renderChecklist);
+registerBlockRenderer('StepByStep', renderChecklist);
+
+// --- AuthorBio ---
+registerBlockRenderer('AuthorBio', (block, _ctx) => {
+    const content = (block.content || {}) as Record<string, unknown>;
+    const name = (content.name as string) || '';
+    const bio = (content.bio as string) || '';
+    const title = (content.title as string) || '';
+
+    if (!name) return '';
+
+    const titleHtml = title ? `<span class="author-title">${escapeHtml(title)}</span>` : '';
+
+    return `<aside class="author-bio">
+  <h3>${escapeHtml(name)}</h3>
+  ${titleHtml}
+  <p>${escapeHtml(bio)}</p>
+</aside>`;
+});
+
+// --- Sidebar ---
+registerBlockRenderer('Sidebar', (block, _ctx) => {
+    const content = (block.content || {}) as Record<string, unknown>;
+    const sections = (content.sections as Array<{ title: string; html: string }>) || [];
+
+    if (sections.length === 0) return '';
+
+    const inner = sections.map(s =>
+        `<div class="sidebar-section"><h4>${escapeHtml(s.title)}</h4>${s.html}</div>`
+    ).join('');
+
+    return `<aside class="sidebar">${inner}</aside>`;
+});

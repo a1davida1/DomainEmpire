@@ -11,8 +11,8 @@
  * - Rollback on failure (mark domain as not deployed)
  */
 
-import { db, domains, contentQueue, articles } from '@/lib/db';
-import { eq, count } from 'drizzle-orm';
+import { db, domains, contentQueue, articles, pageDefinitions } from '@/lib/db';
+import { eq, and, count } from 'drizzle-orm';
 import { createDirectUploadProject, directUploadDeploy, addCustomDomain, getZoneNameservers, verifyDomainPointsToCloudflare, ensurePagesDnsRecord } from './cloudflare';
 import {
     hasRegistrarNameserverCredentials,
@@ -417,8 +417,14 @@ async function validateJob(jobId: string) {
         .from(articles)
         .where(eq(articles.domainId, job.domainId));
 
-    if ((articleCount[0]?.count || 0) === 0) {
-        throw new Error(`Domain ${payload.domain} has no articles to deploy`);
+    // v2 domains may have page_definitions instead of (or in addition to) articles
+    const pageDefCount = await db
+        .select({ count: count() })
+        .from(pageDefinitions)
+        .where(and(eq(pageDefinitions.domainId, job.domainId), eq(pageDefinitions.isPublished, true)));
+
+    if ((articleCount[0]?.count || 0) === 0 && (pageDefCount[0]?.count || 0) === 0) {
+        throw new Error(`Domain ${payload.domain} has no articles or published page definitions to deploy`);
     }
 
     return { job, payload, domain: domainRecord[0] };
