@@ -34,6 +34,15 @@ const LABEL_MAP: Record<string, string> = {
     import: 'Import',
     operations: 'Operations',
     freshness: 'Freshness',
+    articles: 'Articles',
+    audit: 'Audit',
+    citations: 'Citations',
+    revisions: 'Revisions',
+    calendar: 'Calendar',
+    duplicates: 'Duplicates',
+    'domain-buy': 'Domain Buy',
+    'campaign-launch': 'Campaign Launch',
+    preview: 'Preview',
 };
 
 function isUuid(segment: string): boolean {

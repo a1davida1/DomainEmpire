@@ -7,6 +7,7 @@ import { db } from '@/lib/db';
 import { domainResearch, promotionCampaigns, reviewTasks, users } from '@/lib/db/schema';
 import { assignReviewTask } from '@/lib/review/task-assignment';
 import { decideReviewTask } from '@/lib/review/task-decision';
+import { Rocket, ChevronLeft, CheckCircle2, XCircle, AlertTriangle, User, Clock, Download } from 'lucide-react';
 
 type QueueScope = 'all' | 'mine' | 'unassigned';
 
@@ -288,52 +289,74 @@ export default async function CampaignLaunchReviewPage({
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-3xl font-bold">Campaign Launch Review Queue</h1>
-                    <p className="text-sm text-muted-foreground">Approval gate for campaign launch handoff</p>
+            {/* Header */}
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-violet-100 dark:bg-violet-950">
+                        <Rocket className="h-5 w-5 text-violet-700 dark:text-violet-400" />
+                    </div>
+                    <div>
+                        <h1 className="text-2xl font-bold tracking-tight">Campaign Launch Review</h1>
+                        <p className="text-sm text-muted-foreground">
+                            {queueItems.length} pending &middot; Approval gate for launch handoff
+                        </p>
+                    </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3">
                     <a
                         href="/api/review/tasks/campaign-launch/summary?format=csv&limit=1000"
-                        className="px-3 py-2 rounded-md border text-sm hover:bg-muted"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-medium hover:bg-muted transition-colors"
                     >
-                        Export SLA CSV
+                        <Download className="h-3 w-3" />
+                        Export CSV
                     </a>
-                    <Link href="/dashboard/review" className="text-sm text-primary hover:underline">
-                        Back to review hub
+                    <Link
+                        href="/dashboard/review"
+                        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                        <ChevronLeft className="h-4 w-4" />
+                        Review Center
                     </Link>
                 </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-                <Link href={scopePath('mine')} className={`px-2 py-1 rounded border text-xs ${scope === 'mine' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-                    Mine
+            {/* Scope Tabs */}
+            <div className="flex items-center gap-1 rounded-lg border bg-muted/30 p-1 w-fit">
+                <Link href={scopePath('mine')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${scope === 'mine' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                    My Tasks
                 </Link>
-                <Link href={scopePath('unassigned')} className={`px-2 py-1 rounded border text-xs ${scope === 'unassigned' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
+                <Link href={scopePath('unassigned')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${scope === 'unassigned' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
                     Unassigned
                 </Link>
                 {canManageAssignments ? (
-                    <Link href={scopePath('all')} className={`px-2 py-1 rounded border text-xs ${scope === 'all' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
+                    <Link href={scopePath('all')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${scope === 'all' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
                         All
                     </Link>
                 ) : null}
             </div>
 
             {params.error && (
-                <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                <div className="rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/30 dark:border-red-900 px-4 py-3 text-sm text-red-700 dark:text-red-400 flex items-center gap-2">
+                    <XCircle className="h-4 w-4 shrink-0" />
                     {params.error}
                 </div>
             )}
             {messageText && (
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 dark:bg-emerald-950/30 dark:border-emerald-900 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-400 flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4 shrink-0" />
                     {messageText}
                 </div>
             )}
 
             {queueItems.length === 0 ? (
-                <div className="rounded-lg border bg-card p-10 text-center text-sm text-muted-foreground">
-                    No pending campaign-launch review tasks in this scope.
+                <div className="flex flex-col items-center justify-center rounded-xl border border-dashed bg-card/50 py-16 px-8 text-center">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted mb-4">
+                        <CheckCircle2 className="h-7 w-7 text-muted-foreground" />
+                    </div>
+                    <p className="text-base font-medium mb-1">No pending launches</p>
+                    <p className="text-sm text-muted-foreground max-w-sm">
+                        Campaign launch review tasks will appear here when campaigns are ready for handoff approval.
+                    </p>
                 </div>
             ) : (
                 <div className="space-y-4">
@@ -352,118 +375,148 @@ export default async function CampaignLaunchReviewPage({
                         const canRelease = canManageAssignments || item.reviewerId === user.id;
 
                         return (
-                            <div key={item.taskId} className="rounded-lg border bg-card p-4 space-y-4">
-                                <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                                    <div>
-                                        <div className="text-lg font-semibold">{item.domain}</div>
-                                        <div className="text-xs text-muted-foreground">
-                                            Campaign {item.campaignId.slice(0, 8)} | Status {item.campaignStatus || 'unknown'} | Channels {item.channels.length > 0 ? item.channels.join(', ') : 'none'}
-                                        </div>
-                                        <div className="text-xs text-muted-foreground">
-                                            Assignee {assigneeLabel}
-                                        </div>
+                            <div key={item.taskId} className="rounded-xl border bg-card overflow-hidden">
+                                {/* Card Header */}
+                                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b px-5 py-3 bg-muted/20">
+                                    <div className="flex items-center gap-3">
+                                        <span className="text-lg font-bold">{item.domain}</span>
+                                        {item.channels.length > 0 && (
+                                            <div className="flex items-center gap-1">
+                                                {item.channels.map((ch) => (
+                                                    <span key={ch} className="text-[10px] uppercase tracking-wider font-medium px-1.5 py-0.5 rounded border bg-card text-muted-foreground">
+                                                        {ch}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        )}
+                                        <span className="text-xs text-muted-foreground">
+                                            {item.campaignStatus || 'unknown'}
+                                        </span>
                                     </div>
-                                    <div className={`text-xs font-medium px-2 py-1 rounded-full w-fit ${timing.status === 'escalated'
-                                        ? 'bg-red-100 text-red-700'
+                                    <div className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full w-fit ${timing.status === 'escalated'
+                                        ? 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400'
                                         : timing.status === 'warning'
-                                            ? 'bg-yellow-100 text-yellow-700'
-                                            : 'bg-blue-100 text-blue-700'
+                                            ? 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400'
+                                            : 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-400'
                                         }`}>
+                                        {timing.status !== 'normal' && <AlertTriangle className="h-3 w-3" />}
                                         {timing.status === 'escalated'
                                             ? `Escalated (${Math.abs(timing.hoursToEscalation).toFixed(1)}h overdue)`
                                             : timing.status === 'warning'
                                                 ? `SLA breached (${Math.abs(timing.hoursToSla).toFixed(1)}h overdue)`
-                                                : `SLA ${timing.hoursToSla.toFixed(1)}h left`}
+                                                : `${timing.hoursToSla.toFixed(1)}h until SLA`}
                                     </div>
                                 </div>
 
-                                <div className="text-xs text-muted-foreground">
-                                    Created {formatDateTime(item.createdAt)} | Due {formatDateTime(dueAt)} | Escalate {formatDateTime(escalateAt)}
-                                </div>
+                                {/* Card Body */}
+                                <div className="px-5 py-4 space-y-4">
+                                    {/* Meta info */}
+                                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                                        <span className="inline-flex items-center gap-1">
+                                            <User className="h-3 w-3" />
+                                            {assigneeLabel}
+                                        </span>
+                                        <span className="inline-flex items-center gap-1">
+                                            <Clock className="h-3 w-3" />
+                                            Created {formatDateTime(item.createdAt)}
+                                        </span>
+                                        {dueAt && (
+                                            <span>Due {formatDateTime(dueAt)}</span>
+                                        )}
+                                        {escalateAt && (
+                                            <span>Escalate {formatDateTime(escalateAt)}</span>
+                                        )}
+                                        <span className="font-mono text-[10px]">{item.campaignId.slice(0, 8)}</span>
+                                    </div>
 
-                                <div className="flex flex-wrap gap-2">
-                                    <form action={assignTaskAction} className="flex items-center gap-2">
-                                        <input type="hidden" name="taskId" value={item.taskId} />
-                                        <input type="hidden" name="scope" value={scope} />
-                                        <input type="hidden" name="mode" value="claim" />
-                                        <button
-                                            type="submit"
-                                            disabled={!canClaim}
-                                            className="h-9 px-3 rounded-md border text-sm hover:bg-muted disabled:opacity-50"
-                                        >
-                                            Claim
-                                        </button>
-                                    </form>
-                                    <form action={assignTaskAction} className="flex items-center gap-2">
-                                        <input type="hidden" name="taskId" value={item.taskId} />
-                                        <input type="hidden" name="scope" value={scope} />
-                                        <input type="hidden" name="mode" value="release" />
-                                        <button
-                                            type="submit"
-                                            disabled={!canRelease}
-                                            className="h-9 px-3 rounded-md border text-sm hover:bg-muted disabled:opacity-50"
-                                        >
-                                            Release
-                                        </button>
-                                    </form>
-
-                                    {canManageAssignments ? (
-                                        <form action={assignTaskAction} className="flex items-center gap-2">
+                                    {/* Assignment actions */}
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <form action={assignTaskAction} className="contents">
                                             <input type="hidden" name="taskId" value={item.taskId} />
                                             <input type="hidden" name="scope" value={scope} />
-                                            <input type="hidden" name="mode" value="set" />
-                                            <select
-                                                name="reviewerId"
-                                                defaultValue={item.reviewerId || ''}
-                                                className="h-9 rounded-md border px-2 text-xs"
-                                            >
-                                                <option value="">Unassigned</option>
-                                                {reviewerOptions.map((reviewer) => (
-                                                    <option key={reviewer.id} value={reviewer.id}>
-                                                        {reviewer.name} ({reviewer.role})
-                                                    </option>
-                                                ))}
-                                            </select>
+                                            <input type="hidden" name="mode" value="claim" />
                                             <button
                                                 type="submit"
-                                                className="h-9 px-3 rounded-md border text-sm hover:bg-muted"
+                                                disabled={!canClaim}
+                                                className="h-8 px-3 rounded-md border text-xs font-medium hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                                             >
-                                                Set Assignee
+                                                Claim
                                             </button>
                                         </form>
-                                    ) : null}
+                                        <form action={assignTaskAction} className="contents">
+                                            <input type="hidden" name="taskId" value={item.taskId} />
+                                            <input type="hidden" name="scope" value={scope} />
+                                            <input type="hidden" name="mode" value="release" />
+                                            <button
+                                                type="submit"
+                                                disabled={!canRelease}
+                                                className="h-8 px-3 rounded-md border text-xs font-medium hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                            >
+                                                Release
+                                            </button>
+                                        </form>
+
+                                        {canManageAssignments ? (
+                                            <form action={assignTaskAction} className="flex items-center gap-1.5">
+                                                <input type="hidden" name="taskId" value={item.taskId} />
+                                                <input type="hidden" name="scope" value={scope} />
+                                                <input type="hidden" name="mode" value="set" />
+                                                <select
+                                                    name="reviewerId"
+                                                    defaultValue={item.reviewerId || ''}
+                                                    className="h-8 rounded-md border bg-background px-2 text-xs focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"
+                                                >
+                                                    <option value="">Unassigned</option>
+                                                    {reviewerOptions.map((reviewer) => (
+                                                        <option key={reviewer.id} value={reviewer.id}>
+                                                            {reviewer.name} ({reviewer.role})
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                                <button
+                                                    type="submit"
+                                                    className="h-8 px-3 rounded-md border text-xs font-medium hover:bg-muted transition-colors"
+                                                >
+                                                    Assign
+                                                </button>
+                                            </form>
+                                        ) : null}
+                                    </div>
                                 </div>
 
-                                <div className="flex flex-wrap gap-2">
-                                    <form action={approveTaskAction} className="flex items-center gap-2">
+                                {/* Card Footer — Decision */}
+                                <div className="flex flex-wrap items-center gap-2 border-t px-5 py-3 bg-muted/10">
+                                    <form action={approveTaskAction} className="flex items-center gap-1.5">
                                         <input type="hidden" name="taskId" value={item.taskId} />
                                         <input type="hidden" name="scope" value={scope} />
                                         <input
                                             type="text"
                                             name="reviewNotes"
-                                            placeholder="Approval note (optional)"
-                                            className="h-9 rounded-md border px-2 text-xs w-52"
+                                            placeholder="Note (optional)"
+                                            className="h-8 rounded-md border bg-background px-2 text-xs w-44 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1"
                                         />
                                         <button
                                             type="submit"
-                                            className="h-9 px-3 rounded-md bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+                                            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
                                         >
+                                            <CheckCircle2 className="h-3 w-3" />
                                             Approve
                                         </button>
                                     </form>
-                                    <form action={rejectTaskAction} className="flex items-center gap-2">
+                                    <form action={rejectTaskAction} className="flex items-center gap-1.5">
                                         <input type="hidden" name="taskId" value={item.taskId} />
                                         <input type="hidden" name="scope" value={scope} />
                                         <input
                                             type="text"
                                             name="reviewNotes"
-                                            placeholder="Rejection note (optional)"
-                                            className="h-9 rounded-md border px-2 text-xs w-52"
+                                            placeholder="Note (optional)"
+                                            className="h-8 rounded-md border bg-background px-2 text-xs w-44 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1"
                                         />
                                         <button
                                             type="submit"
-                                            className="h-9 px-3 rounded-md bg-red-600 text-white text-sm hover:bg-red-700"
+                                            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-xs font-medium hover:bg-red-50 dark:hover:bg-red-950 transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
                                         >
+                                            <XCircle className="h-3 w-3" />
                                             Reject
                                         </button>
                                     </form>

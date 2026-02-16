@@ -6,6 +6,7 @@ import { getAuthUser } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { domainResearch, previewBuilds, reviewTasks } from '@/lib/db/schema';
 import { decideReviewTask } from '@/lib/review/task-decision';
+import { ShoppingCart, ExternalLink, CheckCircle2, XCircle, ChevronLeft, Shield, AlertTriangle } from 'lucide-react';
 
 type QueueItem = {
     taskId: string;
@@ -224,32 +225,66 @@ export default async function DomainBuyReviewPage({
         }
     }
 
+    function riskColor(score: number | null): string {
+        if (score === null || score === undefined) return 'text-muted-foreground';
+        if (score >= 70) return 'text-red-600 dark:text-red-400';
+        if (score >= 40) return 'text-amber-600 dark:text-amber-400';
+        return 'text-emerald-600 dark:text-emerald-400';
+    }
+
+    function riskBg(score: number | null): string {
+        if (score === null || score === undefined) return 'bg-muted/50';
+        if (score >= 70) return 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-900';
+        if (score >= 40) return 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900';
+        return 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900';
+    }
+
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-3xl font-bold">Domain Buy Review Queue</h1>
-                    <p className="text-sm text-muted-foreground">Human approval gate for acquisition decisions</p>
+            {/* Header */}
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-100 dark:bg-blue-950">
+                        <ShoppingCart className="h-5 w-5 text-blue-700 dark:text-blue-400" />
+                    </div>
+                    <div>
+                        <h1 className="text-2xl font-bold tracking-tight">Domain Buy Review</h1>
+                        <p className="text-sm text-muted-foreground">
+                            {reviewRows.length} pending &middot; Human approval gate for acquisitions
+                        </p>
+                    </div>
                 </div>
-                <Link href="/dashboard/review" className="text-sm text-primary hover:underline">
-                    Back to content review
+                <Link
+                    href="/dashboard/review"
+                    className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                >
+                    <ChevronLeft className="h-4 w-4" />
+                    Back to Review Center
                 </Link>
             </div>
 
             {params.error && (
-                <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                <div className="rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/30 dark:border-red-900 px-4 py-3 text-sm text-red-700 dark:text-red-400 flex items-center gap-2">
+                    <XCircle className="h-4 w-4 shrink-0" />
                     {params.error}
                 </div>
             )}
             {params.message && (
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 dark:bg-emerald-950/30 dark:border-emerald-900 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-400 flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4 shrink-0" />
                     Task {params.message}
                 </div>
             )}
 
             {reviewRows.length === 0 ? (
-                <div className="rounded-lg border bg-card p-10 text-center text-sm text-muted-foreground">
-                    No pending domain-buy review tasks.
+                <div className="flex flex-col items-center justify-center rounded-xl border border-dashed bg-card/50 py-16 px-8 text-center">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted mb-4">
+                        <CheckCircle2 className="h-7 w-7 text-muted-foreground" />
+                    </div>
+                    <p className="text-base font-medium mb-1">No pending acquisitions</p>
+                    <p className="text-sm text-muted-foreground max-w-sm">
+                        Domain buy review tasks will appear here when the research pipeline flags candidates for human approval.
+                    </p>
                 </div>
             ) : (
                 <div className="space-y-4">
@@ -259,96 +294,144 @@ export default async function DomainBuyReviewPage({
                         const timing = getTiming(item);
 
                         return (
-                            <div key={item.taskId} className="rounded-lg border bg-card p-4 space-y-4">
-                                <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                                    <div>
-                                        <div className="text-lg font-semibold">{item.domain}</div>
-                                        <div className="text-xs text-muted-foreground">
-                                            Source: {item.listingSource || 'unknown'} | Confidence: {typeof item.confidenceScore === 'number' ? `${item.confidenceScore.toFixed(1)}%` : '-'}
-                                        </div>
+                            <div key={item.taskId} className="rounded-xl border bg-card overflow-hidden">
+                                {/* Card Header */}
+                                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b px-5 py-3 bg-muted/20">
+                                    <div className="flex items-center gap-3">
+                                        <span className="text-lg font-bold">{item.domain}</span>
+                                        <span className="text-xs text-muted-foreground px-2 py-0.5 rounded-full border bg-card">
+                                            {item.listingSource || 'unknown'}
+                                        </span>
+                                        {typeof item.confidenceScore === 'number' && (
+                                            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${item.confidenceScore >= 70
+                                                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400'
+                                                : item.confidenceScore >= 40
+                                                    ? 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400'
+                                                    : 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400'
+                                            }`}>
+                                                {item.confidenceScore.toFixed(0)}% confidence
+                                            </span>
+                                        )}
                                     </div>
-                                    <div className={`text-xs font-medium px-2 py-1 rounded-full w-fit ${timing.status === 'escalated'
-                                            ? 'bg-red-100 text-red-700'
+                                    <div className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full w-fit ${timing.status === 'escalated'
+                                            ? 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400'
                                             : timing.status === 'warning'
-                                                ? 'bg-yellow-100 text-yellow-700'
-                                                : 'bg-blue-100 text-blue-700'
+                                                ? 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400'
+                                                : 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-400'
                                         }`}>
+                                        {timing.status !== 'normal' && <AlertTriangle className="h-3 w-3" />}
                                         {timing.status === 'escalated'
                                             ? `Escalated (${Math.abs(timing.hoursToEscalation).toFixed(1)}h overdue)`
                                             : timing.status === 'warning'
                                                 ? `SLA breached (${Math.abs(timing.hoursToSla).toFixed(1)}h overdue)`
-                                                : `SLA ${timing.hoursToSla.toFixed(1)}h left`}
+                                                : `${timing.hoursToSla.toFixed(1)}h until SLA`}
                                     </div>
                                 </div>
 
-                                <div className="grid gap-3 md:grid-cols-4 text-sm">
-                                    <div className="rounded border bg-muted/20 p-3">
-                                        <div className="text-xs text-muted-foreground">Current Bid</div>
-                                        <div className="font-semibold">{formatMoney(item.currentBid)}</div>
-                                    </div>
-                                    <div className="rounded border bg-muted/20 p-3">
-                                        <div className="text-xs text-muted-foreground">Buy Now</div>
-                                        <div className="font-semibold">{formatMoney(item.buyNowPrice)}</div>
-                                    </div>
-                                    <div className="rounded border bg-muted/20 p-3">
-                                        <div className="text-xs text-muted-foreground">Recommended Max Bid</div>
-                                        <div className="font-semibold">{formatMoney(item.recommendedMaxBid)}</div>
-                                    </div>
-                                    <div className="rounded border bg-muted/20 p-3">
-                                        <div className="text-xs text-muted-foreground">Risk Snapshot</div>
-                                        <div className="font-semibold">
-                                            TM {item.tmRiskScore?.toFixed(0) ?? '-'} | Hist {item.historyRiskScore?.toFixed(0) ?? '-'} | BL {item.backlinkRiskScore?.toFixed(0) ?? '-'}
+                                {/* Card Body */}
+                                <div className="px-5 py-4 space-y-4">
+                                    {/* Pricing Grid */}
+                                    <div className="grid gap-3 sm:grid-cols-3">
+                                        <div className="rounded-lg border bg-muted/20 p-3">
+                                            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Current Bid</div>
+                                            <div className="text-lg font-bold tabular-nums">{formatMoney(item.currentBid)}</div>
+                                        </div>
+                                        <div className="rounded-lg border bg-muted/20 p-3">
+                                            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Buy Now</div>
+                                            <div className="text-lg font-bold tabular-nums">{formatMoney(item.buyNowPrice)}</div>
+                                        </div>
+                                        <div className="rounded-lg border bg-primary/5 dark:bg-primary/10 border-primary/20 p-3">
+                                            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Recommended Max</div>
+                                            <div className="text-lg font-bold tabular-nums text-primary">{formatMoney(item.recommendedMaxBid)}</div>
                                         </div>
                                     </div>
-                                </div>
 
-                                <div className="text-xs text-muted-foreground">
-                                    Demand {item.demandScore?.toFixed(1) ?? '-'} / Comps {item.compsScore?.toFixed(1) ?? '-'}
-                                    {item.hardFailReason ? ` | Hard fail: ${item.hardFailReason}` : ''}
-                                    {item.decisionReason ? ` | Decision note: ${item.decisionReason}` : ''}
-                                </div>
-
-                                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                                    <div className="text-xs text-muted-foreground">
-                                        Preview: {preview ? preview.buildStatus : 'none'}
-                                        {preview?.expiresAt ? ` | Expires ${new Date(preview.expiresAt).toLocaleString()}` : ''}
-                                    </div>
+                                    {/* Risk Scores */}
                                     <div className="flex flex-wrap gap-2">
+                                        <div className="flex items-center gap-1.5">
+                                            <Shield className="h-3.5 w-3.5 text-muted-foreground" />
+                                            <span className="text-xs text-muted-foreground">Risk:</span>
+                                        </div>
+                                        <div className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-md border ${riskBg(item.tmRiskScore)}`}>
+                                            <span className="text-muted-foreground">TM</span>
+                                            <span className={riskColor(item.tmRiskScore)}>{item.tmRiskScore?.toFixed(0) ?? '-'}</span>
+                                        </div>
+                                        <div className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-md border ${riskBg(item.historyRiskScore)}`}>
+                                            <span className="text-muted-foreground">History</span>
+                                            <span className={riskColor(item.historyRiskScore)}>{item.historyRiskScore?.toFixed(0) ?? '-'}</span>
+                                        </div>
+                                        <div className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-md border ${riskBg(item.backlinkRiskScore)}`}>
+                                            <span className="text-muted-foreground">Backlinks</span>
+                                            <span className={riskColor(item.backlinkRiskScore)}>{item.backlinkRiskScore?.toFixed(0) ?? '-'}</span>
+                                        </div>
+                                        <span className="text-xs text-muted-foreground px-1">
+                                            Demand {item.demandScore?.toFixed(1) ?? '-'} &middot; Comps {item.compsScore?.toFixed(1) ?? '-'}
+                                        </span>
+                                    </div>
+
+                                    {/* Warnings */}
+                                    {item.hardFailReason && (
+                                        <div className="flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 px-3 py-2 text-xs text-red-700 dark:text-red-400">
+                                            <XCircle className="h-3.5 w-3.5 shrink-0" />
+                                            <span className="font-medium">Hard fail:</span> {item.hardFailReason}
+                                        </div>
+                                    )}
+                                    {item.decisionReason && (
+                                        <p className="text-xs text-muted-foreground">
+                                            <span className="font-medium">Decision note:</span> {item.decisionReason}
+                                        </p>
+                                    )}
+                                </div>
+
+                                {/* Card Footer — Actions */}
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t px-5 py-3 bg-muted/10">
+                                    <div className="flex items-center gap-3">
                                         {previewUrl && (
                                             <Link
                                                 href={previewUrl}
-                                                className="px-3 py-2 rounded-md border text-sm hover:bg-muted"
+                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-medium hover:bg-muted transition-colors"
                                             >
-                                                Open Preview
+                                                <ExternalLink className="h-3 w-3" />
+                                                Preview
                                             </Link>
                                         )}
-                                        <form action={approveTaskAction} className="flex items-center gap-2">
+                                        {preview && (
+                                            <span className="text-[10px] text-muted-foreground">
+                                                Build: {preview.buildStatus}
+                                                {preview?.expiresAt ? ` · Expires ${new Date(preview.expiresAt).toLocaleDateString()}` : ''}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <form action={approveTaskAction} className="flex items-center gap-1.5">
                                             <input type="hidden" name="taskId" value={item.taskId} />
                                             <input
                                                 type="text"
                                                 name="reviewNotes"
-                                                placeholder="Approval note (optional)"
-                                                className="h-9 rounded-md border px-2 text-xs w-48"
+                                                placeholder="Note (optional)"
+                                                className="h-8 rounded-md border bg-background px-2 text-xs w-40 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1"
                                             />
                                             <button
                                                 type="submit"
-                                                className="h-9 px-3 rounded-md bg-emerald-600 text-white text-sm hover:bg-emerald-700"
+                                                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
                                             >
+                                                <CheckCircle2 className="h-3 w-3" />
                                                 Approve
                                             </button>
                                         </form>
-                                        <form action={rejectTaskAction} className="flex items-center gap-2">
+                                        <form action={rejectTaskAction} className="flex items-center gap-1.5">
                                             <input type="hidden" name="taskId" value={item.taskId} />
                                             <input
                                                 type="text"
                                                 name="reviewNotes"
-                                                placeholder="Rejection note (optional)"
-                                                className="h-9 rounded-md border px-2 text-xs w-48"
+                                                placeholder="Note (optional)"
+                                                className="h-8 rounded-md border bg-background px-2 text-xs w-40 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1"
                                             />
                                             <button
                                                 type="submit"
-                                                className="h-9 px-3 rounded-md bg-red-600 text-white text-sm hover:bg-red-700"
+                                                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-xs font-medium hover:bg-red-50 dark:hover:bg-red-950 transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
                                             >
+                                                <XCircle className="h-3 w-3" />
                                                 Reject
                                             </button>
                                         </form>

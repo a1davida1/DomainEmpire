@@ -15,6 +15,11 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 const STATUSES = ['active', 'parked', 'redirect', 'forsale', 'defensive'] as const;
+const DEPLOYMENT_STATES = [
+    { value: 'deployed', label: 'Deployed' },
+    { value: 'project_ready', label: 'Project Ready' },
+    { value: 'not_deployed', label: 'Not Deployed' },
+] as const;
 const TIERS = [1, 2, 3, 4] as const;
 
 export function DomainSearch() {
@@ -25,6 +30,7 @@ export function DomainSearch() {
 
     const currentSearch = searchParams.get('q') ?? '';
     const currentStatus = searchParams.get('status') ?? '';
+    const currentDeploy = searchParams.get('deploy') ?? '';
     const currentTier = searchParams.get('tier') ?? '';
     const [query, setQuery] = useState(currentSearch);
 
@@ -54,7 +60,7 @@ export function DomainSearch() {
         });
     };
 
-    const hasFilters = currentSearch || currentStatus || currentTier;
+    const hasFilters = currentSearch || currentStatus || currentDeploy || currentTier;
 
     return (
         <div className="flex gap-4">
@@ -75,7 +81,7 @@ export function DomainSearch() {
                         Filters
                         {hasFilters && (
                             <span className="ml-1 rounded-full bg-primary px-1.5 py-0.5 text-xs text-primary-foreground">
-                                {[currentSearch, currentStatus, currentTier].filter(Boolean).length}
+                                {[currentSearch, currentStatus, currentDeploy, currentTier].filter(Boolean).length}
                             </span>
                         )}
                     </Button>
@@ -89,6 +95,16 @@ export function DomainSearch() {
                             className="capitalize"
                         >
                             {currentStatus === s && '✓ '}{s}
+                        </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel>Deployment</DropdownMenuLabel>
+                    {DEPLOYMENT_STATES.map((state) => (
+                        <DropdownMenuItem
+                            key={state.value}
+                            onSelect={() => updateParams({ deploy: currentDeploy === state.value ? '' : state.value })}
+                        >
+                            {currentDeploy === state.value && '✓ '}{state.label}
                         </DropdownMenuItem>
                     ))}
                     <DropdownMenuSeparator />

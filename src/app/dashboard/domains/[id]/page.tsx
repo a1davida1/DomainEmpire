@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -407,12 +407,33 @@ export default async function DomainDetailPage({ params }: PageProps) {
     }
 
     const operationsSettingsPromise = getOperationsSettings();
-    const [stats, recentArticles, operationsSettings] = await Promise.all([
+    const [stats, recentArticles, operationsSettings, contentTypeRows] = await Promise.all([
         getDomainStats(id),
         getRecentArticles(id),
         operationsSettingsPromise,
+        db.select({
+            contentType: articles.contentType,
+            count: sql<number>`count(*)::int`,
+        })
+            .from(articles)
+            .where(and(eq(articles.domainId, id), isNull(articles.deletedAt)))
+            .groupBy(articles.contentType),
     ]);
     const queueSnapshot = await getDomainQueueSnapshot(id, operationsSettings);
+    const contentTypeCounts = new Map<string, number>();
+    for (const row of contentTypeRows) {
+        contentTypeCounts.set(row.contentType || 'article', row.count);
+    }
+    const calculatorCount = contentTypeCounts.get('calculator') ?? 0;
+    const interactiveCount = (
+        (contentTypeCounts.get('wizard') ?? 0)
+        + (contentTypeCounts.get('configurator') ?? 0)
+        + (contentTypeCounts.get('quiz') ?? 0)
+        + (contentTypeCounts.get('survey') ?? 0)
+        + (contentTypeCounts.get('assessment') ?? 0)
+        + (contentTypeCounts.get('interactive_infographic') ?? 0)
+        + (contentTypeCounts.get('interactive_map') ?? 0)
+    );
 
     return (
         <div className="space-y-6">
@@ -462,6 +483,17 @@ export default async function DomainDetailPage({ params }: PageProps) {
                         </TooltipTrigger>
                         <TooltipContent>View all pending, processing, and completed background jobs for this domain (keyword research, article generation, deploys).</TooltipContent>
                     </Tooltip>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Link href={`/dashboard/content/articles?domainId=${id}`}>
+                                <Button variant="outline">
+                                    <FileText className="mr-2 h-4 w-4" />
+                                    Review Articles
+                                </Button>
+                            </Link>
+                        </TooltipTrigger>
+                        <TooltipContent>Open article review filtered to this domain.</TooltipContent>
+                    </Tooltip>
                     {domain.isDeployed && (
                         <Tooltip>
                             <TooltipTrigger asChild>
@@ -505,6 +537,31 @@ export default async function DomainDetailPage({ params }: PageProps) {
                     processingJobs: queueSnapshot.byStatus.processing,
                 }}
             />
+
+            <Card className="border-sky-200 bg-sky-50/40">
+                <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+                    <div className="space-y-1">
+                        <p className="text-sm font-semibold text-sky-900">Content For This Domain</p>
+                        <p className="text-xs text-sky-900/80">
+                            Articles: {stats.articles} • Calculators: {calculatorCount} • Interactive: {interactiveCount}
+                        </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        <Link href={`/dashboard/content/articles?domainId=${id}`}>
+                            <Button size="sm" variant="outline">All Content</Button>
+                        </Link>
+                        <Link href={`/dashboard/content/articles?domainId=${id}&contentType=calculator`}>
+                            <Button size="sm" variant="outline">Calculators</Button>
+                        </Link>
+                        <Link href={`/dashboard/content/articles?domainId=${id}&contentType=interactive`}>
+                            <Button size="sm" variant="outline">Interactive</Button>
+                        </Link>
+                        <Link href={`/dashboard/content/articles?domainId=${id}&status=review`}>
+                            <Button size="sm" variant="outline">Needs Review</Button>
+                        </Link>
+                    </div>
+                </CardContent>
+            </Card>
 
             {/* Quick Stats */}
             <div className="grid gap-4 md:grid-cols-4">
@@ -958,6 +1015,9 @@ export default async function DomainDetailPage({ params }: PageProps) {
                                         <Link href={`/dashboard/content/articles/${article.id}/review`} className="text-xs text-blue-600 hover:underline">
                                             Review
                                         </Link>
+                                        <Badge variant="outline" className="capitalize">
+                                            {(article.contentType || 'article').replaceAll('_', ' ')}
+                                        </Badge>
                                         <Badge variant="outline" className="capitalize">{article.status}</Badge>
                                     </div>
                                 </div>

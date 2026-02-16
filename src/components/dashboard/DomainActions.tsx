@@ -11,7 +11,7 @@ import {
     DropdownMenuSeparator,
     DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu';
-import { MoreHorizontal, Settings, Rocket, Globe, Trash2, AlertTriangle } from 'lucide-react';
+import { MoreHorizontal, Settings, Rocket, Globe, Trash2, AlertTriangle, Waypoints } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -19,6 +19,9 @@ interface DomainActionsProps {
     domainId: string;
     domainName: string;
     isDeployed: boolean;
+    registrar?: string | null;
+    nameserverConfigured?: boolean | null;
+    nameserverPending?: boolean | null;
 }
 
 type PreflightIssue = {
@@ -27,10 +30,63 @@ type PreflightIssue = {
     severity: 'blocking' | 'warning';
 };
 
-export function DomainActions({ domainId, domainName, isDeployed }: DomainActionsProps) {
+type NameserverFailure = {
+    code?: string;
+    domain: string;
+    error: string;
+};
+
+type NameserverSkip = {
+    domain: string;
+    reason: string;
+};
+
+type NameserverPreflightResponse = {
+    readyCount?: number;
+    failedCount?: number;
+    skippedCount?: number;
+    failures?: NameserverFailure[];
+    skipped?: NameserverSkip[];
+};
+
+type NameserverApplyResponse = {
+    successCount?: number;
+    failedCount?: number;
+    skippedCount?: number;
+    failures?: NameserverFailure[];
+    skipped?: NameserverSkip[];
+};
+
+type CloudflareZoneCreateResponse = {
+    createdCount?: number;
+    existingCount?: number;
+    failedCount?: number;
+    failed?: Array<{ domain: string; error: string }>;
+};
+
+const AUTOMATED_NAMESERVER_REGISTRARS = new Set(['godaddy', 'namecheap']);
+
+function isMissingCloudflareZoneFailure(failure: NameserverFailure): boolean {
+    if (failure.code === 'missing_cloudflare_zone') {
+        return true;
+    }
+    return failure.error.includes('Unable to resolve Cloudflare nameservers');
+}
+
+export function DomainActions({
+    domainId,
+    domainName,
+    isDeployed,
+    registrar,
+    nameserverConfigured,
+    nameserverPending,
+}: DomainActionsProps) {
     const router = useRouter();
     const [deploying, setDeploying] = useState(false);
+    const [fixingDns, setFixingDns] = useState(false);
     const [confirmDelete, setConfirmDelete] = useState(false);
+    const normalizedRegistrar = (registrar || '').trim().toLowerCase();
+    const canAutomateNameserverCutover = AUTOMATED_NAMESERVER_REGISTRARS.has(normalizedRegistrar);
 
     const handleDeploy = async () => {
         setDeploying(true);
@@ -86,6 +142,112 @@ export function DomainActions({ domainId, domainName, isDeployed }: DomainAction
         }
     };
 
+    async function runNameserverPreflight(): Promise<NameserverPreflightResponse> {
+        const response = await fetch('/api/domains/bulk-nameservers', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                domainIds: [domainId],
+                dryRun: true,
+                reason: `One-click DNS cutover preflight from domain actions for ${domainName}`,
+            }),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(body.error || body.message || 'Nameserver preflight failed');
+        }
+        return body as NameserverPreflightResponse;
+    }
+
+    async function runNameserverCutover(): Promise<NameserverApplyResponse> {
+        const response = await fetch('/api/domains/bulk-nameservers', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                domainIds: [domainId],
+                reason: `One-click DNS cutover from domain actions for ${domainName}`,
+            }),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(body.error || body.message || 'Nameserver cutover failed');
+        }
+        return body as NameserverApplyResponse;
+    }
+
+    async function runCloudflareZoneCreate(): Promise<CloudflareZoneCreateResponse> {
+        const response = await fetch('/api/domains/bulk-cloudflare-zones', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                domainIds: [domainId],
+                jumpStart: false,
+            }),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(body.error || body.message || 'Cloudflare zone creation failed');
+        }
+        return body as CloudflareZoneCreateResponse;
+    }
+
+    const handleFixDns = async () => {
+        if (!canAutomateNameserverCutover) {
+            toast.error('Automated DNS cutover is currently supported for GoDaddy and Namecheap only.');
+            return;
+        }
+
+        setFixingDns(true);
+        try {
+            let preflight = await runNameserverPreflight();
+            const missingZone = (preflight.failures || []).some((failure) => isMissingCloudflareZoneFailure(failure));
+
+            if ((preflight.readyCount ?? 0) === 0 && missingZone) {
+                const zoneCreate = await runCloudflareZoneCreate();
+                if ((zoneCreate.failedCount ?? 0) > 0) {
+                    throw new Error(zoneCreate.failed?.[0]?.error || 'Failed to create Cloudflare zone');
+                }
+                preflight = await runNameserverPreflight();
+            }
+
+            if ((preflight.readyCount ?? 0) === 0) {
+                const failureMessage = preflight.failures?.[0]?.error;
+                const skipMessage = preflight.skipped?.[0]?.reason;
+                throw new Error(failureMessage || skipMessage || 'Domain is not ready for nameserver cutover');
+            }
+
+            const result = await runNameserverCutover();
+            const successCount = result.successCount ?? 0;
+            const failedCount = result.failedCount ?? 0;
+            const skippedCount = result.skippedCount ?? 0;
+
+            if (successCount > 0) {
+                toast.success(`DNS cutover applied for ${domainName}.`);
+            }
+            if (failedCount > 0 || skippedCount > 0) {
+                const firstFailure = result.failures?.[0]?.error;
+                const firstSkip = result.skipped?.[0]?.reason;
+                toast.warning(firstFailure || firstSkip || `DNS cutover completed with issues for ${domainName}.`);
+            }
+            if (successCount === 0) {
+                throw new Error(result.failures?.[0]?.error || 'No DNS updates were applied.');
+            }
+
+            router.refresh();
+        } catch (error) {
+            console.error('DNS fix failed:', error);
+            toast.error(error instanceof Error ? error.message : 'DNS fix failed');
+        } finally {
+            setFixingDns(false);
+        }
+    };
+
+    const dnsLabel = nameserverConfigured && !nameserverPending
+        ? 'Re-check DNS/Cutover'
+        : nameserverPending
+            ? 'Complete DNS Cutover'
+            : 'Fix DNS to Cloudflare';
+
     return (
         <DropdownMenu onOpenChange={(open) => { if (!open) setConfirmDelete(false); }}>
             <DropdownMenuTrigger asChild>
@@ -113,6 +275,15 @@ export function DomainActions({ domainId, domainName, isDeployed }: DomainAction
                     <Rocket className="mr-2 h-4 w-4" />
                     {deploying ? 'Deploying...' : isDeployed ? 'Redeploy' : 'Deploy'}
                 </DropdownMenuItem>
+                {canAutomateNameserverCutover && (
+                    <DropdownMenuItem
+                        onSelect={handleFixDns}
+                        disabled={fixingDns}
+                    >
+                        <Waypoints className="mr-2 h-4 w-4" />
+                        {fixingDns ? 'Fixing DNS...' : dnsLabel}
+                    </DropdownMenuItem>
+                )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                     onSelect={handleDelete}

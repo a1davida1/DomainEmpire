@@ -54,10 +54,10 @@ const ROLE_HIERARCHY: Record<string, number> = {
 };
 
 const YMYL_COLORS: Record<string, string> = {
-    high: 'bg-red-100 text-red-800 border-red-200',
-    medium: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-    low: 'bg-blue-100 text-blue-800 border-blue-200',
-    none: 'bg-gray-100 text-gray-600 border-gray-200',
+    high: 'bg-red-100 text-red-800 border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800',
+    medium: 'bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-950 dark:text-yellow-300 dark:border-yellow-800',
+    low: 'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800',
+    none: 'bg-gray-100 text-gray-600 border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700',
 };
 
 export default function ArticleReviewPage() {
@@ -367,7 +367,12 @@ export default function ArticleReviewPage() {
     }
 
     if (loading) {
-        return <div className="flex items-center justify-center p-12"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+        return (
+            <div className="flex flex-col items-center justify-center p-16 gap-3">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">Loading review data…</p>
+            </div>
+        );
     }
 
     const items = qaData?.checklist.items || [];
@@ -385,21 +390,29 @@ export default function ArticleReviewPage() {
 
     return (
         <div className="space-y-6 max-w-3xl">
-            <div className="flex items-center gap-4">
+            {/* Header */}
+            <div className="flex items-start gap-4">
                 <Link href={`/dashboard/content/articles/${articleId}`}>
-                    <Button variant="ghost" size="icon">
+                    <Button variant="ghost" size="icon" className="mt-0.5">
                         <ArrowLeft className="h-5 w-5" />
                     </Button>
                 </Link>
-                <div>
-                    <h1 className="text-3xl font-bold">Review Article</h1>
+                <div className="flex-1 min-w-0">
+                    <h1 className="text-2xl font-bold tracking-tight">
+                        {articleInfo?.title || 'Review Article'}
+                    </h1>
                     {articleInfo && (
-                        <div className="flex items-center gap-2 mt-1">
+                        <div className="flex flex-wrap items-center gap-2 mt-2">
                             <Badge variant="outline" className="capitalize">{currentStatus}</Badge>
                             {ymylLevel !== 'none' && (
                                 <Badge variant="outline" className={YMYL_COLORS[ymylLevel]}>
                                     <ShieldAlert className="h-3 w-3 mr-1" />
                                     YMYL {ymylLevel}
+                                </Badge>
+                            )}
+                            {articleInfo.contentType && articleInfo.contentType !== 'article' && (
+                                <Badge variant="secondary" className="capitalize text-xs">
+                                    {articleInfo.contentType.replace(/_/g, ' ')}
                                 </Badge>
                             )}
                             {userInfo && (
@@ -410,20 +423,28 @@ export default function ArticleReviewPage() {
                         </div>
                     )}
                 </div>
+                <Link
+                    href="/dashboard/review"
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                >
+                    Back to queue
+                </Link>
             </div>
 
             {/* QA Checklist */}
-            <div className="bg-card rounded-lg border p-4">
-                <h2 className="text-lg font-semibold mb-3">{qaData?.checklist.name || 'QA Checklist'}</h2>
-
+            <div className="rounded-xl border bg-card overflow-hidden">
+                <div className="border-b bg-muted/20 px-5 py-3">
+                    <h2 className="text-base font-semibold">{qaData?.checklist.name || 'QA Checklist'}</h2>
+                </div>
+                <div className="p-5 space-y-4">
                 {qaData?.latestResult && (
-                    <div className={`mb-4 p-3 rounded-lg border flex items-center gap-2 text-sm ${qaData.latestResult.allPassed
-                        ? 'bg-green-50 border-green-200 text-green-800'
-                        : 'bg-red-50 border-red-200 text-red-800'
+                    <div className={`p-3 rounded-lg border flex items-center gap-2 text-sm ${qaData.latestResult.allPassed
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800 dark:bg-emerald-950/30 dark:border-emerald-900 dark:text-emerald-400'
+                        : 'bg-red-50 border-red-200 text-red-800 dark:bg-red-950/30 dark:border-red-900 dark:text-red-400'
                         }`}>
                         {qaData.latestResult.allPassed ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
                         Last QA: {qaData.latestResult.allPassed ? 'All passed' : 'Some items failed'}
-                        <span className="text-xs ml-auto">{new Date(qaData.latestResult.completedAt).toLocaleString()}</span>
+                        <span className="text-xs ml-auto opacity-70">{new Date(qaData.latestResult.completedAt).toLocaleString()}</span>
                     </div>
                 )}
 
@@ -433,12 +454,12 @@ export default function ArticleReviewPage() {
                     </p>
                 )}
 
-                <div className="space-y-2">
+                <div className="space-y-1">
                     {items.map(item => (
                         <label
                             key={item.id}
                             htmlFor={`qa-item-${item.id}`}
-                            className="flex items-start gap-3 p-2 rounded hover:bg-muted/30 cursor-pointer"
+                            className={`flex items-start gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors ${checkedItems[item.id] ? 'bg-emerald-50/50 dark:bg-emerald-950/20' : 'hover:bg-muted/40'}`}
                             aria-label={item.label}
                         >
                             <input
@@ -446,11 +467,14 @@ export default function ArticleReviewPage() {
                                 type="checkbox"
                                 checked={!!checkedItems[item.id]}
                                 onChange={() => toggleItem(item.id)}
-                                className="mt-1 h-4 w-4 rounded border-gray-300 text-purple-600 focus:ring-purple-600"
+                                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
                             />
-                            <div className="flex-1">
-                                <p className="text-sm font-medium leading-none">{item.label}</p>
-                                <p className="text-xs text-muted-foreground mt-1">{item.category}</p>
+                            <div className="flex-1 min-w-0">
+                                <p className={`text-sm font-medium leading-tight ${checkedItems[item.id] ? 'text-muted-foreground line-through' : ''}`}>
+                                    {item.label}
+                                    {item.required && <span className="ml-1 text-red-500 text-xs">*</span>}
+                                </p>
+                                <p className="text-xs text-muted-foreground mt-0.5">{item.category}</p>
                             </div>
                         </label>
                     ))}
@@ -468,39 +492,47 @@ export default function ArticleReviewPage() {
                     </div>
                 )}
 
-                <div className="mt-4">
+                <div className="pt-2">
                     <Button onClick={submitQa} disabled={submitting} size="sm">
                         {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                         Save QA Results
                     </Button>
                 </div>
+                </div>
             </div>
 
             {/* Expert Sign-Off (only for experts/admins on high YMYL) */}
             {(ymylLevel === 'high') && isExpert && currentStatus === 'approved' && (
-                <div className="bg-card rounded-lg border p-4">
-                    <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
-                        <ShieldAlert className="h-5 w-5 text-red-600" />
-                        Expert Sign-Off Required
-                    </h2>
-                    <p className="text-sm text-muted-foreground mb-3">
-                        This high-YMYL article requires expert sign-off before publishing.
-                        By signing, you attest that the content is factually accurate and appropriate.
-                    </p>
-                    <Button
-                        onClick={expertSignOffAndPublish}
-                        disabled={submitting}
-                        className="bg-red-600 hover:bg-red-700"
-                    >
-                        {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                        Sign Off & Publish
-                    </Button>
+                <div className="rounded-xl border-2 border-red-200 dark:border-red-900 bg-red-50/50 dark:bg-red-950/20 overflow-hidden">
+                    <div className="border-b border-red-200 dark:border-red-900 bg-red-100/50 dark:bg-red-950/40 px-5 py-3">
+                        <h2 className="text-base font-semibold flex items-center gap-2 text-red-800 dark:text-red-300">
+                            <ShieldAlert className="h-5 w-5" />
+                            Expert Sign-Off Required
+                        </h2>
+                    </div>
+                    <div className="px-5 py-4">
+                        <p className="text-sm text-muted-foreground mb-4">
+                            This high-YMYL article requires expert sign-off before publishing.
+                            By signing, you attest that the content is factually accurate and appropriate.
+                        </p>
+                        <Button
+                            onClick={expertSignOffAndPublish}
+                            disabled={submitting}
+                            className="bg-red-600 hover:bg-red-700"
+                        >
+                            {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                            Sign Off & Publish
+                        </Button>
+                    </div>
                 </div>
             )}
 
             {/* Status Actions */}
-            <div className="bg-card rounded-lg border p-4">
-                <h2 className="text-lg font-semibold mb-3">Status Actions</h2>
+            <div className="rounded-xl border bg-card overflow-hidden">
+                <div className="border-b bg-muted/20 px-5 py-3">
+                    <h2 className="text-base font-semibold">Review Decision</h2>
+                </div>
+                <div className="p-5">
 
                 <div className="space-y-3">
                     <div className="mb-4">
@@ -901,10 +933,12 @@ export default function ArticleReviewPage() {
                     )}
 
                     {canApprove && currentStatus === 'review' && !allRequiredChecked && (
-                        <p className="text-xs text-muted-foreground">
+                        <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                            <AlertTriangle className="h-3 w-3" />
                             All required QA checklist items must be checked before approval.
                         </p>
                     )}
+                </div>
                 </div>
             </div>
         </div>

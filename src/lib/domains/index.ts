@@ -32,6 +32,7 @@ export async function getRecentArticles(domainId: string) {
                 id: articles.id,
                 title: articles.title,
                 status: articles.status,
+                contentType: articles.contentType,
                 wordCount: articles.wordCount,
                 createdAt: articles.createdAt,
             })

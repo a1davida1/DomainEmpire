@@ -1,5 +1,5 @@
 import { MetricCard } from '@/components/dashboard/MetricCard';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -284,64 +284,49 @@ export default async function DashboardPage() {
     return (
         <div className="space-y-8">
             {/* Header */}
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold">Dashboard</h1>
-                    <p className="text-muted-foreground">
+                    <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
+                    <p className="text-sm text-muted-foreground">
                         Portfolio overview and key metrics
-                    </p>
-                    <p className="text-[10px] text-muted-foreground/60 tabular-nums">
-                        Last updated {new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
                     </p>
                 </div>
                 <div className="flex items-center gap-2">
                     <DashboardRefresh />
-                    <Link href="/dashboard/workflow">
-                        <Button>
-                            <PlayCircle className="mr-2 h-4 w-4" />
-                            Start Here
-                        </Button>
-                    </Link>
-                    <Link href="/dashboard/growth">
-                        <Button variant="outline">
-                            <Megaphone className="mr-2 h-4 w-4" />
-                            Growth
-                        </Button>
-                    </Link>
-                    <Link href="/dashboard/deploy">
-                        <Button variant="outline">
-                            <Rocket className="mr-2 h-4 w-4" />
-                            Deploy
-                        </Button>
-                    </Link>
                     <Link href="/dashboard/domains/new">
-                        <Button variant="outline">
-                            <Plus className="mr-2 h-4 w-4" />
+                        <Button size="sm" variant="outline">
+                            <Plus className="mr-1.5 h-3.5 w-3.5" />
                             Add Domain
+                        </Button>
+                    </Link>
+                    <Link href="/dashboard/workflow">
+                        <Button size="sm">
+                            <PlayCircle className="mr-1.5 h-3.5 w-3.5" />
+                            Workflow
                         </Button>
                     </Link>
                 </div>
             </div>
 
-            <Card>
-                <CardHeader>
-                    <CardTitle>Execution Workflow</CardTitle>
-                    <CardDescription>
-                        Use one queue for what to do next, what is blocked, and what needs setup.
-                    </CardDescription>
-                </CardHeader>
-                <CardContent className="flex flex-wrap gap-2">
-                    <Link href="/dashboard/workflow">
-                        <Button>Open Workflow</Button>
-                    </Link>
-                    <Link href="/dashboard/queue">
-                        <Button variant="outline">Open Queue</Button>
-                    </Link>
-                    <Link href="/dashboard/integrations">
-                        <Button variant="outline">Open Integrations</Button>
-                    </Link>
-                </CardContent>
-            </Card>
+            {/* Quick Actions */}
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/30 px-4 py-2.5">
+                <span className="text-xs font-medium text-muted-foreground mr-1">Quick actions</span>
+                <Link href="/dashboard/queue" className="inline-flex items-center gap-1.5 rounded-md border bg-card px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors">
+                    <Activity className="h-3 w-3" /> Queue
+                </Link>
+                <Link href="/dashboard/deploy" className="inline-flex items-center gap-1.5 rounded-md border bg-card px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors">
+                    <Rocket className="h-3 w-3" /> Deploy
+                </Link>
+                <Link href="/dashboard/growth" className="inline-flex items-center gap-1.5 rounded-md border bg-card px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors">
+                    <Megaphone className="h-3 w-3" /> Growth
+                </Link>
+                <Link href="/dashboard/review" className="inline-flex items-center gap-1.5 rounded-md border bg-card px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors">
+                    <TrendingUp className="h-3 w-3" /> Review
+                </Link>
+                <Link href="/dashboard/integrations" className="inline-flex items-center gap-1.5 rounded-md border bg-card px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors">
+                    <Globe className="h-3 w-3" /> Integrations
+                </Link>
+            </div>
 
             {/* Onboarding CTA when no domains */}
             {metrics.domains === 0 && (
@@ -369,7 +354,7 @@ export default async function DashboardPage() {
             )}
 
             {/* Metrics Grid */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+            <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
                 <MetricCard
                     title="Total Domains"
                     value={metrics.domains}
@@ -398,6 +383,36 @@ export default async function DashboardPage() {
                     icon={<Cpu className="h-6 w-6 text-primary" />}
                 />
             </div>
+
+            {/* Weekly Target */}
+            <Card>
+                <CardContent className="py-4 px-6">
+                    <div className="flex items-center gap-6">
+                        <div className="flex items-center gap-3">
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                                <TrendingUp className="h-4 w-4 text-primary" />
+                            </div>
+                            <div>
+                                <p className="text-sm font-medium">Weekly Target</p>
+                                <p className="text-xs text-muted-foreground tabular-nums">
+                                    {metrics.weeklyArticles} / {TARGET_WEEKLY_ARTICLES} articles
+                                </p>
+                            </div>
+                        </div>
+                        <div className="flex-1">
+                            <div className="h-2.5 overflow-hidden rounded-full bg-secondary">
+                                <div
+                                    className="h-full rounded-full bg-primary transition-all"
+                                    style={{ width: `${Math.min(100, (metrics.weeklyArticles / TARGET_WEEKLY_ARTICLES) * 100)}%` }}
+                                />
+                            </div>
+                        </div>
+                        <span className="text-sm font-bold tabular-nums">
+                            {Math.round((metrics.weeklyArticles / TARGET_WEEKLY_ARTICLES) * 100)}%
+                        </span>
+                    </div>
+                </CardContent>
+            </Card>
 
             {/* Pipeline Velocity */}
             <div className="grid gap-4 md:grid-cols-4">
@@ -516,30 +531,22 @@ export default async function DashboardPage() {
 
             {/* Content Pipeline Status */}
             <Card>
-                <CardHeader>
-                    <CardTitle>Content Pipeline Status</CardTitle>
-                    <CardDescription>Weekly target progress and pending work</CardDescription>
+                <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Content Pipeline</CardTitle>
                 </CardHeader>
                 <CardContent>
-                    <div className="flex items-center gap-8">
-                        <div className="text-center">
-                            <p className="text-2xl font-bold">{metrics.pendingJobs}</p>
-                            <p className="text-sm text-muted-foreground">Pending Jobs</p>
+                    <div className="grid grid-cols-3 gap-4 text-center">
+                        <div className="rounded-lg bg-muted/50 p-3">
+                            <p className="text-2xl font-bold tabular-nums">{metrics.pendingJobs}</p>
+                            <p className="text-xs text-muted-foreground">Pending Jobs</p>
                         </div>
-                        <div className="h-12 w-px bg-border" />
-                        <div className="flex-1">
-                            <div className="flex items-center justify-between text-sm">
-                                <span className="text-muted-foreground">Weekly Target Progress</span>
-                                <span className="font-medium">
-                                    {metrics.weeklyArticles} / {TARGET_WEEKLY_ARTICLES} articles
-                                </span>
-                            </div>
-                            <div className="mt-2 h-2 overflow-hidden rounded-full bg-secondary">
-                                <div
-                                    className="h-full bg-primary transition-all"
-                                    style={{ width: `${Math.min(100, (metrics.weeklyArticles / TARGET_WEEKLY_ARTICLES) * 100)}%` }}
-                                />
-                            </div>
+                        <div className="rounded-lg bg-muted/50 p-3">
+                            <p className="text-2xl font-bold tabular-nums">{metrics.weeklyArticles}</p>
+                            <p className="text-xs text-muted-foreground">Published This Week</p>
+                        </div>
+                        <div className="rounded-lg bg-muted/50 p-3">
+                            <p className="text-2xl font-bold tabular-nums">{metrics.deployedDomains}</p>
+                            <p className="text-xs text-muted-foreground">Deployed Domains</p>
                         </div>
                     </div>
                 </CardContent>

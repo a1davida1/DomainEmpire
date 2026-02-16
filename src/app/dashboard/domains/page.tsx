@@ -1,12 +1,13 @@
 import { Suspense } from 'react';
+import { resolveNs } from 'node:dns/promises';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { TableHead } from '@/components/ui/table';
 import { Plus, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
-import { db, domains } from '@/lib/db';
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { db, domainRegistrarProfiles, domains } from '@/lib/db';
+import { and, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
 import { articles, contentQueue } from '@/lib/db/schema';
 import { formatDate } from '@/lib/format-utils';
 import { DeployAllButton } from '@/components/dashboard/DeployAllButton';
@@ -62,16 +63,89 @@ type QueueSpotlight = {
     activeByType: Array<{ jobType: string; count: number }>;
 };
 
+type NameserverHint = {
+    configured: boolean;
+    pending: boolean;
+};
+
+type DomainListResult = {
+    data: Array<typeof domains.$inferSelect>;
+    nameserverHintsByDomainId: Record<string, NameserverHint>;
+    deployActionDomainIds: string[];
+    dnsActionDomainIds: string[];
+    totalCount: number;
+    page: number;
+    totalPages: number;
+    error: string | null;
+};
+
+const DEPLOY_FILTER_VALUES = ['deployed', 'project_ready', 'not_deployed'] as const;
+type DeployFilter = (typeof DEPLOY_FILTER_VALUES)[number];
+
+function isDeployFilter(value: string | undefined): value is DeployFilter {
+    return !!value && (DEPLOY_FILTER_VALUES as readonly string[]).includes(value);
+}
+
 interface DomainsPageProps {
     readonly searchParams: Promise<{
         readonly q?: string; readonly status?: string; readonly tier?: string;
         readonly account?: string;
+        readonly deploy?: string;
         readonly page?: string; readonly sort?: string; readonly dir?: string;
     }>;
 }
 
 function isSortColumn(v: string | undefined): v is SortColumn {
     return !!v && (SORT_COLUMNS as readonly string[]).includes(v);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function extractNameserverHint(metadata: unknown): NameserverHint {
+    if (!isRecord(metadata)) {
+        return { configured: false, pending: false };
+    }
+    const nameserverState = metadata.nameserverState;
+    if (!isRecord(nameserverState)) {
+        return { configured: false, pending: false };
+    }
+    const nameservers = Array.isArray(nameserverState.nameservers)
+        ? nameserverState.nameservers.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+        : [];
+    const pending = nameserverState.pending === true;
+    return {
+        configured: nameservers.length >= 2,
+        pending,
+    };
+}
+
+function uniqueNormalizedNameservers(values: string[]): string[] {
+    return [...new Set(
+        values
+            .map((value) => value.trim().toLowerCase().replace(/\.+$/g, ''))
+            .filter((value) => value.length > 0),
+    )];
+}
+
+function isCloudflareNameserverSet(values: string[]): boolean {
+    const nameservers = uniqueNormalizedNameservers(values);
+    return nameservers.length >= 2
+        && nameservers.every((value) => value.endsWith('.cloudflare.com'));
+}
+
+async function resolveCloudflareNsMatch(domain: string): Promise<boolean> {
+    try {
+        const lookup = resolveNs(domain);
+        const timeout = new Promise<string[]>((_, reject) => {
+            setTimeout(() => reject(new Error('dns_lookup_timeout')), 1200);
+        });
+        const nameservers = await Promise.race([lookup, timeout]);
+        return isCloudflareNameserverSet(nameservers);
+    } catch {
+        return false;
+    }
 }
 
 async function getQueueSpotlight(domainIds: string[]): Promise<QueueSpotlight> {
@@ -147,7 +221,7 @@ function SortIndicator({ col, activeCol, activeDir }: { col: SortColumn; activeC
         : <ChevronDown className="ml-1 inline h-3 w-3 text-primary" />;
 }
 
-async function getDomains(filters: { q?: string; status?: string; tier?: string; account?: string; sort?: string; dir?: string; page?: string }) {
+async function getDomains(filters: { q?: string; status?: string; tier?: string; account?: string; deploy?: string; sort?: string; dir?: string; page?: string }): Promise<DomainListResult> {
     try {
         // Build SQL WHERE conditions
         const conditions = [isNull(domains.deletedAt)];
@@ -171,8 +245,41 @@ async function getDomains(filters: { q?: string; status?: string; tier?: string;
                 conditions.push(eq(domains.cloudflareAccount, filters.account));
             }
         }
+        if (isDeployFilter(filters.deploy)) {
+            if (filters.deploy === 'deployed') {
+                conditions.push(eq(domains.isDeployed, true));
+            } else if (filters.deploy === 'project_ready') {
+                const projectReadyCondition = and(
+                    isNotNull(domains.cloudflareProject),
+                    or(eq(domains.isDeployed, false), isNull(domains.isDeployed)),
+                );
+                if (projectReadyCondition) {
+                    conditions.push(projectReadyCondition);
+                }
+            } else if (filters.deploy === 'not_deployed') {
+                const notDeployedCondition = or(eq(domains.isDeployed, false), isNull(domains.isDeployed));
+                if (notDeployedCondition) {
+                    conditions.push(notDeployedCondition);
+                }
+            }
+        }
 
         const whereClause = and(...conditions);
+
+        const matchingActionRows = await db.select({
+            id: domains.id,
+            registrar: domains.registrar,
+            isDeployed: domains.isDeployed,
+        })
+            .from(domains)
+            .where(whereClause);
+
+        const deployActionDomainIds = matchingActionRows
+            .filter((row) => row.isDeployed !== true)
+            .map((row) => row.id);
+        const dnsActionDomainIds = matchingActionRows
+            .filter((row) => ['godaddy', 'namecheap'].includes((row.registrar || '').toLowerCase()))
+            .map((row) => row.id);
 
         // Count total matching rows
         const [{ count: totalCount }] = await db.select({ count: sql<number>`count(*)::int` }).from(domains).where(whereClause);
@@ -205,10 +312,65 @@ async function getDomains(filters: { q?: string; status?: string; tier?: string;
             .limit(PAGE_SIZE)
             .offset(offset);
 
-        return { data: allDomains, totalCount, page: safePage, totalPages, error: null };
+        const nameserverHintsByDomainId: Record<string, { configured: boolean; pending: boolean }> = {};
+        if (allDomains.length > 0) {
+            const profileRows = await db.select({
+                domainId: domainRegistrarProfiles.domainId,
+                metadata: domainRegistrarProfiles.metadata,
+            })
+                .from(domainRegistrarProfiles)
+                .where(inArray(domainRegistrarProfiles.domainId, allDomains.map((domain) => domain.id)));
+
+            for (const row of profileRows) {
+                if (!row.domainId) continue;
+                nameserverHintsByDomainId[row.domainId] = extractNameserverHint(row.metadata);
+            }
+
+            const liveDnsCandidates = allDomains.filter((domain) => {
+                const existing = nameserverHintsByDomainId[domain.id];
+                return !existing?.configured;
+            });
+
+            if (liveDnsCandidates.length > 0) {
+                const liveDnsResults = await Promise.all(
+                    liveDnsCandidates.map(async (domain) => ({
+                        id: domain.id,
+                        match: await resolveCloudflareNsMatch(domain.domain),
+                    })),
+                );
+
+                for (const result of liveDnsResults) {
+                    if (!result.match) continue;
+                    nameserverHintsByDomainId[result.id] = {
+                        configured: true,
+                        pending: false,
+                    };
+                }
+            }
+        }
+
+        return {
+            data: allDomains,
+            nameserverHintsByDomainId,
+            deployActionDomainIds,
+            dnsActionDomainIds,
+            totalCount,
+            page: safePage,
+            totalPages,
+            error: null,
+        };
     } catch (error) {
         console.error('Failed to fetch domains:', error);
-        return { data: [], totalCount: 0, page: 1, totalPages: 1, error: 'Failed to load domains. Please try again later.' };
+        return {
+            data: [],
+            nameserverHintsByDomainId: {},
+            deployActionDomainIds: [],
+            dnsActionDomainIds: [],
+            totalCount: 0,
+            page: 1,
+            totalPages: 1,
+            error: 'Failed to load domains. Please try again later.',
+        };
     }
 }
 
@@ -239,7 +401,16 @@ async function getCampaignLaunchReviewSummaryPreview() {
 export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
     const { searchParams } = props;
     const params = await searchParams;
-    const { data: allDomains, totalCount: filteredCount, page, totalPages, error } = await getDomains(params);
+    const {
+        data: allDomains,
+        nameserverHintsByDomainId,
+        deployActionDomainIds,
+        dnsActionDomainIds,
+        totalCount: filteredCount,
+        page,
+        totalPages,
+        error,
+    } = await getDomains(params);
     const sortCol = isSortColumn(params.sort) ? params.sort : 'tier';
     const sortDir: SortDir = params.dir === 'desc' ? 'desc' : 'asc';
 
@@ -250,6 +421,7 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
         if (params.status) p.set('status', params.status);
         if (params.tier) p.set('tier', params.tier);
         if (params.account) p.set('account', params.account);
+        if (params.deploy) p.set('deploy', params.deploy);
         p.set('sort', col);
         p.set('dir', newDir);
         return `/dashboard/domains?${p.toString()}`;
@@ -261,6 +433,7 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
         if (params.status) p.set('status', params.status);
         if (params.tier) p.set('tier', params.tier);
         if (params.account) p.set('account', params.account);
+        if (params.deploy) p.set('deploy', params.deploy);
         if (params.sort) p.set('sort', params.sort);
         if (params.dir) p.set('dir', params.dir);
         p.set('page', String(pg));
@@ -342,12 +515,7 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                 </div>
                 <div className="flex gap-2">
                     <ClassifyDomainsButton mode="all" />
-                    <DeployAllButton domainIds={allDomains.filter(d => !d.isDeployed).map(d => d.id)} />
-                    <BulkNameserverCutoverButton
-                        domainIds={allDomains
-                            .filter((d) => ['godaddy', 'namecheap'].includes((d.registrar || '').toLowerCase()))
-                            .map((d) => d.id)}
-                    />
+                    <DeployAllButton domainIds={deployActionDomainIds} />
                     <Link href="/dashboard/domains/import">
                         <Button variant="outline">
                             Import CSV
@@ -361,6 +529,24 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                     </Link>
                 </div>
             </div>
+            <p className="text-xs text-muted-foreground">
+                Current filter scope: {deployActionDomainIds.length} deploy candidates, {dnsActionDomainIds.length} registrar DNS automation candidates.
+            </p>
+
+            <Card className="border-sky-200 bg-sky-50/40">
+                <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+                    <div className="space-y-1">
+                        <p className="text-sm font-semibold text-sky-900">DNS Onboarding</p>
+                        <p className="text-xs text-sky-900/80">
+                            Single click flow for GoDaddy and Namecheap: preflight, create missing Cloudflare zones, switch nameservers, then refresh status.
+                        </p>
+                        <p className="text-xs text-sky-900/70">
+                            Scope: {dnsActionDomainIds.length} eligible domains in the current filter (all pages, not just visible rows).
+                        </p>
+                    </div>
+                    <BulkNameserverCutoverButton domainIds={dnsActionDomainIds} />
+                </CardContent>
+            </Card>
 
             {/* Status Summary Cards */}
             <div className="grid gap-4 md:grid-cols-5">
@@ -417,6 +603,7 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                                 if (params.q) p.set('q', params.q);
                                 if (params.status) p.set('status', params.status);
                                 if (params.tier) p.set('tier', params.tier);
+                                if (params.deploy) p.set('deploy', params.deploy);
                                 return `/dashboard/domains?${p.toString()}`;
                             })()}
                             className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
@@ -433,6 +620,7 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                             if (params.q) p.set('q', params.q);
                             if (params.status) p.set('status', params.status);
                             if (params.tier) p.set('tier', params.tier);
+                            if (params.deploy) p.set('deploy', params.deploy);
                             p.set('account', account);
                             return (
                                 <Link
@@ -660,16 +848,18 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                             renewalDate: formatDate(d.renewalDate),
                             cloudflareAccount: d.cloudflareAccount,
                             cloudflareProject: d.cloudflareProject,
+                            nameserverConfigured: nameserverHintsByDomainId[d.id]?.configured ?? false,
+                            nameserverPending: nameserverHintsByDomainId[d.id]?.pending ?? false,
                         }))}
                         queueHints={queueSpotlight.hintsByDomain}
-                        hasFilters={!!(params.q || params.status || params.tier || params.account)}
+                        hasFilters={!!(params.q || params.status || params.tier || params.account || params.deploy)}
                         headerSlot={
                             <>
                                 <TableHead><Link href={sortHref('domain')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Domain<SortIndicator col="domain" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
                                 <TableHead>
                                     <Tooltip>
                                         <TooltipTrigger asChild>
-                                            <Link href={sortHref('status')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Status<SortIndicator col="status" activeCol={sortCol} activeDir={sortDir} /></Link>
+                                            <Link href={sortHref('status')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Ops Status<SortIndicator col="status" activeCol={sortCol} activeDir={sortDir} /></Link>
                                         </TooltipTrigger>
                                         <TooltipContent>Operational status: parked (inactive), active (building content), redirect, for-sale, or defensive (brand protection).</TooltipContent>
                                     </Tooltip>
@@ -694,7 +884,7 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                                 <TableHead>
                                     <Tooltip>
                                         <TooltipTrigger asChild>
-                                            <Link href={sortHref('isDeployed')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Deployed<SortIndicator col="isDeployed" activeCol={sortCol} activeDir={sortDir} /></Link>
+                                            <Link href={sortHref('isDeployed')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Deploy State<SortIndicator col="isDeployed" activeCol={sortCol} activeDir={sortDir} /></Link>
                                         </TooltipTrigger>
                                         <TooltipContent>Whether a static site has been built and uploaded to Cloudflare Pages. &quot;Deployed&quot; means the site is live if nameservers are pointed.</TooltipContent>
                                     </Tooltip>

@@ -439,6 +439,8 @@ export default async function QueuePage({
     searchParams?: Promise<QueueSearchParams>;
 }) {
     const inlineWorkerEnabled = process.env.NEXT_PUBLIC_INLINE_WORKER === '1';
+    const serverWorkerAutostartEnabled = process.env.DISABLE_SERVER_QUEUE_WORKER !== '1';
+    const workerAutostartEnabled = inlineWorkerEnabled || serverWorkerAutostartEnabled;
     const params = (await searchParams) ?? {};
     const operationsSettings = await getOperationsSettings();
     const staleThresholdMinutes = operationsSettings.queueStaleThresholdMinutes;
@@ -521,7 +523,7 @@ export default async function QueuePage({
 
     const whereClause = whereFilters.length > 0 ? and(...whereFilters) : sql`true`;
 
-    const [health, backend, recentJobs, totalMatchingRows, jobTypeOptionsRows, domainOptionRows, activityRows, failedDomainAggregateRows, staleProcessingRows] = await Promise.all([
+    const [health, backend, recentJobs, totalMatchingRows, jobTypeOptionsRows, domainOptionRows, activityRows, failedDomainAggregateRows, domainJobTypeAggregateRows, staleProcessingRows] = await Promise.all([
         getQueueHealth(),
         getContentQueueBackendHealth(),
         db.select()
@@ -571,6 +573,22 @@ export default async function QueuePage({
             .orderBy(sql`count(*) desc`)
             .limit(12),
         db.select({
+            domainId: sql<string | null>`coalesce(${contentQueue.domainId}, ${articles.domainId})`,
+            domain: domains.domain,
+            jobType: contentQueue.jobType,
+            pendingCount: sql<number>`count(*) filter (where ${contentQueue.status} = 'pending')::int`,
+            processingCount: sql<number>`count(*) filter (where ${contentQueue.status} = 'processing')::int`,
+            failedCount: sql<number>`count(*) filter (where ${contentQueue.status} = 'failed')::int`,
+            totalCount: sql<number>`count(*)::int`,
+        })
+            .from(contentQueue)
+            .leftJoin(articles, eq(contentQueue.articleId, articles.id))
+            .leftJoin(domains, sql`coalesce(${contentQueue.domainId}, ${articles.domainId}) = ${domains.id}`)
+            .where(whereClause)
+            .groupBy(sql`coalesce(${contentQueue.domainId}, ${articles.domainId})`, domains.domain, contentQueue.jobType)
+            .orderBy(sql`count(*) desc`, domains.domain, contentQueue.jobType)
+            .limit(16),
+        db.select({
             count: sql<number>`count(*)::int`,
         })
             .from(contentQueue)
@@ -601,6 +619,17 @@ export default async function QueuePage({
             domainId: row.domainId,
             domain: failedDomainMap.get(row.domainId) ?? row.domainId,
             failedCount: row.failedCount,
+        }));
+    const domainJobTypeGroups = domainJobTypeAggregateRows
+        .filter((row) => typeof row.jobType === 'string' && row.jobType.length > 0)
+        .map((row) => ({
+            domainId: row.domainId,
+            domain: row.domain ?? (row.domainId ? row.domainId : 'Unresolved domain'),
+            jobType: String(row.jobType),
+            pendingCount: row.pendingCount,
+            processingCount: row.processingCount,
+            failedCount: row.failedCount,
+            totalCount: row.totalCount,
         }));
     const staleProcessingCount = staleProcessingRows[0]?.count ?? 0;
 
@@ -936,15 +965,15 @@ export default async function QueuePage({
                 {queueLikelyStalled && (
                     <p className="mt-3 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
                         Queue appears stalled: pending jobs exist, nothing is processing, and throughput is zero.
-                        {inlineWorkerEnabled
+                        {workerAutostartEnabled
                             ? (
                                 <>
-                                    Confirm the dev process is running with inline worker (<code className="mx-1">npm run dev</code>) or use
+                                    Confirm the app process is running and keep this queue page open while it catches up, or use
                                 </>
                             )
                             : (
                                 <>
-                                    Run a persistent worker with <code className="mx-1">npm run worker</code> or use
+                                    Start a dedicated worker with <code className="mx-1">npm run worker</code> or use
                                 </>
                             )}
                         &quot;Process Now&quot; button for manual batches.
@@ -970,9 +999,9 @@ export default async function QueuePage({
 
             <div className={`rounded-lg border p-4 ${workerNeedsPersistentProcess ? 'border-amber-300 bg-amber-50/70' : 'bg-card'}`}>
                 <h2 className="text-lg font-semibold mb-2">Worker Run Guide</h2>
-                {inlineWorkerEnabled ? (
+                {workerAutostartEnabled ? (
                     <p className="text-sm text-emerald-800">
-                        Inline worker mode is enabled for this app process. Queue jobs should auto-process while the dashboard is running.
+                        Built-in worker autostart is enabled for this app process. Queue jobs should process automatically.
                     </p>
                 ) : workerNeedsPersistentProcess ? (
                     <p className="text-sm text-amber-900">
@@ -986,7 +1015,7 @@ export default async function QueuePage({
                 <div className="mt-3 grid gap-3 md:grid-cols-3 text-xs">
                     <div className="rounded border bg-background p-3">
                         <div className="text-muted-foreground">Terminal Command</div>
-                        <code className="mt-1 block">{inlineWorkerEnabled ? 'npm run dev (includes worker)' : 'npm run worker'}</code>
+                        <code className="mt-1 block">{workerAutostartEnabled ? 'Not required (auto-run enabled)' : 'npm run worker'}</code>
                         {inlineWorkerEnabled && (
                             <div className="mt-1 text-muted-foreground">
                                 Use <code>npm run dev:web</code> only when you intentionally want web-only mode.
@@ -1014,6 +1043,46 @@ export default async function QueuePage({
                                 {j.jobType}: {j.count}
                             </span>
                         ))}
+                    </div>
+                </div>
+            )}
+
+            {domainJobTypeGroups.length > 0 && (
+                <div className="bg-card rounded-lg border p-4">
+                    <div className="flex items-center justify-between gap-2">
+                        <h2 className="text-lg font-semibold">Domain x Job Type</h2>
+                        <span className="text-xs text-muted-foreground">Top {domainJobTypeGroups.length} groups in current filter</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mb-3">
+                        Drill down quickly into the exact domain + operation combo with active queue load.
+                    </p>
+                    <div className="space-y-2">
+                        {domainJobTypeGroups.map((row) => {
+                            const params = new URLSearchParams();
+                            if (row.domainId) {
+                                params.set('domainId', row.domainId);
+                            }
+                            params.append('jobTypes', row.jobType);
+                            const href = `/dashboard/queue?${params.toString()}`;
+                            return (
+                                <Link
+                                    key={`${row.domainId || 'unresolved'}:${row.jobType}`}
+                                    href={href}
+                                    className="flex flex-wrap items-center justify-between gap-2 rounded border px-3 py-2 hover:bg-muted/40"
+                                >
+                                    <div className="min-w-0">
+                                        <p className="truncate text-sm font-medium">{row.domain}</p>
+                                        <p className="text-xs text-muted-foreground font-mono">{row.jobType}</p>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-1 text-xs">
+                                        <span className="rounded-full border px-2 py-0.5">Total {row.totalCount}</span>
+                                        {row.pendingCount > 0 && <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-yellow-900">P {row.pendingCount}</span>}
+                                        {row.processingCount > 0 && <span className="rounded-full bg-blue-100 px-2 py-0.5 text-blue-900">R {row.processingCount}</span>}
+                                        {row.failedCount > 0 && <span className="rounded-full bg-red-100 px-2 py-0.5 text-red-900">F {row.failedCount}</span>}
+                                    </div>
+                                </Link>
+                            );
+                        })}
                     </div>
                 </div>
             )}

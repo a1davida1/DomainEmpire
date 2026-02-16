@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
@@ -141,6 +142,32 @@ export default function QueuePage() {
                     </Tooltip>
                 </div>
             </div>
+
+            <Card className="border-sky-200 bg-sky-50/40">
+                <CardHeader>
+                    <CardTitle>View Created Content</CardTitle>
+                    <CardDescription>
+                        Fast links to actually view/edit generated articles, calculators, and interactive pages.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="flex flex-wrap gap-2">
+                    <Link href="/dashboard/content/articles">
+                        <Button variant="outline">Open Content Library</Button>
+                    </Link>
+                    <Link href="/dashboard/content/articles?contentType=calculator">
+                        <Button variant="outline">View Calculators</Button>
+                    </Link>
+                    <Link href="/dashboard/content/articles?contentType=interactive">
+                        <Button variant="outline">View Interactive Content</Button>
+                    </Link>
+                    <Link href="/dashboard/content/articles?status=review">
+                        <Button variant="outline">Review Queue</Button>
+                    </Link>
+                    <Link href="/dashboard/domains">
+                        <Button variant="ghost">Go to Domains</Button>
+                    </Link>
+                </CardContent>
+            </Card>
 
             {lastResult && (
                 <div

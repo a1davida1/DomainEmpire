@@ -130,7 +130,7 @@ export function DeployAllButton({ domainIds }: Readonly<{ domainIds: string[] }>
             `• Blocked: ${preflightBlocked}\n` +
             `• Warnings: ${warningCount}\n\n` +
             `Queue deploy jobs for ${preflightQueueable} domain${preflightQueueable !== 1 ? 's' : ''} now?\n\n` +
-            `Make sure the worker is running: npm run worker`
+            `Queue processing will continue automatically when the server worker is enabled.`
         );
 
         if (!proceed) {
@@ -162,8 +162,7 @@ export function DeployAllButton({ domainIds }: Readonly<{ domainIds: string[] }>
                 `✅ ${totalQueued} deployment jobs queued.` +
                 `${totalBlocked > 0 ? `\n⚠️ ${totalBlocked} blocked by preflight.` : ''}` +
                 `${queuedWarningCount > 0 ? `\n⚠️ ${queuedWarningCount} domains queued with warnings.` : ''}` +
-                `${blockedPreview ? `\n\nBlocked domains:\n${blockedPreview}${blockedDomainNames.length > 5 ? '\n...' : ''}` : ''}` +
-                `\n\nMake sure the worker is running:\nnpm run worker`
+                `${blockedPreview ? `\n\nBlocked domains:\n${blockedPreview}${blockedDomainNames.length > 5 ? '\n...' : ''}` : ''}`
             );
             router.refresh();
         } catch (error) {

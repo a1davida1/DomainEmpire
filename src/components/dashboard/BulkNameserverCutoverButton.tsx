@@ -10,6 +10,7 @@ const BATCH_SIZE = 50;
 
 type BulkNameserverCutoverButtonProps = {
     domainIds: string[];
+    compact?: boolean;
 };
 
 type NameserverFailure = {
@@ -48,7 +49,7 @@ type PreflightAggregate = {
     perDomainNameservers: Record<string, string[]>;
 };
 
-export function BulkNameserverCutoverButton({ domainIds }: Readonly<BulkNameserverCutoverButtonProps>) {
+export function BulkNameserverCutoverButton({ domainIds, compact = false }: Readonly<BulkNameserverCutoverButtonProps>) {
     const [preflighting, setPreflighting] = useState(false);
     const [creatingZones, setCreatingZones] = useState(false);
     const [applyingCutover, setApplyingCutover] = useState(false);
@@ -457,10 +458,15 @@ export function BulkNameserverCutoverButton({ domainIds }: Readonly<BulkNameserv
                 ) : (
                     <>
                         <Waypoints className="mr-2 h-4 w-4" />
-                        Auto NS to CF ({domainIds.length})
+                        {compact ? `DNS Cutover (${domainIds.length})` : `Fix DNS in Cloudflare (${domainIds.length})`}
                     </>
                 )}
             </Button>
+            {!compact && (
+                <p className="max-w-[34rem] text-xs text-muted-foreground">
+                    One click flow: preflight, auto-create missing Cloudflare zones, then switch registrar nameservers.
+                </p>
+            )}
 
             {(error || preflight || zoneCreateSummary || cutoverSummary || progress) && (
                 <div className="max-w-[34rem] rounded-md border bg-background p-3 text-xs space-y-2">

@@ -8,6 +8,7 @@ import { PageTitle } from '@/components/dashboard/PageTitle';
 import { PageTransition } from '@/components/dashboard/PageTransition';
 import { QueueBackgroundProcessor } from '@/components/dashboard/QueueBackgroundProcessor';
 import { verifyAuth } from '@/lib/auth';
+import { ensureServerWorkerStarted } from '@/lib/ai/worker-bootstrap';
 import { redirect } from 'next/navigation';
 
 export default async function DashboardLayout({
@@ -21,6 +22,8 @@ export default async function DashboardLayout({
     if (!isAuthenticated) {
         redirect('/login');
     }
+
+    await ensureServerWorkerStarted();
 
     return (
         <div className="flex h-screen bg-background flex-col md:flex-row">

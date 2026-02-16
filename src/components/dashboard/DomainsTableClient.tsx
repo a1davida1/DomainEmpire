@@ -27,6 +27,8 @@ interface SerializedDomain {
     renewalDate: string | null;
     cloudflareAccount: string | null;
     cloudflareProject: string | null;
+    nameserverConfigured?: boolean | null;
+    nameserverPending?: boolean | null;
 }
 
 type DomainQueueHint = {
@@ -103,6 +105,25 @@ const tierConfig: Record<number, { label: string; color: string }> = {
     3: { label: 'Incubate', color: 'border-gray-400 text-gray-600' },
     4: { label: 'Brand/Hold', color: 'border-purple-400 text-purple-600' },
 };
+
+function resolveDeploymentState(domain: SerializedDomain): { label: string; className: string } {
+    if (domain.isDeployed) {
+        return { label: 'Live', className: 'bg-emerald-100 text-emerald-800' };
+    }
+    if (domain.nameserverConfigured && !domain.nameserverPending) {
+        return { label: 'DNS Ready', className: 'bg-emerald-50 text-emerald-700 border border-emerald-200' };
+    }
+    if (domain.nameserverPending) {
+        return { label: 'DNS Pending', className: 'bg-amber-100 text-amber-900' };
+    }
+    if (domain.cloudflareProject) {
+        return { label: 'Project Ready', className: 'bg-yellow-100 text-yellow-800' };
+    }
+    if (domain.cloudflareAccount) {
+        return { label: 'Not Deployed', className: 'bg-slate-100 text-slate-700 border border-slate-200' };
+    }
+    return { label: 'Unassigned', className: 'bg-slate-100 text-slate-500 border border-slate-200' };
+}
 
 interface Props {
     domains: SerializedDomain[];
@@ -298,7 +319,7 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints
                             <Button size="sm" variant="outline" onClick={() => setConfirmAction({ endpoint: '/api/domains/bulk-deploy', label: 'Deploy' })} disabled={acting}>Deploy</Button>
                             <Button size="sm" variant="outline" onClick={() => bulkAction('/api/domains/classify', 'Classify queued')} disabled={acting}>Classify</Button>
                             <Button size="sm" variant="outline" onClick={() => setConfirmAction({ endpoint: '/api/domains/bulk-seed', label: 'Seed' })} disabled={acting}>Seed Content</Button>
-                            <BulkNameserverCutoverButton domainIds={selectedAutomatedDnsIds} />
+                            <BulkNameserverCutoverButton domainIds={selectedAutomatedDnsIds} compact />
                         </>
                     )}
                     <Button size="sm" variant="ghost" onClick={copySelectedNames} disabled={acting} title="Copy selected domain names">
@@ -329,6 +350,7 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints
                     const sCfg = statusConfig[domain.status] || { color: 'bg-gray-500', label: domain.status };
                     const t = domain.tier || 3;
                     const tCfg = tierConfig[t] || tierConfig[3];
+                    const deployState = resolveDeploymentState(domain);
                     const queueHint = queueHints[domain.id];
                     return (
                         <div
@@ -350,13 +372,20 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints
                                     <Link href={`/dashboard/domains/${domain.id}`} className="font-medium hover:underline text-sm">{domain.domain}</Link>
                                     <CopyButton text={domain.domain} />
                                 </div>
-                                <DomainActions domainId={domain.id} domainName={domain.domain} isDeployed={domain.isDeployed ?? false} />
+                                <DomainActions
+                                    domainId={domain.id}
+                                    domainName={domain.domain}
+                                    isDeployed={domain.isDeployed ?? false}
+                                    registrar={domain.registrar}
+                                    nameserverConfigured={domain.nameserverConfigured}
+                                    nameserverPending={domain.nameserverPending}
+                                />
                             </div>
                             <div className="flex flex-wrap gap-1.5">
                                 <Badge variant="secondary" className={cn(sCfg.color, 'text-white text-[10px]')}>{sCfg.label}</Badge>
                                 <Badge variant="outline" className={cn(tCfg.color, 'text-[10px]')}>T{t}</Badge>
                                 {domain.niche && <Badge variant="outline" className="text-[10px]">{domain.niche}</Badge>}
-                                {domain.isDeployed && <Badge variant="secondary" className="bg-green-100 text-green-800 text-[10px]">Live</Badge>}
+                                <Badge variant="secondary" className={cn('text-[10px]', deployState.className)}>{deployState.label}</Badge>
                             </div>
                             {queueHint && queueHint.total > 0 && (
                                 <div className="flex flex-wrap gap-1">
@@ -420,6 +449,7 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints
                         const sCfg = statusConfig[domain.status] || { color: 'bg-gray-500', label: domain.status };
                         const t = domain.tier || 3;
                         const tCfg = tierConfig[t] || tierConfig[3];
+                        const deployState = resolveDeploymentState(domain);
                         const queueHint = queueHints[domain.id];
                         return (
                             <div key={domain.id} className={cn('rounded-lg border p-3 space-y-2 hover:border-primary/40 transition-colors', selected.has(domain.id) && 'bg-muted/40 border-primary/30')}>
@@ -428,13 +458,20 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints
                                         <input type="checkbox" checked={selected.has(domain.id)} onChange={() => toggle(domain.id)} className="h-4 w-4 shrink-0 accent-primary" aria-label={`Select ${domain.domain}`} />
                                         <Link href={`/dashboard/domains/${domain.id}`} className="font-medium text-sm hover:underline truncate">{domain.domain}</Link>
                                     </div>
-                                    <DomainActions domainId={domain.id} domainName={domain.domain} isDeployed={domain.isDeployed ?? false} />
+                                    <DomainActions
+                                        domainId={domain.id}
+                                        domainName={domain.domain}
+                                        isDeployed={domain.isDeployed ?? false}
+                                        registrar={domain.registrar}
+                                        nameserverConfigured={domain.nameserverConfigured}
+                                        nameserverPending={domain.nameserverPending}
+                                    />
                                 </div>
                                 <div className="flex flex-wrap gap-1">
                                     <Badge variant="secondary" className={cn(sCfg.color, 'text-white text-[10px]')}>{sCfg.label}</Badge>
                                     <Badge variant="outline" className={cn(tCfg.color, 'text-[10px]')}>T{t}</Badge>
                                     {domain.niche && <Badge variant="outline" className="text-[10px]">{domain.niche}</Badge>}
-                                    {domain.isDeployed && <Badge variant="secondary" className="bg-green-100 text-green-800 text-[10px]">Live</Badge>}
+                                    <Badge variant="secondary" className={cn('text-[10px]', deployState.className)}>{deployState.label}</Badge>
                                 </div>
                                 {queueHint && queueHint.total > 0 && (
                                     <div className="flex flex-wrap gap-1">
@@ -526,6 +563,7 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints
                             const sCfg = statusConfig[domain.status] || { color: 'bg-gray-500', label: domain.status };
                             const t = domain.tier || 3;
                             const tCfg = tierConfig[t] || tierConfig[3];
+                            const deployState = resolveDeploymentState(domain);
                             const queueHint = queueHints[domain.id];
                             return (
                                 <TableRow
@@ -581,18 +619,20 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints
                                                     </a>
                                                 )}
                                             </div>
-                                            {domain.cloudflareAccount && (
+                                            {(domain.cloudflareAccount || domain.nameserverConfigured || domain.nameserverPending || domain.cloudflareProject) && (
                                                 <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
                                                     <span className={`inline-block h-1.5 w-1.5 rounded-full ${
-                                                        domain.isDeployed ? 'bg-emerald-500' :
-                                                        domain.cloudflareProject ? 'bg-yellow-500' :
-                                                        'bg-gray-300'
+                                                        domain.isDeployed || (domain.nameserverConfigured && !domain.nameserverPending) ? 'bg-emerald-500'
+                                                            : domain.cloudflareProject || domain.nameserverPending ? 'bg-yellow-500'
+                                                                : 'bg-gray-300'
                                                     }`} title={
-                                                        domain.isDeployed ? 'NS active — deployed' :
-                                                        domain.cloudflareProject ? 'CF project created — NS not pointed' :
-                                                        'Assigned — not set up'
+                                                        domain.isDeployed ? 'NS active — deployed'
+                                                            : domain.nameserverConfigured && !domain.nameserverPending ? 'Cloudflare nameserver switch recorded'
+                                                                : domain.nameserverPending ? 'Nameserver switch pending verification'
+                                                                    : domain.cloudflareProject ? 'CF project created — NS not pointed'
+                                                                        : 'Assigned — not set up'
                                                     } />
-                                                    {domain.cloudflareAccount}
+                                                    {domain.cloudflareAccount || 'cloudflare-detected'}
                                                 </span>
                                             )}
                                         </div>
@@ -673,17 +713,22 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints
                                         )}
                                     </TableCell>
                                     <TableCell>
-                                        {domain.isDeployed ? (
-                                            <Badge variant="secondary" className="bg-green-100 text-green-800">Live</Badge>
-                                        ) : (
-                                            <span className="text-muted-foreground">—</span>
-                                        )}
+                                        <Badge variant="secondary" className={cn('text-[11px]', deployState.className)}>
+                                            {deployState.label}
+                                        </Badge>
                                     </TableCell>
                                     <TableCell>
                                         <span className={cn('text-sm', renewalUrgency(domain.renewalDate))} title={formatExactDate(domain.renewalDate) || undefined}>{relativeDate(domain.renewalDate)}</span>
                                     </TableCell>
                                     <TableCell>
-                                        <DomainActions domainId={domain.id} domainName={domain.domain} isDeployed={domain.isDeployed ?? false} />
+                                        <DomainActions
+                                            domainId={domain.id}
+                                            domainName={domain.domain}
+                                            isDeployed={domain.isDeployed ?? false}
+                                            registrar={domain.registrar}
+                                            nameserverConfigured={domain.nameserverConfigured}
+                                            nameserverPending={domain.nameserverPending}
+                                        />
                                     </TableCell>
                                 </TableRow>
                             );
