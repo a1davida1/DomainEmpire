@@ -55,6 +55,23 @@ describe('integration connection sync route', () => {
         expect(body.error).toContain('Connection not found');
     });
 
+    it('returns 409 when a sync is already running for connection', async () => {
+        mockRunIntegrationConnectionSync.mockResolvedValue({
+            error: 'already_running',
+            runId: 'run-abc-123',
+        });
+
+        const response = await POST(
+            makeJsonRequest('http://localhost/api/integrations/connections/00000000-0000-4000-8000-000000000003/sync', {}),
+            { params: Promise.resolve({ id: '00000000-0000-4000-8000-000000000003' }) },
+        );
+
+        expect(response.status).toBe(409);
+        const body = await response.json();
+        expect(body.code).toBe('sync_already_running');
+        expect(body.runId).toBe('run-abc-123');
+    });
+
     it('returns run payload on success', async () => {
         mockRunIntegrationConnectionSync.mockResolvedValue({
             run: {

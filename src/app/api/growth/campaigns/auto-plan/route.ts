@@ -93,7 +93,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-    const authError = await requireRole(request, 'expert');
+    const authError = await requireRole(request, 'reviewer');
     if (authError) return authError;
 
     const user = getRequestUser(request);
@@ -128,6 +128,17 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(
             { error: 'Validation failed', details: parsed.error.issues },
             { status: 400, headers: rate.headers },
+        );
+    }
+
+    const isExpertLike = user.role === 'expert' || user.role === 'admin';
+    if (!parsed.data.dryRun && !isExpertLike) {
+        return NextResponse.json(
+            {
+                error: 'Forbidden',
+                message: 'Applying ROI auto-plan requires expert or admin role. Reviewer can run dry-run previews.',
+            },
+            { status: 403, headers: rate.headers },
         );
     }
 

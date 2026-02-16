@@ -10,6 +10,10 @@
 const CF_GRAPHQL = 'https://api.cloudflare.com/client/v4/graphql';
 const MAX_RETRIES = 3;
 const BASE_RETRY_DELAY_MS = 1_000;
+const MIN_RATE_LIMIT_COOLDOWN_MS = 2_000;
+
+let rateLimitCooldownUntilMs = 0;
+let rateLimitCooldownReason: string | null = null;
 
 export interface AnalyticsData {
     views: number;
@@ -80,9 +84,47 @@ function parseRetryAfterMs(header: string | null): number | null {
     return null;
 }
 
+function getRateLimitCooldownRemainingMs(nowMs = Date.now()): number {
+    if (rateLimitCooldownUntilMs <= nowMs) {
+        rateLimitCooldownUntilMs = 0;
+        rateLimitCooldownReason = null;
+        return 0;
+    }
+    return rateLimitCooldownUntilMs - nowMs;
+}
+
+function setRateLimitCooldown(waitMs: number, reason: string): void {
+    const boundedWaitMs = Math.max(MIN_RATE_LIMIT_COOLDOWN_MS, waitMs);
+    const candidateUntil = Date.now() + boundedWaitMs;
+    if (candidateUntil > rateLimitCooldownUntilMs) {
+        rateLimitCooldownUntilMs = candidateUntil;
+        rateLimitCooldownReason = reason;
+    }
+}
+
+export function getCloudflareApiRateLimitCooldown(): {
+    active: boolean;
+    remainingMs: number;
+    reason: string | null;
+} {
+    const remainingMs = getRateLimitCooldownRemainingMs();
+    return {
+        active: remainingMs > 0,
+        remainingMs,
+        reason: rateLimitCooldownReason,
+    };
+}
+
 async function cfGraphQL(query: string, variables: Record<string, unknown>): Promise<CFGraphQLResponse> {
     const config = getConfig();
     if (!config) throw new Error('Cloudflare credentials not configured');
+
+    const cooldownMs = getRateLimitCooldownRemainingMs();
+    if (cooldownMs > 0) {
+        const seconds = Math.ceil(cooldownMs / 1000);
+        const suffix = rateLimitCooldownReason ? ` (${rateLimitCooldownReason})` : '';
+        throw new CloudflareApiError(429, `Cloudflare API cooldown active for ${seconds}s${suffix}`);
+    }
 
     let lastError: Error | null = null;
 
@@ -114,7 +156,11 @@ async function cfGraphQL(query: string, variables: Record<string, unknown>): Pro
         const retryAfterMs = parseRetryAfterMs(response.headers.get('Retry-After'));
         const jitterMs = Math.floor(Math.random() * 250);
         const fallbackBackoff = BASE_RETRY_DELAY_MS * 2 ** (attempt - 1);
-        await sleep((retryAfterMs ?? fallbackBackoff) + jitterMs);
+        const waitMs = (retryAfterMs ?? fallbackBackoff) + jitterMs;
+        if (response.status === 429) {
+            setRateLimitCooldown(waitMs, `status_${response.status}`);
+        }
+        await sleep(waitMs);
     }
 
     throw lastError ?? new Error('Unknown Cloudflare API error');

@@ -528,6 +528,8 @@ export const contentQueue = pgTable('content_queue', {
             'run_media_review_escalations',
             // Integration marketplace sync automation
             'run_integration_connection_sync',
+            // Launch freeze recovery
+            'campaign_launch_recovery',
         ]
     }).notNull(),
 
@@ -1152,7 +1154,7 @@ export const apiCallLogs = pgTable('api_call_logs', {
     domainId: uuid('domain_id').references(() => domains.id, { onDelete: 'set null' }),
 
     stage: text('stage', {
-        enum: ['keyword_research', 'outline', 'draft', 'humanize', 'seo', 'meta', 'classify', 'research', 'evaluate', 'aiReview']
+        enum: ['keyword_research', 'outline', 'draft', 'humanize', 'seo', 'meta', 'classify', 'research', 'evaluate', 'ai_review']
     }).notNull(),
     modelKey: text('model_key').notNull().default('legacy'),
     model: text('model').notNull(),

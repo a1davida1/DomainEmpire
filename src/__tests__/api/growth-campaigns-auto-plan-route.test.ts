@@ -131,4 +131,21 @@ describe('growth campaign auto-plan route', () => {
             requirePreviewApproval: true,
         }));
     });
+
+    it('blocks non-expert apply while allowing dry-run previews', async () => {
+        mockGetRequestUser.mockReturnValue({ id: 'user-1', role: 'reviewer' });
+
+        const response = await POST(makePostRequest({
+            dryRun: false,
+            limit: 15,
+            windowDays: 30,
+            actions: ['scale', 'optimize', 'recover', 'incubate'],
+            reason: 'ROI queue auto-plan from domains dashboard',
+        }));
+
+        expect(response.status).toBe(403);
+        const body = await response.json();
+        expect(body.message).toContain('expert or admin role');
+        expect(mockApplyAutoplan).not.toHaveBeenCalled();
+    });
 });

@@ -232,6 +232,13 @@
       "when": 1771214400000,
       "tag": "0032_persistent_shard_health",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1771209964754,
+      "tag": "0033_fair_iceman",
+      "breakpoints": true
     }
   ]
 }

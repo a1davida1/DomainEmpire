@@ -10,7 +10,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 dotenv.config({ path: path.resolve(__dirname, '../.env.local') });
 
-import XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { db, domains } from '../src/lib/db';
 import { eq } from 'drizzle-orm';
 
@@ -154,12 +154,29 @@ async function main() {
     const dryRun = process.argv.includes('--dry-run');
 
     console.log(`Reading spreadsheet: ${SPREADSHEET_PATH}`);
-    const wb = XLSX.readFile(SPREADSHEET_PATH);
-    const ws = wb.Sheets['Domain Tool Map'];
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(SPREADSHEET_PATH);
+    const ws = wb.getWorksheet('Domain Tool Map');
     if (!ws) {
-        throw new Error(`Worksheet "Domain Tool Map" not found in ${SPREADSHEET_PATH}. Available sheets: ${Object.keys(wb.Sheets).join(', ')}`);
+        const sheetNames = wb.worksheets.map((s: { name: string }) => s.name).join(', ');
+        throw new Error(`Worksheet "Domain Tool Map" not found in ${SPREADSHEET_PATH}. Available sheets: ${sheetNames}`);
     }
-    const rows = XLSX.utils.sheet_to_json(ws) as Record<string, string>[];
+    // Convert worksheet to array of key-value row objects (header row = keys)
+    const headerRow = ws.getRow(1);
+    const headers: string[] = [];
+    headerRow.eachCell((cell: { value: unknown }, colNumber: number) => {
+        headers[colNumber] = String(cell.value ?? '').trim();
+    });
+    const rows: Record<string, string>[] = [];
+    ws.eachRow((row: { eachCell: (cb: (cell: { value: unknown }, col: number) => void) => void }, rowNumber: number) => {
+        if (rowNumber === 1) return; // skip header
+        const obj: Record<string, string> = {};
+        row.eachCell((cell: { value: unknown }, colNumber: number) => {
+            const key = headers[colNumber];
+            if (key) obj[key] = String(cell.value ?? '').trim();
+        });
+        rows.push(obj);
+    });
 
     console.log(`Found ${rows.length} domain rows in spreadsheet`);
 
@@ -195,7 +212,7 @@ async function main() {
             subNiche: row['Sub-Niche'] || null,
             vertical: deriveVertical(bucket),
             tier: deriveTier(priority),
-            status: deriveStatus(priority, revenue) as 'parked' | 'active' | 'redirect' | 'forsale',
+            status: deriveStatus(priority, revenue) as 'parked' | 'active' | 'redirect' | 'forsale' | 'defensive',
             lifecycleState: deriveLifecycleState(priority, revenue) as 'sourced' | 'build' | 'sell' | 'hold',
             bucket: deriveBucket(priority, revenue),
             siteTemplate: deriveSiteTemplate(row) as typeof domains.$inferInsert.siteTemplate,

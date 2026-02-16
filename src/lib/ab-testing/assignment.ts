@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import type { AbVariantMetrics } from './decision-gates';
 
 export type AbAssignmentVariant = AbVariantMetrics & {
@@ -27,17 +28,11 @@ function toFiniteNonNegative(value: unknown): number | null {
     return value;
 }
 
-function stableHash(input: string): number {
-    let hash = 0x811c9dc5;
-    for (let index = 0; index < input.length; index += 1) {
-        hash ^= input.charCodeAt(index);
-        hash = Math.imul(hash, 0x01000193);
-    }
-    return hash >>> 0;
-}
-
-function toBucketPct(hash: number): number {
-    const ratio = hash / 0xffffffff;
+function toBucketPct(input: string): number {
+    // 48-bit digest window keeps deterministic hashing while staying within safe integer precision.
+    const digest = createHash('sha256').update(input).digest();
+    const value = digest.readUIntBE(0, 6);
+    const ratio = value / 281_474_976_710_656;
     return clamp(ratio * 100, 0, 99.9999);
 }
 
@@ -167,8 +162,7 @@ export function assignVariantBySubject(input: {
         minHoldoutSharePct: holdoutSharePct,
     });
 
-    const bucketHash = stableHash(`${input.testId}:${input.subjectKey}`);
-    const assignmentBucketPct = toBucketPct(bucketHash);
+    const assignmentBucketPct = toBucketPct(`${input.testId}:${input.subjectKey}`);
 
     let cumulative = 0;
     let assignedVariantId = controlVariantId;
@@ -197,4 +191,3 @@ export function assignVariantBySubject(input: {
         reason: 'allocation_weight',
     };
 }
-

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -177,6 +178,7 @@ export default function DomainOwnershipOperationsConfig({ domainId }: Props) {
     const [syncingRegistrar, setSyncingRegistrar] = useState(false);
     const [switchingNameservers, setSwitchingNameservers] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [errorAction, setErrorAction] = useState<{ href: string; label: string } | null>(null);
     const [message, setMessage] = useState<string | null>(null);
 
     const canEdit = payload?.permissions?.canEdit ?? false;
@@ -190,6 +192,7 @@ export default function DomainOwnershipOperationsConfig({ domainId }: Props) {
     async function loadOwnership() {
         setLoading(true);
         setError(null);
+        setErrorAction(null);
         try {
             const response = await fetch(`/api/domains/${domainId}/ownership?limit=20`);
             if (!response.ok) {
@@ -220,6 +223,7 @@ export default function DomainOwnershipOperationsConfig({ domainId }: Props) {
         if (!canEdit) return;
         setSaving(true);
         setError(null);
+        setErrorAction(null);
         setMessage(null);
 
         const requestBody = {
@@ -258,6 +262,7 @@ export default function DomainOwnershipOperationsConfig({ domainId }: Props) {
     async function syncRenewalData() {
         setSyncing(true);
         setError(null);
+        setErrorAction(null);
         setMessage(null);
         try {
             const renewalResponse = await fetch(`/api/domains/${domainId}/renewals`, {
@@ -298,6 +303,7 @@ export default function DomainOwnershipOperationsConfig({ domainId }: Props) {
 
         setSwitchingNameservers(true);
         setError(null);
+        setErrorAction(null);
         setMessage(null);
 
         try {
@@ -356,6 +362,7 @@ export default function DomainOwnershipOperationsConfig({ domainId }: Props) {
         if (!canEdit) return;
         setSyncingRegistrar(true);
         setError(null);
+        setErrorAction(null);
         setMessage(null);
 
         try {
@@ -368,6 +375,32 @@ export default function DomainOwnershipOperationsConfig({ domainId }: Props) {
             });
             const body = await response.json().catch(() => ({}));
             if (!response.ok) {
+                const actionHref = typeof body?.action === 'string' && body.action.startsWith('/dashboard/')
+                    ? body.action
+                    : null;
+                if (actionHref) {
+                    setErrorAction({ href: actionHref, label: 'Open Integrations' });
+                }
+
+                if (response.status === 409 && body?.code === 'registrar_integration_missing') {
+                    const provider = typeof body?.provider === 'string'
+                        ? body.provider
+                        : (payload?.domain.registrar || 'registrar');
+                    throw new Error(
+                        `No connected ${provider} integration is available for this domain. ` +
+                        'Connect the registrar first, then retry sync.',
+                    );
+                }
+
+                if (response.status === 409 && body?.code === 'sync_already_running') {
+                    const runId = typeof body?.runId === 'string' ? body.runId : null;
+                    throw new Error(
+                        runId
+                            ? `Registrar sync already running (run ${runId.slice(0, 8)}).`
+                            : 'Registrar sync already running for this domain connection.',
+                    );
+                }
+
                 throw new Error(body.error || body.message || 'Failed to sync registrar state');
             }
 
@@ -381,6 +414,7 @@ export default function DomainOwnershipOperationsConfig({ domainId }: Props) {
             } else {
                 setMessage('Registrar state synced.');
             }
+            setErrorAction(null);
             await loadOwnership();
         } catch (syncError) {
             setError(syncError instanceof Error ? syncError.message : 'Failed to sync registrar state');
@@ -669,7 +703,12 @@ export default function DomainOwnershipOperationsConfig({ domainId }: Props) {
 
                 {error && (
                     <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-                        {error}
+                        <p>{error}</p>
+                        {errorAction && (
+                            <Link href={errorAction.href} className="mt-2 inline-block text-xs underline underline-offset-2">
+                                {errorAction.label}
+                            </Link>
+                        )}
                     </div>
                 )}
                 {message && (

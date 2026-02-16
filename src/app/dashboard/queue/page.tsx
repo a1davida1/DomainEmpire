@@ -154,7 +154,7 @@ async function recoverStaleLocksAction() {
     'use server';
 
     const settings = await getOperationsSettings();
-    const staleCutoff = new Date(Date.now() - settings.queueStaleThresholdMinutes * 60 * 1000);
+    const staleCutoff = new Date(Date.now() - settings.queueStaleThresholdMinutes * 60 * 1000).toISOString();
 
     const now = new Date();
     const recoveredRows = await db
@@ -205,7 +205,7 @@ async function cancelJobAction(formData: FormData) {
         .set({ status: 'cancelled' })
         .where(and(
             eq(contentQueue.id, jobId),
-            inArray(contentQueue.status, ['pending', 'failed']),
+            inArray(contentQueue.status, ['pending', 'processing', 'failed']),
         ));
     revalidatePath('/dashboard/queue');
 }
@@ -443,7 +443,7 @@ export default async function QueuePage({
     const staleThresholdMinutes = operationsSettings.queueStaleThresholdMinutes;
     const pendingSlaMinutes = operationsSettings.queuePendingSlaMinutes;
     const processingSlaMinutes = operationsSettings.queueProcessingSlaMinutes;
-    const staleCutoff = new Date(Date.now() - staleThresholdMinutes * 60 * 1000);
+    const staleCutoff = new Date(Date.now() - staleThresholdMinutes * 60 * 1000).toISOString();
 
     const presetParam = toStringValue(params.preset);
     const preset: QueuePreset = isQueuePreset(presetParam) ? presetParam : 'none';
@@ -1123,13 +1123,16 @@ export default async function QueuePage({
                                 const runtimeMs = job.startedAt && job.completedAt
                                     ? Math.max(job.completedAt.getTime() - job.startedAt.getTime(), 0)
                                     : null;
-                                const statusAgeMs = status === 'pending'
-                                    ? (job.createdAt ? Math.max(Date.now() - job.createdAt.getTime(), 0) : null)
-                                    : status === 'processing'
-                                        ? (job.startedAt || job.createdAt
-                                            ? Math.max(Date.now() - (job.startedAt ?? job.createdAt!).getTime(), 0)
-                                            : null)
-                                        : null;
+                                const statusAgeMs = (() => {
+                                    if (status === 'pending') {
+                                        return job.createdAt ? Math.max(Date.now() - job.createdAt.getTime(), 0) : null;
+                                    }
+                                    if (status === 'processing') {
+                                        const base = job.startedAt ?? job.createdAt;
+                                        return base ? Math.max(Date.now() - base.getTime(), 0) : null;
+                                    }
+                                    return null;
+                                })();
                                 const statusSlaMinutes = status === 'pending'
                                     ? pendingSlaMinutes
                                     : status === 'processing'

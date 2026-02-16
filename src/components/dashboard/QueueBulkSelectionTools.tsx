@@ -37,8 +37,9 @@ export function QueueBulkSelectionTools({
 
     const selectAllActionable = useCallback(() => {
         for (const input of getQueueCheckboxes(formId, checkboxName)) {
-            if (!input.disabled) {
+            if (!input.disabled && !input.checked) {
                 input.checked = true;
+                input.dispatchEvent(new Event('change', { bubbles: true }));
             }
         }
         refreshCounts();
@@ -46,8 +47,9 @@ export function QueueBulkSelectionTools({
 
     const clearSelection = useCallback(() => {
         for (const input of getQueueCheckboxes(formId, checkboxName)) {
-            if (!input.disabled) {
+            if (!input.disabled && input.checked) {
                 input.checked = false;
+                input.dispatchEvent(new Event('change', { bubbles: true }));
             }
         }
         refreshCounts();

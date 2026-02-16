@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { computeRegistrarExpirationRisk } from '@/lib/domain/registrar-operations';
+import {
+    computeRegistrarExpirationRisk,
+    computeRenewalRoiRecommendation,
+} from '@/lib/domain/registrar-operations';
 
 describe('computeRegistrarExpirationRisk', () => {
     it('returns unknown when renewal date is missing', () => {
@@ -50,5 +53,45 @@ describe('computeRegistrarExpirationRisk', () => {
         expect(result.risk).toBe('expired');
         expect(result.renewalWindow).toBe('expired');
         expect(result.riskScore).toBe(100);
+    });
+});
+
+describe('computeRenewalRoiRecommendation', () => {
+    it('returns renew when revenue coverage is strong', () => {
+        const result = computeRenewalRoiRecommendation({
+            renewalPrice: 20,
+            trailingRevenue90d: 80,
+            trailingCost90d: 10,
+            risk: 'low',
+            daysUntilRenewal: 40,
+        });
+
+        expect(result.band).toBe('renew');
+        expect(result.coverageRatio).toBeGreaterThanOrEqual(2);
+    });
+
+    it('returns review when risk is critical even with moderate coverage', () => {
+        const result = computeRenewalRoiRecommendation({
+            renewalPrice: 25,
+            trailingRevenue90d: 32,
+            trailingCost90d: 5,
+            risk: 'critical',
+            daysUntilRenewal: 3,
+        });
+
+        expect(result.band).toBe('review');
+    });
+
+    it('returns insufficient_data when renewal price is missing', () => {
+        const result = computeRenewalRoiRecommendation({
+            renewalPrice: null,
+            trailingRevenue90d: 50,
+            trailingCost90d: 10,
+            risk: 'unknown',
+            daysUntilRenewal: null,
+        });
+
+        expect(result.band).toBe('insufficient_data');
+        expect(result.coverageRatio).toBeNull();
     });
 });

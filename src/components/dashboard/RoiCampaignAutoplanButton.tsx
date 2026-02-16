@@ -184,7 +184,14 @@ export function RoiCampaignAutoplanButton({ limit, windowDays = 30 }: Readonly<R
             );
             router.refresh();
         } catch (error) {
-            alert(error instanceof Error ? error.message : 'Failed to create ROI campaign drafts');
+            const message = error instanceof Error ? error.message : 'Failed to create ROI campaign drafts';
+            if (message.toLowerCase().includes('requires expert or admin role')) {
+                alert(
+                    `${message}\n\nPreview was generated successfully; ask an expert/admin to run the apply step.`,
+                );
+            } else {
+                alert(message);
+            }
         } finally {
             setProgress('');
             setLoading(false);

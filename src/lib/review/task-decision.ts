@@ -32,6 +32,11 @@ export type ReviewTaskDecisionResult = {
     status: ReviewTaskDecisionStatus;
     bidPlanQueued: boolean;
     campaignLaunchQueued: boolean;
+    launchBlocked?: boolean;
+    launchBlockReason?: {
+        level: string;
+        reasonCodes: string[];
+    };
 };
 
 export const REQUIRED_DOMAIN_BUY_CHECKLIST_KEYS = [
@@ -324,15 +329,46 @@ export async function decideReviewTask(input: ReviewTaskDecisionInput): Promise<
             input.actor.id,
         );
     }
+    let launchBlocked = false;
+    let launchBlockReason: { level: string; reasonCodes: string[] } | undefined;
+
     if (campaignLaunchQueueCampaignId) {
         const launchFreeze = await evaluateGrowthLaunchFreeze();
         if (shouldBlockGrowthLaunchForScope({ state: launchFreeze })) {
-            console.warn('Campaign launch queue skipped due to active launch-freeze', {
+            launchBlocked = true;
+            launchBlockReason = {
+                level: launchFreeze.level,
+                reasonCodes: launchFreeze.reasonCodes,
+            };
+            console.warn('Campaign launch queue blocked due to active launch-freeze', {
                 campaignId: campaignLaunchQueueCampaignId,
                 reviewTaskId: resolvedTaskId || input.taskId,
                 freezeLevel: launchFreeze.level,
                 reasonCodes: launchFreeze.reasonCodes,
             });
+
+            // Enqueue a deferred recovery job so the campaign can be auto-queued when the freeze lifts
+            try {
+                await enqueueContentJob({
+                    jobType: 'campaign_launch_recovery',
+                    payload: {
+                        campaignId: campaignLaunchQueueCampaignId,
+                        reviewTaskId: resolvedTaskId || input.taskId,
+                        createdBy: input.actor.id,
+                        blockedAt: new Date().toISOString(),
+                        freezeLevel: launchFreeze.level,
+                        reasonCodes: launchFreeze.reasonCodes,
+                    },
+                    status: 'pending',
+                    priority: 2,
+                    scheduledFor: new Date(Date.now() + 30 * 60 * 1000), // retry in 30 min
+                });
+            } catch (recoveryErr) {
+                console.error('Failed to enqueue campaign_launch_recovery job', {
+                    campaignId: campaignLaunchQueueCampaignId,
+                    error: recoveryErr instanceof Error ? recoveryErr.message : String(recoveryErr),
+                });
+            }
         } else {
             campaignLaunchQueued = await queueCampaignLaunchIfMissing(
                 campaignLaunchQueueCampaignId,
@@ -347,5 +383,6 @@ export async function decideReviewTask(input: ReviewTaskDecisionInput): Promise<
         status: input.status,
         bidPlanQueued,
         campaignLaunchQueued,
+        ...(launchBlocked ? { launchBlocked, launchBlockReason } : {}),
     };
 }

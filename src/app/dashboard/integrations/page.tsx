@@ -63,6 +63,9 @@ type CloudflareShardHealthRow = {
     successCount: number;
     rateLimitCount: number;
     failureCount: number;
+    observedCount?: number;
+    instabilityRatio?: number;
+    saturationSeverity?: 'healthy' | 'warning' | 'critical';
     lastOutcome: 'success' | 'rate_limited' | 'failure' | null;
     lastOutcomeAt: string | null;
     healthUpdatedAt: string | null;
@@ -76,6 +79,20 @@ type CloudflareShardHealthSummary = {
     totalSuccessCount: number;
     totalRateLimitCount: number;
     totalFailureCount: number;
+    saturation?: {
+        warningShards: number;
+        criticalShards: number;
+        warningRegions: number;
+        criticalRegions: number;
+        thresholds: {
+            minSamples: number;
+            shardFailureWarningRatio: number;
+            shardFailureCriticalRatio: number;
+            regionCoolingWarningRatio: number;
+            regionCoolingCriticalRatio: number;
+            minShardsPerRegion: number;
+        };
+    };
 };
 
 type RoutingPolicy = {
@@ -83,6 +100,19 @@ type RoutingPolicy = {
     strictRegion: boolean;
     globalFallbackRegions: string[];
     regionFallbacks: Array<{ sourceRegion: string; fallbackRegions: string[] }>;
+};
+
+type RegionSaturationRow = {
+    region: string;
+    shardCount: number;
+    coolingCount: number;
+    warningCount: number;
+    criticalCount: number;
+    maxPenalty: number;
+    coolingRatio: number;
+    degradedRatio: number;
+    avgInstabilityRatio: number;
+    severity: 'healthy' | 'warning' | 'critical';
 };
 
 type CloudflareShardDraft = {
@@ -188,6 +218,7 @@ export default function IntegrationsPage() {
     const [shardHealthRows, setShardHealthRows] = useState<CloudflareShardHealthRow[]>([]);
     const [shardHealthSummary, setShardHealthSummary] = useState<CloudflareShardHealthSummary | null>(null);
     const [routingPolicy, setRoutingPolicy] = useState<RoutingPolicy | null>(null);
+    const [regionSaturation, setRegionSaturation] = useState<RegionSaturationRow[]>([]);
     const [cloudflareDrafts, setCloudflareDrafts] = useState<Record<string, CloudflareShardDraft>>({});
 
     const [provider, setProvider] = useState<string>('');
@@ -261,10 +292,12 @@ export default function IntegrationsPage() {
                 setShardHealthRows(Array.isArray(shardBody.rows) ? shardBody.rows : []);
                 setShardHealthSummary(shardBody.summary ?? null);
                 setRoutingPolicy(shardBody.routingPolicy ?? null);
+                setRegionSaturation(Array.isArray(shardBody.regionSaturation) ? shardBody.regionSaturation : []);
             } else {
                 setShardHealthRows([]);
                 setShardHealthSummary(null);
                 setRoutingPolicy(null);
+                setRegionSaturation([]);
             }
 
             if (!provider && providerBody.providers?.length) {
@@ -476,11 +509,30 @@ export default function IntegrationsPage() {
 
             const body = await res.json().catch(() => ({}));
             if (!res.ok) {
+                if (res.status === 409 && body.code === 'sync_already_running') {
+                    const runningRunId = typeof body.runId === 'string' ? body.runId : null;
+                    setMessage(
+                        runningRunId
+                            ? `A sync is already running (run ${runningRunId.slice(0, 8)}).`
+                            : 'A sync is already running for this connection.',
+                    );
+                    await loadData();
+                    return;
+                }
                 throw new Error(body.error || 'Failed to sync connection');
             }
 
             const runStatus = body?.run?.status || 'unknown';
-            setMessage(`Sync completed with status: ${runStatus}`);
+            const cooldownSeconds = Number(body?.run?.details?.rateLimitCooldownSeconds);
+            if (
+                runStatus === 'partial'
+                && Number.isFinite(cooldownSeconds)
+                && cooldownSeconds > 0
+            ) {
+                setMessage(`Sync completed with status: partial (Cloudflare cooldown ~${Math.ceil(cooldownSeconds)}s).`);
+            } else {
+                setMessage(`Sync completed with status: ${runStatus}`);
+            }
             await loadData();
         } catch (err) {
             console.error(err);
@@ -840,6 +892,43 @@ export default function IntegrationsPage() {
                         </div>
                     )}
 
+                    {shardHealthSummary?.saturation && (
+                        <div className="grid gap-3 md:grid-cols-4">
+                            <div className="rounded border p-3">
+                                <div className="text-xs text-muted-foreground">Shard Saturation</div>
+                                <div className="text-sm font-medium">
+                                    warning {shardHealthSummary.saturation.warningShards}
+                                    {' · '}
+                                    critical {shardHealthSummary.saturation.criticalShards}
+                                </div>
+                            </div>
+                            <div className="rounded border p-3">
+                                <div className="text-xs text-muted-foreground">Region Saturation</div>
+                                <div className="text-sm font-medium">
+                                    warning {shardHealthSummary.saturation.warningRegions}
+                                    {' · '}
+                                    critical {shardHealthSummary.saturation.criticalRegions}
+                                </div>
+                            </div>
+                            <div className="rounded border p-3">
+                                <div className="text-xs text-muted-foreground">Failure Thresholds</div>
+                                <div className="text-sm font-medium">
+                                    {Math.round(shardHealthSummary.saturation.thresholds.shardFailureWarningRatio * 100)}%
+                                    {' / '}
+                                    {Math.round(shardHealthSummary.saturation.thresholds.shardFailureCriticalRatio * 100)}%
+                                </div>
+                            </div>
+                            <div className="rounded border p-3">
+                                <div className="text-xs text-muted-foreground">Cooling Thresholds</div>
+                                <div className="text-sm font-medium">
+                                    {Math.round(shardHealthSummary.saturation.thresholds.regionCoolingWarningRatio * 100)}%
+                                    {' / '}
+                                    {Math.round(shardHealthSummary.saturation.thresholds.regionCoolingCriticalRatio * 100)}%
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {routingPolicy && (
                         <div className="rounded border p-3 text-xs text-muted-foreground">
                             <div>
@@ -856,6 +945,28 @@ export default function IntegrationsPage() {
                                         ? routingPolicy.regionFallbacks.map((entry) => `${entry.sourceRegion} -> ${entry.fallbackRegions.join(', ')}`).join(' | ')
                                         : 'none'}
                                 </span>
+                            </div>
+                        </div>
+                    )}
+
+                    {regionSaturation.length > 0 && (
+                        <div className="rounded border p-3">
+                            <div className="text-xs text-muted-foreground mb-2">Region Saturation Snapshot</div>
+                            <div className="flex flex-wrap gap-2">
+                                {regionSaturation.slice(0, 8).map((entry) => (
+                                    <span
+                                        key={entry.region}
+                                        className={`rounded-full border px-3 py-1 text-xs ${
+                                            entry.severity === 'critical'
+                                                ? 'border-red-300 bg-red-50 text-red-800'
+                                                : entry.severity === 'warning'
+                                                    ? 'border-amber-300 bg-amber-50 text-amber-800'
+                                                    : 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                                        }`}
+                                    >
+                                        {entry.region}: {entry.coolingCount}/{entry.shardCount} cooling
+                                    </span>
+                                ))}
                             </div>
                         </div>
                     )}
@@ -931,6 +1042,8 @@ export default function IntegrationsPage() {
                                                 rate-limit {health?.rateLimitCount ?? 0}
                                                 {' · '}
                                                 failure {health?.failureCount ?? 0}
+                                                {' · '}
+                                                instability {Math.round((health?.instabilityRatio ?? 0) * 100)}%
                                                 {' · '}
                                                 last outcome {health?.lastOutcome || '-'} {health?.lastOutcomeAt ? `(${formatDate(health.lastOutcomeAt)})` : ''}
                                             </div>

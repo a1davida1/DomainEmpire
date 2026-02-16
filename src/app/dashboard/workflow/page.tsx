@@ -64,6 +64,16 @@ type DailyBlockerTrend = {
     lifecycleMoves: number;
 };
 
+type LifecycleAutomationEvent = {
+    id: string;
+    domainId: string;
+    domain: string;
+    fromState: string;
+    toState: string;
+    source: string;
+    createdAt: Date;
+};
+
 const ACTION_META: Record<DomainActionType, { label: string; className: string }> = {
     research: { label: 'Research', className: 'bg-blue-100 text-blue-800' },
     acquire: { label: 'Acquire', className: 'bg-violet-100 text-violet-800' },
@@ -77,6 +87,12 @@ const SOURCE_STATES = new Set(['sourced', 'underwriting']);
 const ACQUIRE_STATES = new Set(['approved']);
 const BUILD_STATES = new Set(['acquired', 'build']);
 const GROWTH_STATES = new Set(['growth', 'monetized', 'hold', 'sell', 'sunset']);
+const LIFECYCLE_AUTOMATION_SOURCES = new Set([
+    'acquisition_pipeline',
+    'deploy_processor',
+    'growth_campaign_launch',
+    'finance_ledger',
+]);
 const BLOCKER_OWNERS = ['Ops', 'Research', 'Acquisition', 'Content', 'Deploy', 'Integrations'] as const;
 type BlockerOwner = (typeof BLOCKER_OWNERS)[number];
 
@@ -99,8 +115,17 @@ function buildRecentDayKeys(days: number): string[] {
 function formatDayLabel(dayKey: string): string {
     const parsed = new Date(`${dayKey}T00:00:00Z`);
     return Number.isFinite(parsed.getTime())
-        ? parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+        ? parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
         : dayKey;
+}
+
+function formatLifecycleSource(source: string): string {
+    if (source === 'acquisition_pipeline') return 'Acquisition';
+    if (source === 'deploy_processor') return 'Deploy';
+    if (source === 'growth_campaign_launch') return 'Growth Launch';
+    if (source === 'finance_ledger') return 'Finance Ledger';
+    if (source === 'manual') return 'Manual';
+    return source.replaceAll('_', ' ');
 }
 
 function ownerBadgeClass(owner: GlobalBlocker['owner']): string {
@@ -251,7 +276,7 @@ export default async function WorkflowPage({
     const params = (await searchParams) ?? {};
     const ownerFilter = parseOwnerFilter(params.owner);
     const trendDays = buildRecentDayKeys(7);
-    const trendWindowStart = new Date(`${trendDays[0]}T00:00:00Z`);
+    const trendWindowStart = new Date(`${trendDays[0]}T00:00:00Z`).toISOString();
 
     const domainRows = await db
         .select({
@@ -333,7 +358,7 @@ export default async function WorkflowPage({
     const hasRegistrar = connectedCategories.has('registrar');
     const hasAnalytics = connectedCategories.has('analytics') || connectedCategories.has('seo');
     const hasHosting = connectedCategories.has('hosting');
-    const [failedQueueDailyRows, completedQueueDailyRows, researchDailyRows, lifecycleDailyRows] = await Promise.all([
+    const [failedQueueDailyRows, completedQueueDailyRows, researchDailyRows, lifecycleDailyRows, lifecycleSourceRows, lifecycleRecentRows] = await Promise.all([
         db.select({
             dayKey: sql<string>`to_char(date_trunc('day', ${contentQueue.createdAt}), 'YYYY-MM-DD')`,
             count: sql<number>`count(*)::int`,
@@ -373,6 +398,28 @@ export default async function WorkflowPage({
             .where(sql`${domainLifecycleEvents.createdAt} >= ${trendWindowStart}`)
             .groupBy(sql`date_trunc('day', ${domainLifecycleEvents.createdAt})`)
             .orderBy(sql`date_trunc('day', ${domainLifecycleEvents.createdAt}) asc`),
+        db.select({
+            source: sql<string>`coalesce(${domainLifecycleEvents.metadata} ->> 'source', 'manual')`,
+            count: sql<number>`count(*)::int`,
+        })
+            .from(domainLifecycleEvents)
+            .where(sql`${domainLifecycleEvents.createdAt} >= ${trendWindowStart}`)
+            .groupBy(sql`coalesce(${domainLifecycleEvents.metadata} ->> 'source', 'manual')`)
+            .orderBy(sql`count(*) desc`),
+        db.select({
+            id: domainLifecycleEvents.id,
+            domainId: domainLifecycleEvents.domainId,
+            domain: domains.domain,
+            fromState: domainLifecycleEvents.fromState,
+            toState: domainLifecycleEvents.toState,
+            source: sql<string>`coalesce(${domainLifecycleEvents.metadata} ->> 'source', 'manual')`,
+            createdAt: domainLifecycleEvents.createdAt,
+        })
+            .from(domainLifecycleEvents)
+            .innerJoin(domains, eq(domainLifecycleEvents.domainId, domains.id))
+            .where(sql`${domainLifecycleEvents.createdAt} >= ${trendWindowStart}`)
+            .orderBy(sql`${domainLifecycleEvents.createdAt} desc`)
+            .limit(12),
     ]);
 
     const actions = domainRows
@@ -505,6 +552,35 @@ export default async function WorkflowPage({
     const completedByDay = new Map(completedQueueDailyRows.map((row) => [row.dayKey, row.count]));
     const researchedByDay = new Map(researchDailyRows.map((row) => [row.dayKey, row.count]));
     const lifecycleByDay = new Map(lifecycleDailyRows.map((row) => [row.dayKey, row.count]));
+    const lifecycleAutomationBySource = lifecycleSourceRows.map((row) => ({
+        source: row.source,
+        count: row.count,
+        isAutomation: LIFECYCLE_AUTOMATION_SOURCES.has(row.source),
+    }));
+    const lifecycleAutomationCount7d = lifecycleAutomationBySource
+        .filter((row) => row.isAutomation)
+        .reduce((sum, row) => sum + row.count, 0);
+    const lifecycleTotalCount7d = lifecycleAutomationBySource.reduce((sum, row) => sum + row.count, 0);
+    const lifecycleAutomationShare = lifecycleTotalCount7d > 0
+        ? Math.round((lifecycleAutomationCount7d / lifecycleTotalCount7d) * 100)
+        : 0;
+    const recentAutomationEvents: LifecycleAutomationEvent[] = lifecycleRecentRows
+        .filter((row) => (
+            LIFECYCLE_AUTOMATION_SOURCES.has(row.source)
+            && row.createdAt instanceof Date
+        ))
+        .map((row) => ({
+            id: row.id,
+            domainId: row.domainId,
+            domain: row.domain,
+            fromState: String(row.fromState),
+            toState: String(row.toState),
+            source: row.source,
+            createdAt: row.createdAt,
+        }))
+        .slice(0, 8);
+    const latestAutomationEvent = recentAutomationEvents[0] ?? null;
+    const lifecycleSourcesTop = lifecycleAutomationBySource.slice(0, 6);
     const blockerTrend: DailyBlockerTrend[] = trendDays.map((dayKey) => ({
         dayKey,
         label: formatDayLabel(dayKey),
@@ -612,6 +688,7 @@ export default async function WorkflowPage({
                         <Link
                             href="/dashboard/workflow"
                             className={`rounded-full border px-2 py-1 text-xs ${ownerFilter === 'all' ? 'bg-foreground text-background' : 'hover:bg-muted'}`}
+                            {...(ownerFilter === 'all' ? { 'aria-current': 'page' as const } : {})}
                         >
                             All Owners
                         </Link>
@@ -620,6 +697,7 @@ export default async function WorkflowPage({
                                 key={owner}
                                 href={`/dashboard/workflow?owner=${encodeURIComponent(owner)}`}
                                 className={`rounded-full border px-2 py-1 text-xs ${ownerFilter === owner ? 'bg-foreground text-background' : 'hover:bg-muted'}`}
+                                {...(ownerFilter === owner ? { 'aria-current': 'page' as const } : {})}
                             >
                                 {owner}
                             </Link>
@@ -722,6 +800,87 @@ export default async function WorkflowPage({
                             </tbody>
                         </table>
                     </div>
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle>Lifecycle Automation (7d)</CardTitle>
+                    <CardDescription>Automatic transitions generated by deploy, growth launch, and finance workflows.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                    <div className="grid gap-3 md:grid-cols-4">
+                        <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2">
+                            <p className="text-xs text-muted-foreground">Auto transitions</p>
+                            <p className="text-lg font-semibold text-blue-900">{lifecycleAutomationCount7d}</p>
+                        </div>
+                        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                            <p className="text-xs text-muted-foreground">All lifecycle moves</p>
+                            <p className="text-lg font-semibold text-slate-900">{lifecycleTotalCount7d}</p>
+                        </div>
+                        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2">
+                            <p className="text-xs text-muted-foreground">Automation share</p>
+                            <p className="text-lg font-semibold text-emerald-900">{lifecycleAutomationShare}%</p>
+                        </div>
+                        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
+                            <p className="text-xs text-muted-foreground">Latest auto move</p>
+                            <p className="text-sm font-semibold text-amber-900">
+                                {latestAutomationEvent
+                                    ? new Date(latestAutomationEvent.createdAt).toLocaleString('en-US', { timeZone: 'UTC' })
+                                    : 'No recent auto transitions'}
+                            </p>
+                        </div>
+                    </div>
+
+                    {lifecycleSourcesTop.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                            {lifecycleSourcesTop.map((row) => (
+                                <span
+                                    key={row.source}
+                                    className={`rounded-full border px-2 py-1 text-xs ${
+                                        row.isAutomation
+                                            ? 'border-blue-200 bg-blue-50 text-blue-900'
+                                            : 'border-slate-200 bg-slate-50 text-slate-800'
+                                    }`}
+                                >
+                                    {formatLifecycleSource(row.source)}: {row.count}
+                                </span>
+                            ))}
+                        </div>
+                    )}
+
+                    {recentAutomationEvents.length === 0 ? (
+                        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-700">
+                            No lifecycle automation events in the last 7 days.
+                        </div>
+                    ) : (
+                        <div className="overflow-x-auto rounded border">
+                            <table className="w-full text-xs">
+                                <thead className="bg-muted/40">
+                                    <tr>
+                                        <th className="p-2 text-left">When</th>
+                                        <th className="p-2 text-left">Domain</th>
+                                        <th className="p-2 text-left">Transition</th>
+                                        <th className="p-2 text-left">Source</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {recentAutomationEvents.map((row) => (
+                                        <tr key={row.id} className="border-t">
+                                            <td className="p-2">{new Date(row.createdAt).toLocaleString('en-US', { timeZone: 'UTC' })}</td>
+                                            <td className="p-2">
+                                                <Link href={`/dashboard/domains/${row.domainId}`} className="hover:underline">
+                                                    {row.domain}
+                                                </Link>
+                                            </td>
+                                            <td className="p-2">{row.fromState} {'->'} {row.toState}</td>
+                                            <td className="p-2">{formatLifecycleSource(row.source)}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
                 </CardContent>
             </Card>
 

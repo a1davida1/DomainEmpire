@@ -141,6 +141,18 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         if (result.error === 'not_found') {
             return NextResponse.json({ error: 'Connection not found' }, { status: 404 });
         }
+        if (result.error === 'already_running') {
+            return NextResponse.json(
+                {
+                    error: 'A registrar sync is already running for this connection',
+                    code: 'sync_already_running',
+                    runId: result.runId,
+                    connectionId: selectedConnectionId,
+                    provider: registrarProvider,
+                },
+                { status: 409 },
+            );
+        }
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { getRequestUser, requireAuth } from '@/lib/auth';
-import { db, contentQueue, promotionCampaigns, promotionJobs, reviewTasks } from '@/lib/db';
+import { db, contentQueue, domainResearch, promotionCampaigns, promotionJobs, reviewTasks } from '@/lib/db';
 import { isFeatureEnabled } from '@/lib/feature-flags';
 import {
     emitGrowthLaunchFreezeIncident,
@@ -10,6 +10,7 @@ import {
     shouldBlockGrowthLaunchForScope,
 } from '@/lib/growth/launch-freeze';
 import { enqueueContentJob } from '@/lib/queue/content-queue';
+import { advanceDomainLifecycleForAcquisition } from '@/lib/domain/lifecycle-sync';
 
 const launchBodySchema = z.object({
     priority: z.number().int().min(0).max(100).optional(),
@@ -56,10 +57,12 @@ export async function POST(
             id: promotionCampaigns.id,
             status: promotionCampaigns.status,
             domainResearchId: promotionCampaigns.domainResearchId,
+            domainId: domainResearch.domainId,
             channels: promotionCampaigns.channels,
             metrics: promotionCampaigns.metrics,
         })
             .from(promotionCampaigns)
+            .leftJoin(domainResearch, eq(promotionCampaigns.domainResearchId, domainResearch.id))
             .where(eq(promotionCampaigns.id, id))
             .limit(1);
 
@@ -241,6 +244,33 @@ export async function POST(
                 promotionJobId: promotionJob.id as string | null,
             };
         });
+
+        const campaignMetrics = campaign.metrics as Record<string, unknown> | null;
+        const campaignDomainId = campaign.domainId
+            ?? (typeof campaignMetrics?.domainId === 'string' ? campaignMetrics.domainId : null);
+        if (campaignDomainId) {
+            try {
+                await advanceDomainLifecycleForAcquisition({
+                    domainId: campaignDomainId,
+                    targetState: 'growth',
+                    actorId: user.id,
+                    actorRole: user.role,
+                    reason: 'Campaign launch queued',
+                    metadata: {
+                        source: 'growth_campaign_launch',
+                        campaignId: id,
+                        contentQueueJobId: txResult.jobId,
+                        deduped: txResult.deduped,
+                    },
+                });
+            } catch (lifecycleError) {
+                console.error('Failed to auto-advance lifecycle to growth on campaign launch:', {
+                    campaignId: id,
+                    domainId: campaignDomainId,
+                    error: lifecycleError instanceof Error ? lifecycleError.message : String(lifecycleError),
+                });
+            }
+        }
 
         return NextResponse.json({
             queued: true,

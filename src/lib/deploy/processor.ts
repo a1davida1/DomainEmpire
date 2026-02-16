@@ -21,6 +21,7 @@ import {
     resolveCloudflareHostShardPlan,
     type CloudflareHostShard,
 } from './host-sharding';
+import { advanceDomainLifecycleForAcquisition } from '@/lib/domain/lifecycle-sync';
 
 interface DeployPayload {
     domain: string;
@@ -412,6 +413,27 @@ export async function processDeployJob(jobId: string): Promise<void> {
             lastDeployedAt: new Date(),
             updatedAt: new Date(),
         }).where(eq(domains.id, ctx.domainId));
+
+        try {
+            await advanceDomainLifecycleForAcquisition({
+                domainId: ctx.domainId,
+                targetState: 'build',
+                actorId: null,
+                actorRole: 'admin',
+                reason: 'Deployment completed successfully',
+                metadata: {
+                    source: 'deploy_processor',
+                    jobId,
+                    cloudflareProject: ctx.cfProject ?? null,
+                },
+            });
+        } catch (lifecycleError) {
+            console.error('Failed to auto-advance lifecycle to build after deploy:', {
+                domainId: ctx.domainId,
+                jobId,
+                error: lifecycleError instanceof Error ? lifecycleError.message : String(lifecycleError),
+            });
+        }
 
     } catch (error) {
         // Rollback domain state

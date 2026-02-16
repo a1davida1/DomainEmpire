@@ -182,7 +182,10 @@ export async function POST(request: NextRequest) {
 
         // Auto-classify imported domains that have no niche (sequential to avoid rate limits)
         const unclassified = result.created.filter(
-            (c) => rows.find((r) => r.domain?.toLowerCase() === c.domain)?.niche == null
+            (c) => {
+                const niche = rows.find((r) => r.domain?.toLowerCase() === c.domain)?.niche;
+                return !niche;
+            }
         );
         const classifyErrors: Array<{ domain: string; error: string }> = [];
         for (const item of unclassified) {

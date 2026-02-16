@@ -108,6 +108,7 @@ interface WorkerResult {
     processed: number;
     failed: number;
     staleLocksCleaned: number;
+    transientRetriesQueued: number;
     stats: QueueStats;
 }
 
@@ -3227,6 +3228,7 @@ export async function runWorkerOnce(options: WorkerOptions = {}): Promise<Worker
 
     // Step 1: Recover any stale locks from crashed workers
     const staleLocksCleaned = await recoverStaleLocks();
+    const transientRetriesQueued = await retryTransientFailedJobs(Math.min(maxJobs, 25));
 
     // Step 2: Acquire and process jobs.
     // In Redis mode, consume Redis-dispatched IDs first; otherwise (or on empty/degraded),
@@ -3256,7 +3258,7 @@ export async function runWorkerOnce(options: WorkerOptions = {}): Promise<Worker
     // Step 3: Get current stats
     const stats = await getQueueStats();
 
-    return { processed, failed, staleLocksCleaned, stats };
+    return { processed, failed, staleLocksCleaned, transientRetriesQueued, stats };
 }
 
 /**
@@ -3390,7 +3392,8 @@ export async function runWorkerContinuously(options: WorkerOptions = {}): Promis
                         if (summary.enabled && summary.scanned > 0) {
                             console.log(
                                 `[IntegrationHealthSweep] scanned=${summary.scanned} healthy=${summary.healthy} ` +
-                                `warning=${summary.warning} critical=${summary.critical} alerts=${summary.alertsCreated}`,
+                                `warning=${summary.warning} critical=${summary.critical} alerts=${summary.alertsCreated} ` +
+                                `cloudflareShardAlerts=${summary.cloudflareSaturationAlertsCreated}`,
                             );
                         }
                     })
@@ -3436,10 +3439,10 @@ export async function runWorkerContinuously(options: WorkerOptions = {}): Promis
 
             const result = await runWorkerOnce(options);
 
-            if (result.processed > 0 || result.failed > 0) {
+            if (result.processed > 0 || result.failed > 0 || result.transientRetriesQueued > 0) {
                 console.log(
                     `[Worker] Batch: ${result.processed} processed, ${result.failed} failed, ` +
-                    `${result.staleLocksCleaned} stale recovered | ` +
+                    `${result.staleLocksCleaned} stale recovered, ${result.transientRetriesQueued} transient retried | ` +
                     `Queue: ${result.stats.pending} pending, ${result.stats.failed} dead`
                 );
             }
@@ -3549,6 +3552,22 @@ export async function getQueueHealth() {
     const totalRecent = recentTotal[0]?.count || 0;
     const failedRecent = recentFailed[0]?.count || 0;
 
+    const activityRows = await db.select({
+        lastStartedAt: sql<Date | null>`max(${contentQueue.startedAt})`,
+        lastCompletedAt: sql<Date | null>`max(${contentQueue.completedAt})`,
+        lastQueuedAt: sql<Date | null>`max(${contentQueue.createdAt})`,
+    }).from(contentQueue);
+
+    const latestStartedAt = activityRows[0]?.lastStartedAt ?? null;
+    const latestCompletedAt = activityRows[0]?.lastCompletedAt ?? null;
+    const latestQueuedAt = activityRows[0]?.lastQueuedAt ?? null;
+    const latestWorkerActivityAt = [latestStartedAt, latestCompletedAt]
+        .filter((value): value is Date => value instanceof Date)
+        .sort((left, right) => right.getTime() - left.getTime())[0] ?? null;
+    const latestWorkerActivityAgeMs = latestWorkerActivityAt
+        ? Date.now() - latestWorkerActivityAt.getTime()
+        : null;
+
     return {
         ...stats,
         oldestPendingAge: oldestPending[0]?.createdAt
@@ -3557,33 +3576,199 @@ export async function getQueueHealth() {
         avgProcessingTimeMs: avgDuration[0]?.avgMs || null,
         throughputPerHour: throughput[0]?.count || 0,
         errorRate24h: totalRecent > 0 ? Math.round((failedRecent / totalRecent) * 10000) / 100 : 0,
+        latestStartedAt,
+        latestCompletedAt,
+        latestQueuedAt,
+        latestWorkerActivityAt,
+        latestWorkerActivityAgeMs,
     };
 }
 
 /**
  * Retry failed jobs
  */
-export async function retryFailedJobs(limit = 10): Promise<number> {
+const TRANSIENT_ERROR_PATTERNS = [
+    /\b429\b/i,
+    /too many requests/i,
+    /rate[\s-]?limit/i,
+    /\btimeout\b/i,
+    /timed?\s*out/i,
+    /\beconnreset\b/i,
+    /\betimedout\b/i,
+    /\beai_again\b/i,
+    /\benotfound\b/i,
+    /\beconnrefused\b/i,
+    /socket hang up/i,
+    /network error/i,
+    /fetch failed/i,
+    /service unavailable/i,
+    /bad gateway/i,
+    /gateway timeout/i,
+    /cloudflare api cooldown/i,
+];
+
+const NON_TRANSIENT_ERROR_PATTERNS = [
+    /invalid payload/i,
+    /not found/i,
+    /requires payload/i,
+    /permanent failure/i,
+    /dead letter/i,
+    /validation/i,
+];
+
+type RetryFailedMode = 'all' | 'transient';
+
+type RetryFailedOptions = {
+    mode?: RetryFailedMode;
+    minFailedAgeMs?: number;
+};
+
+type FailedQueueRetryCandidate = {
+    id: string;
+    attempts: number | null;
+    maxAttempts: number | null;
+    errorMessage: string | null;
+    result: unknown;
+    completedAt: Date | null;
+    createdAt: Date | null;
+};
+
+function getRetryableFailureFlag(result: unknown): boolean | null {
+    if (!isPlainObject(result)) return null;
+    const failure = result.failure;
+    if (!isPlainObject(failure)) return null;
+    if (typeof failure.retryable === 'boolean') {
+        return failure.retryable;
+    }
+    return null;
+}
+
+function getTransientAutoRetryCount(result: unknown): number {
+    if (!isPlainObject(result)) return 0;
+    const failure = result.failure;
+    if (!isPlainObject(failure)) return 0;
+    const countValue = failure.autoRetryTransientCount;
+    if (typeof countValue !== 'number' || !Number.isFinite(countValue) || countValue < 0) {
+        return 0;
+    }
+    return Math.floor(countValue);
+}
+
+function isTransientFailedJob(candidate: FailedQueueRetryCandidate, minFailedAgeMs: number): boolean {
+    const attempts = Math.max(0, Number(candidate.attempts ?? 0));
+    const maxAttempts = Math.max(1, Number(candidate.maxAttempts ?? 3));
+    if (attempts >= maxAttempts) {
+        return false;
+    }
+    if (getTransientAutoRetryCount(candidate.result) >= maxAttempts) {
+        return false;
+    }
+
+    const failedAt = candidate.completedAt ?? candidate.createdAt;
+    if (failedAt && Number.isFinite(failedAt.getTime())) {
+        const ageMs = Date.now() - failedAt.getTime();
+        if (ageMs < minFailedAgeMs) {
+            return false;
+        }
+    }
+
+    const metadataRetryable = getRetryableFailureFlag(candidate.result);
+    if (metadataRetryable === true) {
+        return true;
+    }
+    if (metadataRetryable === false) {
+        return false;
+    }
+
+    const message = (candidate.errorMessage ?? '').trim();
+    if (!message) return false;
+    if (NON_TRANSIENT_ERROR_PATTERNS.some((pattern) => pattern.test(message))) {
+        return false;
+    }
+    return TRANSIENT_ERROR_PATTERNS.some((pattern) => pattern.test(message));
+}
+
+export async function retryTransientFailedJobs(limit = 10): Promise<number> {
+    return retryFailedJobs(limit, { mode: 'transient' });
+}
+
+export async function retryFailedJobs(limit = 10, options: RetryFailedOptions = {}): Promise<number> {
+    const normalizedLimit = Math.max(1, Math.min(limit, 200));
+    const mode = options.mode ?? 'all';
+    const minFailedAgeMs = Math.max(
+        0,
+        Math.min(options.minFailedAgeMs ?? 2 * 60 * 1000, 24 * 60 * 60 * 1000),
+    );
+
     const failedJobs = await db
-        .select({ id: contentQueue.id })
+        .select({
+            id: contentQueue.id,
+            attempts: contentQueue.attempts,
+            maxAttempts: contentQueue.maxAttempts,
+            errorMessage: contentQueue.errorMessage,
+            result: contentQueue.result,
+            completedAt: contentQueue.completedAt,
+            createdAt: contentQueue.createdAt,
+        })
         .from(contentQueue)
         .where(eq(contentQueue.status, 'failed'))
-        .limit(limit);
+        .orderBy(desc(contentQueue.completedAt), desc(contentQueue.createdAt))
+        .limit(mode === 'transient' ? normalizedLimit * 8 : normalizedLimit);
 
-    for (const job of failedJobs) {
+    const candidates = mode === 'transient'
+        ? failedJobs
+            .filter((job) => isTransientFailedJob(job, minFailedAgeMs))
+            .slice(0, normalizedLimit)
+        : failedJobs.slice(0, normalizedLimit);
+
+    const now = Date.now();
+    for (const job of candidates) {
+        const attempts = Math.max(0, Number(job.attempts ?? 0));
+        const maxAttempts = Math.max(1, Number(job.maxAttempts ?? 3));
+        const autoRetryTransientCount = getTransientAutoRetryCount(job.result);
+        const nextAutoRetryTransientCount = autoRetryTransientCount + 1;
+        const nextAttempt = mode === 'transient' ? attempts : 0;
+        const retryDelayMs = mode === 'transient'
+            ? calculateBackoff(nextAutoRetryTransientCount, {
+                baseDelayMs: 60_000,
+                maxDelayMs: 30 * 60_000,
+                jitter: false,
+            })
+            : 0;
+        const scheduledFor = new Date(now + retryDelayMs);
+        const existingResult = isPlainObject(job.result) ? job.result : {};
+        const existingFailure = isPlainObject(existingResult.failure) ? existingResult.failure : {};
+        const nextResult = mode === 'transient'
+            ? {
+                ...existingResult,
+                failure: {
+                    ...existingFailure,
+                    autoRetryTransientCount: nextAutoRetryTransientCount,
+                    autoRetryTransientAt: new Date(now).toISOString(),
+                    autoRetryMode: 'transient',
+                    retryable: getRetryableFailureFlag(job.result) ?? true,
+                },
+            }
+            : existingResult;
+
         await db
             .update(contentQueue)
             .set({
                 status: 'pending',
-                attempts: 0,
-                errorMessage: null,
-                scheduledFor: new Date(),
+                attempts: nextAttempt,
+                errorMessage: mode === 'transient'
+                    ? `Auto-retry ${nextAutoRetryTransientCount}/${maxAttempts}: ${job.errorMessage ?? 'Transient failure'}`
+                    : null,
+                result: mode === 'transient' ? nextResult : job.result,
+                scheduledFor,
                 lockedUntil: null,
+                startedAt: null,
+                completedAt: null,
             })
             .where(eq(contentQueue.id, job.id));
     }
 
-    return failedJobs.length;
+    return candidates.length;
 }
 
 /**

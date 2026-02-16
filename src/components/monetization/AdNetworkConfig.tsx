@@ -49,7 +49,7 @@ export function AdNetworkConfig({ domainId, initialNetwork, initialNetworkId, in
                 setMessage(`Error: ${data.error || res.statusText}`);
             }
         } catch (err) {
-            setMessage(err instanceof Error ? err.message : 'Save failed');
+            setMessage('Error: ' + (err instanceof Error ? err.message : 'Save failed'));
         } finally {
             setSaving(false);
         }

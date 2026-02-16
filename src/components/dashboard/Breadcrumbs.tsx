@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { ChevronRight, Home } from 'lucide-react';
+import { useState, useEffect } from 'react';
 
 const LABEL_MAP: Record<string, string> = {
     dashboard: 'Dashboard',
@@ -42,6 +43,24 @@ function isUuid(segment: string): boolean {
 export function Breadcrumbs() {
     const pathname = usePathname();
     const segments = pathname.split('/').filter(Boolean);
+    const [domainNames, setDomainNames] = useState<Record<string, string>>({});
+
+    // Resolve domain name for UUID breadcrumb segments
+    const domainUuid = segments.length >= 3 && segments[1] === 'domains' && isUuid(segments[2]) ? segments[2] : null;
+    useEffect(() => {
+        if (!domainUuid) return;
+        if (domainNames[domainUuid]) return; // already cached
+        let active = true;
+        fetch(`/api/domains/${domainUuid}`)
+            .then(r => r.ok ? r.json() : null)
+            .then(data => {
+                if (active && data?.domain) {
+                    setDomainNames(prev => ({ ...prev, [domainUuid]: data.domain }));
+                }
+            })
+            .catch(() => {});
+        return () => { active = false; };
+    }, [domainUuid, domainNames]);
 
     if (segments.length <= 1) return null;
 
@@ -50,7 +69,7 @@ export function Breadcrumbs() {
     for (const segment of segments) {
         path += `/${segment}`;
         if (isUuid(segment)) {
-            crumbs.push({ label: '…', href: path });
+            crumbs.push({ label: domainNames[segment] || '…', href: path });
         } else {
             crumbs.push({
                 label: LABEL_MAP[segment] || segment.charAt(0).toUpperCase() + segment.slice(1),

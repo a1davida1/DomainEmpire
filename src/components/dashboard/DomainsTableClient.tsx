@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import {
     Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
-import { ExternalLink, Copy, Check, Rows3, Rows2, Globe, Search, X, LayoutGrid, List } from 'lucide-react';
+import { ExternalLink, Copy, Check, Rows3, Rows2, Globe, Search, X, LayoutGrid, List, RefreshCw, Clipboard } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { DomainActions } from '@/components/dashboard/DomainActions';
 import { DomainHoverCard } from '@/components/dashboard/DomainHoverCard';
@@ -24,7 +24,15 @@ interface SerializedDomain {
     isDeployed: boolean | null;
     registrar: string | null;
     renewalDate: string | null;
+    cloudflareAccount: string | null;
 }
+
+type DomainQueueHint = {
+    pending: number;
+    processing: number;
+    failed: number;
+    total: number;
+};
 
 const STATUSES = ['parked', 'active', 'redirect', 'forsale', 'defensive'] as const;
 
@@ -40,6 +48,13 @@ function relativeDate(dateStr: string | null): string {
     if (diffDays > 0 && diffDays <= 90) return `in ${diffDays}d`;
     if (diffDays < 0 && diffDays >= -90) return `${Math.abs(diffDays)}d ago`;
     return dateStr;
+}
+
+function formatExactDate(dateStr: string | null): string {
+    if (!dateStr || dateStr === '—') return '';
+    const d = new Date(dateStr);
+    if (!Number.isFinite(d.getTime())) return dateStr;
+    return d.toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 function renewalUrgency(dateStr: string | null): string {
@@ -91,30 +106,47 @@ interface Props {
     domains: SerializedDomain[];
     headerSlot: React.ReactNode;
     hasFilters: boolean;
+    queueHints?: Record<string, DomainQueueHint>;
 }
 
-export function DomainsTableClient({ domains, headerSlot, hasFilters }: Props) {
+export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints = {} }: Props) {
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [acting, setActing] = useState(false);
+    const [refreshing, setRefreshing] = useState(false);
     const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
     const [confirmAction, setConfirmAction] = useState<{ endpoint: string; label: string } | null>(null);
-    const [compact, setCompact] = useState(false);
+    const [compact, setCompact] = useState(() => {
+        if (typeof window !== 'undefined') return localStorage.getItem('de-compact') === '1';
+        return false;
+    });
     const [searchQuery, setSearchQuery] = useState('');
-    const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
+    const [viewMode, setViewMode] = useState<'table' | 'grid'>(() => {
+        if (typeof window !== 'undefined') return (localStorage.getItem('de-viewMode') as 'table' | 'grid') || 'table';
+        return 'table';
+    });
+
+    // Persist preferences
+    useEffect(() => { localStorage.setItem('de-viewMode', viewMode); }, [viewMode]);
+    useEffect(() => { localStorage.setItem('de-compact', compact ? '1' : '0'); }, [compact]);
     const router = useRouter();
     const searchInputRef = useRef<HTMLInputElement>(null);
 
-    // '/' keyboard shortcut to focus search
+    // Keyboard shortcuts: '/' to focus search, Escape to deselect
     useEffect(() => {
         function onKey(e: KeyboardEvent) {
-            if (e.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) {
+            const tag = (e.target as HTMLElement)?.tagName;
+            if (e.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) {
                 e.preventDefault();
                 searchInputRef.current?.focus();
+            }
+            if (e.key === 'Escape') {
+                if (selected.size > 0) { setSelected(new Set()); setConfirmAction(null); }
+                if (document.activeElement === searchInputRef.current) { searchInputRef.current?.blur(); }
             }
         }
         document.addEventListener('keydown', onKey);
         return () => document.removeEventListener('keydown', onKey);
-    }, []);
+    }, [selected.size]);
 
     const filtered = useMemo(() => {
         if (!searchQuery.trim()) return domains;
@@ -169,6 +201,18 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters }: Props) {
         }
     }
 
+    function copySelectedNames() {
+        const names = filtered.filter(d => selected.has(d.id)).map(d => d.domain).join('\n');
+        navigator.clipboard.writeText(names);
+        toast.success(`Copied ${selected.size} domain names`);
+    }
+
+    function handleRefresh() {
+        setRefreshing(true);
+        router.refresh();
+        setTimeout(() => setRefreshing(false), 1000);
+    }
+
     function exportCsv() {
         const header = 'Domain,Status,Tier,Niche,Template,Deployed,Renewal';
         const rows = domains.map(d =>
@@ -208,10 +252,23 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters }: Props) {
                     </button>
                 )}
             </div>
+            {searchQuery && (
+                <p className="text-xs text-muted-foreground px-1">
+                    {filtered.length} of {domains.length} domains match
+                </p>
+            )}
 
             {someSelected && (
-                <div className="flex items-center gap-3 rounded-lg border bg-muted/50 px-4 py-2 animate-in slide-in-from-top-2">
+                <div className="flex items-center gap-3 rounded-lg border bg-muted/50 px-4 py-2 animate-in slide-in-from-top-2 sticky top-0 z-20">
                     <span className="text-sm font-medium">{selected.size} selected</span>
+                    {allSelected && selected.size < domains.length && (
+                        <button
+                            onClick={() => setSelected(new Set(domains.map(d => d.id)))}
+                            className="text-xs text-primary hover:underline"
+                        >
+                            Select all {domains.length} domains
+                        </button>
+                    )}
                     {confirmAction ? (
                         <>
                             <span className="text-sm text-amber-600 font-medium">{confirmAction.label} {selected.size} domains?</span>
@@ -225,6 +282,9 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters }: Props) {
                             <Button size="sm" variant="outline" onClick={() => setConfirmAction({ endpoint: '/api/domains/bulk-seed', label: 'Seed' })} disabled={acting}>Seed Content</Button>
                         </>
                     )}
+                    <Button size="sm" variant="ghost" onClick={copySelectedNames} disabled={acting} title="Copy selected domain names">
+                        <Clipboard className="h-3.5 w-3.5 mr-1" />Copy
+                    </Button>
                     <Button size="sm" variant="ghost" onClick={() => { setSelected(new Set()); setConfirmAction(null); }} disabled={acting}>Clear</Button>
                     {bulkProgress && (
                         <div className="flex items-center gap-2 ml-auto">
@@ -250,8 +310,21 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters }: Props) {
                     const sCfg = statusConfig[domain.status] || { color: 'bg-gray-500', label: domain.status };
                     const t = domain.tier || 3;
                     const tCfg = tierConfig[t] || tierConfig[3];
+                    const queueHint = queueHints[domain.id];
                     return (
-                        <div key={domain.id} className={cn('rounded-lg border p-3 space-y-2', selected.has(domain.id) && 'bg-muted/40')}>
+                        <div
+                            key={domain.id}
+                            className={cn('rounded-lg border p-3 space-y-2 transition-transform', selected.has(domain.id) && 'bg-muted/40')}
+                            onTouchStart={(e) => {
+                                const touch = e.touches[0];
+                                (e.currentTarget as HTMLElement).dataset.sx = String(touch.clientX);
+                            }}
+                            onTouchEnd={(e) => {
+                                const sx = Number((e.currentTarget as HTMLElement).dataset.sx || 0);
+                                const ex = e.changedTouches[0].clientX;
+                                if (ex - sx > 80) toggle(domain.id);
+                            }}
+                        >
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-2">
                                     <input type="checkbox" checked={selected.has(domain.id)} onChange={() => toggle(domain.id)} className="h-4 w-4 accent-primary" aria-label={`Select ${domain.domain}`} />
@@ -266,8 +339,30 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters }: Props) {
                                 {domain.niche && <Badge variant="outline" className="text-[10px]">{domain.niche}</Badge>}
                                 {domain.isDeployed && <Badge variant="secondary" className="bg-green-100 text-green-800 text-[10px]">Live</Badge>}
                             </div>
+                            {queueHint && queueHint.total > 0 && (
+                                <div className="flex flex-wrap gap-1">
+                                    {queueHint.failed > 0 && (
+                                        <Badge variant="outline" className="text-[10px] border-red-200 text-red-700">
+                                            F {queueHint.failed}
+                                        </Badge>
+                                    )}
+                                    {queueHint.processing > 0 && (
+                                        <Badge variant="outline" className="text-[10px] border-blue-200 text-blue-700">
+                                            R {queueHint.processing}
+                                        </Badge>
+                                    )}
+                                    {queueHint.pending > 0 && (
+                                        <Badge variant="outline" className="text-[10px] border-yellow-300 text-yellow-800">
+                                            P {queueHint.pending}
+                                        </Badge>
+                                    )}
+                                    <Link href={`/dashboard/queue?domainId=${domain.id}`} className="text-[10px] text-blue-600 hover:underline">
+                                        Queue
+                                    </Link>
+                                </div>
+                            )}
                             {domain.renewalDate && domain.renewalDate !== '—' && (
-                                <p className={cn('text-[10px] text-muted-foreground', renewalUrgency(domain.renewalDate))}>Renewal: {relativeDate(domain.renewalDate)}</p>
+                                <p className={cn('text-[10px] text-muted-foreground', renewalUrgency(domain.renewalDate))} title={formatExactDate(domain.renewalDate)}>Renewal: {relativeDate(domain.renewalDate)}</p>
                             )}
                         </div>
                     );
@@ -289,6 +384,9 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters }: Props) {
                     </Button>
                 )}
                 <Button size="sm" variant="ghost" onClick={exportCsv}>Export CSV</Button>
+                <Button size="sm" variant="ghost" onClick={handleRefresh} disabled={refreshing} title="Refresh data">
+                    <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} />
+                </Button>
             </div>
 
             {/* Grid View */}
@@ -303,6 +401,7 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters }: Props) {
                         const sCfg = statusConfig[domain.status] || { color: 'bg-gray-500', label: domain.status };
                         const t = domain.tier || 3;
                         const tCfg = tierConfig[t] || tierConfig[3];
+                        const queueHint = queueHints[domain.id];
                         return (
                             <div key={domain.id} className={cn('rounded-lg border p-3 space-y-2 hover:border-primary/40 transition-colors', selected.has(domain.id) && 'bg-muted/40 border-primary/30')}>
                                 <div className="flex items-center justify-between">
@@ -318,8 +417,30 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters }: Props) {
                                     {domain.niche && <Badge variant="outline" className="text-[10px]">{domain.niche}</Badge>}
                                     {domain.isDeployed && <Badge variant="secondary" className="bg-green-100 text-green-800 text-[10px]">Live</Badge>}
                                 </div>
+                                {queueHint && queueHint.total > 0 && (
+                                    <div className="flex flex-wrap gap-1">
+                                        {queueHint.failed > 0 && (
+                                            <Badge variant="outline" className="text-[10px] border-red-200 text-red-700">
+                                                F {queueHint.failed}
+                                            </Badge>
+                                        )}
+                                        {queueHint.processing > 0 && (
+                                            <Badge variant="outline" className="text-[10px] border-blue-200 text-blue-700">
+                                                R {queueHint.processing}
+                                            </Badge>
+                                        )}
+                                        {queueHint.pending > 0 && (
+                                            <Badge variant="outline" className="text-[10px] border-yellow-300 text-yellow-800">
+                                                P {queueHint.pending}
+                                            </Badge>
+                                        )}
+                                        <Link href={`/dashboard/queue?domainId=${domain.id}`} className="text-[10px] text-blue-600 hover:underline">
+                                            Queue
+                                        </Link>
+                                    </div>
+                                )}
                                 {domain.renewalDate && domain.renewalDate !== '\u2014' && (
-                                    <p className={cn('text-[10px] text-muted-foreground', renewalUrgency(domain.renewalDate))}>Renewal: {relativeDate(domain.renewalDate)}</p>
+                                    <p className={cn('text-[10px] text-muted-foreground', renewalUrgency(domain.renewalDate))} title={formatExactDate(domain.renewalDate)}>Renewal: {relativeDate(domain.renewalDate)}</p>
                                 )}
                             </div>
                         );
@@ -342,6 +463,7 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters }: Props) {
                                 aria-label="Select all domains"
                             />
                         </TableHead>
+                        <TableHead className="w-8 text-[10px] text-muted-foreground/50">#</TableHead>
                         {headerSlot}
                     </TableRow>
                 </TableHeader>
@@ -381,12 +503,21 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters }: Props) {
                             </TableCell>
                         </TableRow>
                     ) : (
-                        filtered.map(domain => {
+                        filtered.map((domain, idx) => {
                             const sCfg = statusConfig[domain.status] || { color: 'bg-gray-500', label: domain.status };
                             const t = domain.tier || 3;
                             const tCfg = tierConfig[t] || tierConfig[3];
+                            const queueHint = queueHints[domain.id];
                             return (
-                                <TableRow key={domain.id} className={cn(selected.has(domain.id) ? 'bg-muted/40' : '', compact && '[&>td]:py-1 [&>td]:text-xs')}>
+                                <TableRow
+                                    key={domain.id}
+                                    className={cn(
+                                        'transition-colors duration-150 hover:bg-muted/30 cursor-pointer',
+                                        selected.has(domain.id) && 'bg-muted/40',
+                                        compact && '[&>td]:py-1 [&>td]:text-xs'
+                                    )}
+                                    onDoubleClick={() => router.push(`/dashboard/domains/${domain.id}`)}
+                                >
                                     <TableCell>
                                         <input
                                             type="checkbox"
@@ -396,23 +527,51 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters }: Props) {
                                             aria-label={`Select ${domain.domain}`}
                                         />
                                     </TableCell>
+                                    <TableCell className="text-[10px] text-muted-foreground/50 tabular-nums">{idx + 1}</TableCell>
                                     <TableCell>
-                                        <DomainHoverCard domain={domain.domain} status={domain.status} tier={domain.tier} niche={domain.niche} isDeployed={domain.isDeployed} renewalDate={domain.renewalDate}>
-                                            <Link href={`/dashboard/domains/${domain.id}`} className="font-medium hover:underline">{domain.domain}</Link>
-                                        </DomainHoverCard>
-                                        <CopyButton text={domain.domain} />
-                                        <Link href={`/dashboard/queue?domainId=${domain.id}`} className="ml-2 text-xs text-blue-600 hover:underline">Queue</Link>
-                                        {domain.isDeployed && (
-                                            <a href={`https://${domain.domain}`} target="_blank" rel="noopener noreferrer" className="ml-2 inline-flex" aria-label={`Open ${domain.domain}`}>
-                                                <ExternalLink className="h-3 w-3 text-muted-foreground" />
-                                            </a>
-                                        )}
+                                        <div className="flex flex-col gap-0.5">
+                                            <div className="flex items-center flex-wrap">
+                                                <DomainHoverCard domain={domain.domain} status={domain.status} tier={domain.tier} niche={domain.niche} isDeployed={domain.isDeployed} renewalDate={domain.renewalDate}>
+                                                    <Link href={`/dashboard/domains/${domain.id}`} className="font-medium hover:underline">{domain.domain}</Link>
+                                                </DomainHoverCard>
+                                                <CopyButton text={domain.domain} />
+                                                <Link href={`/dashboard/queue?domainId=${domain.id}`} className="ml-2 text-xs text-blue-600 hover:underline">Queue</Link>
+                                                {queueHint && queueHint.total > 0 && (
+                                                    <>
+                                                        {queueHint.failed > 0 && (
+                                                            <Badge variant="outline" className="ml-2 text-[10px] border-red-200 text-red-700">
+                                                                F {queueHint.failed}
+                                                            </Badge>
+                                                        )}
+                                                        {queueHint.processing > 0 && (
+                                                            <Badge variant="outline" className="ml-1 text-[10px] border-blue-200 text-blue-700">
+                                                                R {queueHint.processing}
+                                                            </Badge>
+                                                        )}
+                                                        {queueHint.pending > 0 && (
+                                                            <Badge variant="outline" className="ml-1 text-[10px] border-yellow-300 text-yellow-800">
+                                                                P {queueHint.pending}
+                                                            </Badge>
+                                                        )}
+                                                    </>
+                                                )}
+                                                {domain.isDeployed && (
+                                                    <a href={`https://${domain.domain}`} target="_blank" rel="noopener noreferrer" className="ml-2 inline-flex" aria-label={`Open ${domain.domain}`}>
+                                                        <ExternalLink className="h-3 w-3 text-muted-foreground" />
+                                                    </a>
+                                                )}
+                                            </div>
+                                            {domain.cloudflareAccount && (
+                                                <span className="text-[10px] text-muted-foreground">{domain.cloudflareAccount}</span>
+                                            )}
+                                        </div>
                                     </TableCell>
                                     <TableCell>
                                         <select
                                             value={domain.status}
                                             onChange={async (e) => {
                                                 const newStatus = e.target.value;
+                                                const oldStatus = domain.status;
                                                 try {
                                                     const res = await fetch(`/api/domains/${domain.id}`, {
                                                         method: 'PATCH',
@@ -420,7 +579,20 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters }: Props) {
                                                         body: JSON.stringify({ status: newStatus }),
                                                     });
                                                     if (res.ok) {
-                                                        toast.success(`${domain.domain} → ${newStatus}`);
+                                                        toast.success(`${domain.domain} → ${newStatus}`, {
+                                                            action: {
+                                                                label: 'Undo',
+                                                                onClick: async () => {
+                                                                    await fetch(`/api/domains/${domain.id}`, {
+                                                                        method: 'PATCH',
+                                                                        headers: { 'Content-Type': 'application/json' },
+                                                                        body: JSON.stringify({ status: oldStatus }),
+                                                                    });
+                                                                    toast.success(`Reverted ${domain.domain} → ${oldStatus}`);
+                                                                    router.refresh();
+                                                                },
+                                                            },
+                                                        });
                                                         router.refresh();
                                                     } else {
                                                         toast.error('Status update failed');
@@ -469,7 +641,7 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters }: Props) {
                                         )}
                                     </TableCell>
                                     <TableCell>
-                                        <span className={cn('text-sm', renewalUrgency(domain.renewalDate))} title={domain.renewalDate || undefined}>{relativeDate(domain.renewalDate)}</span>
+                                        <span className={cn('text-sm', renewalUrgency(domain.renewalDate))} title={formatExactDate(domain.renewalDate) || undefined}>{relativeDate(domain.renewalDate)}</span>
                                     </TableCell>
                                     <TableCell>
                                         <DomainActions domainId={domain.id} domainName={domain.domain} isDeployed={domain.isDeployed ?? false} />

@@ -982,11 +982,6 @@ export default function ResearchPage() {
                     </div>
                 </CardHeader>
                 <CardContent>
-                    {pipelineMessage && (
-                        <div className={`mb-3 rounded border px-3 py-2 text-sm ${pipelineMessage.startsWith('Error:') ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
-                            {pipelineMessage}
-                        </div>
-                    )}
                     {candidates.length === 0 ? (
                         <p className="text-muted-foreground text-center py-8">
                             No acquisition candidates yet. Evaluate a domain and add it to the pipeline.

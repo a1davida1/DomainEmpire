@@ -17,7 +17,7 @@ import {
     isRegistrarOwnershipStatus,
     isRegistrarTransferStatus,
 } from '@/lib/domain/registrar-operations';
-import { getDomainAnalyticsTyped } from '@/lib/analytics/cloudflare';
+import { getCloudflareApiRateLimitCooldown, getDomainAnalyticsTyped } from '@/lib/analytics/cloudflare';
 import { getDomainGSCSummary } from '@/lib/analytics/search-console';
 import { getGoDaddyRegistrarSignals } from '@/lib/deploy/godaddy';
 
@@ -749,6 +749,7 @@ async function executeCloudflareAnalyticsSync(
     const analyticsResult = await getDomainAnalyticsTyped(connection.domainName, days);
     if (analyticsResult.status === 'error') {
         const rateLimited = analyticsResult.message.includes('429');
+        const cooldown = rateLimited ? getCloudflareApiRateLimitCooldown() : null;
         return {
             status: 'partial',
             recordsProcessed: 0,
@@ -761,6 +762,12 @@ async function executeCloudflareAnalyticsSync(
                 domain: connection.domainName,
                 days,
                 reason: rateLimited ? 'rate_limited' : 'api_error',
+                ...(rateLimited && cooldown
+                    ? {
+                        rateLimitCooldownSeconds: Math.max(0, Math.ceil(cooldown.remainingMs / 1000)),
+                        rateLimitCooldownReason: cooldown.reason,
+                    }
+                    : {}),
             },
         };
     }
@@ -943,6 +950,25 @@ export async function runIntegrationConnectionSync(
         return { error: 'forbidden' as const };
     }
 
+    const [runningRun] = await db
+        .select({
+            id: integrationSyncRuns.id,
+            status: integrationSyncRuns.status,
+        })
+        .from(integrationSyncRuns)
+        .where(and(
+            eq(integrationSyncRuns.connectionId, connection.id),
+            eq(integrationSyncRuns.status, 'running'),
+        ))
+        .limit(1);
+
+    if (runningRun) {
+        return {
+            error: 'already_running' as const,
+            runId: runningRun.id,
+        };
+    }
+
     const [runStart] = await db.insert(integrationSyncRuns).values({
         connectionId: connection.id,
         runType,
@@ -971,10 +997,14 @@ export async function runIntegrationConnectionSync(
             .where(eq(integrationSyncRuns.id, runStart.id))
             .returning();
 
+        const nextConnectionStatus = connection.status === 'disabled'
+            ? 'disabled'
+            : result.status === 'failed'
+                ? 'error'
+                : 'connected';
+
         await db.update(integrationConnections).set({
-            status: result.status === 'success'
-                ? (connection.status === 'disabled' ? 'disabled' : 'connected')
-                : 'error',
+            status: nextConnectionStatus,
             lastSyncAt: completedAt,
             lastSyncStatus: toSyncStatusForConnection(result.status),
             lastSyncError: result.errorMessage ?? null,

@@ -3,6 +3,11 @@ import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { getRequestUser, requireRole } from '@/lib/auth';
 import { createRateLimiter, getClientIp } from '@/lib/rate-limit';
 import { cloudflareShardHealth, db, integrationConnections } from '@/lib/db';
+import {
+    evaluateCloudflareShardSaturation,
+    resolveCloudflareShardSaturationThresholds,
+    summarizeCloudflareRegionSaturation,
+} from '@/lib/integrations/cloudflare-shard-saturation';
 
 const shardHealthLimiter = createRateLimiter('integration_cloudflare_shard_health_summary', {
     maxRequests: 90,
@@ -122,6 +127,8 @@ export async function GET(request: NextRequest) {
     }
 
     try {
+        const saturationThresholds = resolveCloudflareShardSaturationThresholds(process.env);
+
         const connections = await db
             .select({
                 id: integrationConnections.id,
@@ -198,6 +205,16 @@ export async function GET(request: NextRequest) {
             const cooldownRemainingSeconds = cooldownUntil instanceof Date
                 ? Math.max(0, Math.ceil((cooldownUntil.getTime() - nowMs) / 1000))
                 : 0;
+            const saturation = evaluateCloudflareShardSaturation({
+                region: normalizeRegion(connection.config.region)
+                    ?? normalizeRegion(connection.config.routingRegion)
+                    ?? normalizeRegion(connection.config.shardRegion),
+                penalty: health?.penalty ?? 0,
+                cooldownRemainingSeconds,
+                successCount: health?.successCount ?? 0,
+                rateLimitCount: health?.rateLimitCount ?? 0,
+                failureCount: health?.failureCount ?? 0,
+            }, saturationThresholds);
 
             return {
                 connectionId: connection.id,
@@ -207,16 +224,17 @@ export async function GET(request: NextRequest) {
                 hasCredential: Boolean(connection.encryptedCredential),
                 accountRef,
                 accountId: health?.accountId ?? accountIdFromConfig,
-                region: normalizeRegion(connection.config.region)
-                    ?? normalizeRegion(connection.config.routingRegion)
-                    ?? normalizeRegion(connection.config.shardRegion),
+                region: saturation.region,
                 baseWeight: resolveShardWeight(connection.config),
-                penalty: health?.penalty ?? 0,
+                penalty: saturation.penalty,
                 cooldownUntil: cooldownUntil ? cooldownUntil.toISOString() : null,
                 cooldownRemainingSeconds,
-                successCount: health?.successCount ?? 0,
-                rateLimitCount: health?.rateLimitCount ?? 0,
-                failureCount: health?.failureCount ?? 0,
+                successCount: saturation.successCount,
+                rateLimitCount: saturation.rateLimitCount,
+                failureCount: saturation.failureCount,
+                observedCount: saturation.observedCount,
+                instabilityRatio: saturation.instabilityRatio,
+                saturationSeverity: saturation.saturationSeverity,
                 lastOutcome: health?.lastOutcome ?? null,
                 lastOutcomeAt: health?.lastOutcomeAt ? health.lastOutcomeAt.toISOString() : null,
                 healthUpdatedAt: health?.updatedAt ? health.updatedAt.toISOString() : null,
@@ -227,6 +245,21 @@ export async function GET(request: NextRequest) {
         const connectionCount = rows.length;
         const coolingCount = rows.filter((row) => row.cooldownRemainingSeconds > 0).length;
         const totalPenalty = rows.reduce((sum, row) => sum + row.penalty, 0);
+        const warningShards = rows.filter((row) => row.saturationSeverity === 'warning').length;
+        const criticalShards = rows.filter((row) => row.saturationSeverity === 'critical').length;
+        const regionSaturationSummary = summarizeCloudflareRegionSaturation({
+            rows: rows.map((row) => ({
+                region: row.region,
+                penalty: row.penalty,
+                cooldownRemainingSeconds: row.cooldownRemainingSeconds,
+                instabilityRatio: row.instabilityRatio,
+                saturationSeverity: row.saturationSeverity,
+            })),
+            thresholds: saturationThresholds,
+        });
+        const regionSaturation = regionSaturationSummary.rows;
+        const warningRegions = regionSaturationSummary.warningRegions;
+        const criticalRegions = regionSaturationSummary.criticalRegions;
 
         return NextResponse.json(
             {
@@ -239,6 +272,13 @@ export async function GET(request: NextRequest) {
                     totalSuccessCount: rows.reduce((sum, row) => sum + row.successCount, 0),
                     totalRateLimitCount: rows.reduce((sum, row) => sum + row.rateLimitCount, 0),
                     totalFailureCount: rows.reduce((sum, row) => sum + row.failureCount, 0),
+                    saturation: {
+                        warningShards,
+                        criticalShards,
+                        warningRegions,
+                        criticalRegions,
+                        thresholds: saturationThresholds,
+                    },
                 },
                 routingPolicy: {
                     defaultRegion: normalizeRegion(process.env.CLOUDFLARE_SHARD_DEFAULT_REGION) ?? null,
@@ -251,6 +291,7 @@ export async function GET(request: NextRequest) {
                     )],
                     regionFallbacks: parseRegionFallbacks(process.env.CLOUDFLARE_SHARD_REGION_FALLBACKS),
                 },
+                regionSaturation,
                 rows,
                 generatedAt: new Date().toISOString(),
             },

@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth';
+import { requireAuth, getRequestUser } from '@/lib/auth';
 import { db, domains } from '@/lib/db';
-import { isNull } from 'drizzle-orm';
+import { and, isNull } from 'drizzle-orm';
 import { getAIClient } from '@/lib/ai/openrouter';
+
+const DOMAIN_REGEX = /^(?!-)(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i;
+function isValidDomain(value: string): boolean {
+    return DOMAIN_REGEX.test(value) && value.length <= 253;
+}
 
 /**
  * POST /api/research/suggest
@@ -11,6 +16,9 @@ import { getAIClient } from '@/lib/ai/openrouter';
 export async function POST(request: NextRequest) {
     const authError = await requireAuth(request);
     if (authError) return authError;
+
+    // Single-tenant app: requireAuth gates access. No per-user domain scoping needed.
+    const _user = getRequestUser(request);
 
     try {
         const body = await request.json().catch(() => ({}));
@@ -28,7 +36,7 @@ export async function POST(request: NextRequest) {
                 monetizationModel: domains.monetizationModel,
             })
             .from(domains)
-            .where(isNull(domains.deletedAt));
+            .where(and(isNull(domains.deletedAt)));
 
         // Build portfolio summary for AI
         const nicheCount = new Map<string, number>();
@@ -80,7 +88,7 @@ Return ONLY a valid JSON array of domain name strings (with .com TLD):
         const result = await ai.generateJSON<string[]>('keywordResearch', prompt);
 
         const suggestions = Array.isArray(result.data)
-            ? result.data.filter((s): s is string => typeof s === 'string' && s.includes('.'))
+            ? result.data.filter((s): s is string => typeof s === 'string' && isValidDomain(s))
             : [];
 
         return NextResponse.json({

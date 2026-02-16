@@ -11,6 +11,7 @@ type QueueProcessResponse = {
     processed?: number;
     failed?: number;
     staleLocksCleaned?: number;
+    transientRetriesQueued?: number;
 };
 
 export function QueueAutoProcessor({ defaultMaxJobs = 10 }: { defaultMaxJobs?: number }) {
@@ -70,10 +71,11 @@ export function QueueAutoProcessor({ defaultMaxJobs = 10 }: { defaultMaxJobs?: n
                 const processed = typeof body.processed === 'number' ? body.processed : 0;
                 const failed = typeof body.failed === 'number' ? body.failed : 0;
                 const staleLocks = typeof body.staleLocksCleaned === 'number' ? body.staleLocksCleaned : 0;
+                const transientRetriesQueued = typeof body.transientRetriesQueued === 'number' ? body.transientRetriesQueued : 0;
 
-                setLastResult(`processed ${processed}, failed ${failed}, stale locks ${staleLocks}`);
+                setLastResult(`processed ${processed}, failed ${failed}, stale locks ${staleLocks}, transient retries ${transientRetriesQueued}`);
                 setError(null);
-                if (processed > 0 || failed > 0 || staleLocks > 0) {
+                if (processed > 0 || failed > 0 || staleLocks > 0 || transientRetriesQueued > 0) {
                     router.refresh();
                 }
             } catch (runError) {

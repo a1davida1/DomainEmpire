@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
     const corsHeaders = {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Headers': 'Content-Type, X-AB-Subject',
     };
 
     try {
@@ -79,7 +79,8 @@ export async function POST(request: NextRequest) {
         let resolvedVariantId = payload.variantId ?? null;
         let assignment: ReturnType<typeof assignVariantBySubject> | null = null;
 
-        if (!resolvedVariantId || payload.subjectKey) {
+        const hasSubjectOverride = Boolean(payload.subjectKey?.trim()) || request.headers.has('x-ab-subject');
+        if (!resolvedVariantId || hasSubjectOverride) {
             const [test] = await db.select().from(abTests).where(eq(abTests.id, payload.testId)).limit(1);
             if (!test) {
                 return NextResponse.json(
@@ -160,7 +161,7 @@ export async function OPTIONS() {
         headers: {
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type',
+            'Access-Control-Allow-Headers': 'Content-Type, X-AB-Subject',
         },
     });
 }

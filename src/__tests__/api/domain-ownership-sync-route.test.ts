@@ -112,5 +112,24 @@ describe('domain ownership sync route', () => {
             expect.objectContaining({ runType: 'manual', days: 90 }),
         );
     });
-});
 
+    it('returns 409 when registrar sync is already running', async () => {
+        mockRunIntegrationConnectionSync.mockResolvedValue({
+            error: 'already_running',
+            runId: 'run-abc-123',
+        });
+
+        const response = await POST(
+            makeJsonRequest(
+                'http://localhost/api/domains/00000000-0000-4000-8000-000000000001/ownership/sync',
+                {},
+            ),
+            { params: Promise.resolve({ id: '00000000-0000-4000-8000-000000000001' }) },
+        );
+
+        expect(response.status).toBe(409);
+        const body = await response.json();
+        expect(body.code).toBe('sync_already_running');
+        expect(body.runId).toBe('run-abc-123');
+    });
+});

@@ -53,6 +53,13 @@ export type RenewalWindow =
     | 'within_90_days'
     | 'beyond_90_days';
 
+export type RenewalRoiBand =
+    | 'renew'
+    | 'monitor'
+    | 'review'
+    | 'drop_candidate'
+    | 'insufficient_data';
+
 export function isRegistrarOwnershipStatus(
     value: string | null | undefined,
 ): value is RegistrarOwnershipStatus {
@@ -197,5 +204,84 @@ export function computeRegistrarExpirationRisk(input: {
         daysUntilRenewal,
         renewalWindow,
         recommendation: riskRecommendation(risk, daysUntilRenewal),
+    };
+}
+
+export function computeRenewalRoiRecommendation(input: {
+    renewalPrice: number | null | undefined;
+    trailingRevenue90d: number | null | undefined;
+    trailingCost90d?: number | null | undefined;
+    risk: RegistrarExpirationRisk;
+    daysUntilRenewal: number | null;
+}) {
+    const renewalPrice = typeof input.renewalPrice === 'number' && Number.isFinite(input.renewalPrice)
+        ? Math.max(0, input.renewalPrice)
+        : null;
+    const trailingRevenue90d = typeof input.trailingRevenue90d === 'number' && Number.isFinite(input.trailingRevenue90d)
+        ? Math.max(0, input.trailingRevenue90d)
+        : 0;
+    const trailingCost90d = typeof input.trailingCost90d === 'number' && Number.isFinite(input.trailingCost90d)
+        ? Math.max(0, input.trailingCost90d)
+        : 0;
+    const trailingNet90d = trailingRevenue90d - trailingCost90d;
+
+    if (!renewalPrice || renewalPrice <= 0) {
+        return {
+            band: 'insufficient_data' as RenewalRoiBand,
+            renewalPrice,
+            trailingRevenue90d,
+            trailingCost90d,
+            trailingNet90d,
+            coverageRatio: null,
+            paybackDays: null,
+            recommendation: 'Set an accurate renewal price to compute renewal ROI guidance.',
+        };
+    }
+
+    const coverageRatio = trailingRevenue90d / renewalPrice;
+    const paybackDays = trailingRevenue90d > 0
+        ? Number((renewalPrice / (trailingRevenue90d / 90)).toFixed(1))
+        : null;
+
+    let band: RenewalRoiBand = 'drop_candidate';
+    if (coverageRatio >= 2 || trailingNet90d >= renewalPrice) {
+        band = 'renew';
+    } else if (coverageRatio >= 1 || (paybackDays !== null && paybackDays <= 120)) {
+        band = 'monitor';
+    } else if (coverageRatio >= 0.4 || trailingNet90d > 0) {
+        band = 'review';
+    }
+
+    if (input.risk === 'expired' || input.risk === 'critical') {
+        if (band === 'monitor' || band === 'renew') {
+            band = 'review';
+        }
+    }
+
+    const daysText = input.daysUntilRenewal === null
+        ? 'unknown renewal window'
+        : `${Math.max(0, input.daysUntilRenewal)} day(s) until renewal`;
+    const recommendation = (() => {
+        if (band === 'renew') {
+            return `Renew now; trailing 90d revenue covers ${coverageRatio.toFixed(2)}x renewal cost (${daysText}).`;
+        }
+        if (band === 'monitor') {
+            return `Renewal is likely viable, but monitor conversion/revenue trend before payment (${daysText}).`;
+        }
+        if (band === 'review') {
+            return `Manual review required before renewal; economics are borderline and timing is sensitive (${daysText}).`;
+        }
+        return `Consider hold/drop unless strategic value justifies renewal; trailing revenue covers only ${coverageRatio.toFixed(2)}x cost (${daysText}).`;
+    })();
+
+    return {
+        band,
+        renewalPrice,
+        trailingRevenue90d: Number(trailingRevenue90d.toFixed(2)),
+        trailingCost90d: Number(trailingCost90d.toFixed(2)),
+        trailingNet90d: Number(trailingNet90d.toFixed(2)),
+        coverageRatio: Number(coverageRatio.toFixed(4)),
+        paybackDays,
+        recommendation,
     };
 }

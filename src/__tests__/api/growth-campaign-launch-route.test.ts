@@ -8,6 +8,7 @@ const mockEnqueueContentJob = vi.fn();
 const mockEvaluateGrowthLaunchFreeze = vi.fn();
 const mockEmitGrowthLaunchFreezeIncident = vi.fn();
 const mockShouldBlockGrowthLaunchForScope = vi.fn();
+const mockAdvanceDomainLifecycleForAcquisition = vi.fn();
 
 const mockSelect = vi.fn();
 const mockFrom = vi.fn();
@@ -49,6 +50,11 @@ const mockReviewTasksTable = {
     createdBy: 'created_by',
 };
 
+const mockDomainResearchTable = {
+    id: 'id',
+    domainId: 'domain_id',
+};
+
 let campaignRows: Array<Record<string, unknown>> = [];
 let queueRows: Array<Record<string, unknown>> = [];
 let promotionJobRows: Array<Record<string, unknown>> = [];
@@ -82,6 +88,10 @@ vi.mock('@/lib/growth/launch-freeze', () => ({
     evaluateGrowthLaunchFreeze: mockEvaluateGrowthLaunchFreeze,
     emitGrowthLaunchFreezeIncident: mockEmitGrowthLaunchFreezeIncident,
     shouldBlockGrowthLaunchForScope: mockShouldBlockGrowthLaunchForScope,
+}));
+
+vi.mock('@/lib/domain/lifecycle-sync', () => ({
+    advanceDomainLifecycleForAcquisition: mockAdvanceDomainLifecycleForAcquisition,
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -148,6 +158,7 @@ vi.mock('@/lib/db', () => ({
     contentQueue: mockContentQueueTable,
     promotionJobs: mockPromotionJobsTable,
     reviewTasks: mockReviewTasksTable,
+    domainResearch: mockDomainResearchTable,
 }));
 
 const { POST } = await import('@/app/api/growth/campaigns/[id]/launch/route');
@@ -180,6 +191,13 @@ describe('growth campaign launch route', () => {
         mockShouldBlockGrowthLaunchForScope.mockImplementation((input: { state?: { active?: boolean } }) => {
             return input?.state?.active === true;
         });
+        mockAdvanceDomainLifecycleForAcquisition.mockResolvedValue({
+            changed: false,
+            fromState: null,
+            toState: null,
+            appliedStates: [],
+            skippedReason: 'not_applicable',
+        });
 
         campaignRows = [];
         queueRows = [];
@@ -191,6 +209,11 @@ describe('growth campaign launch route', () => {
         mockFrom.mockImplementation((table: unknown) => {
             if (table === mockPromotionCampaignsTable) {
                 return {
+                    leftJoin: () => ({
+                        where: () => ({
+                            limit: async () => campaignRows,
+                        }),
+                    }),
                     where: () => ({
                         limit: async () => campaignRows,
                     }),
@@ -358,5 +381,30 @@ describe('growth campaign launch route', () => {
         expect(response.status).toBe(202);
         expect(mockEmitGrowthLaunchFreezeIncident).not.toHaveBeenCalled();
         expect(mockEnqueueContentJob).toHaveBeenCalled();
+    });
+
+    it('advances lifecycle to growth when campaign domain is known', async () => {
+        campaignRows = [{
+            id: 'campaign-1',
+            status: 'draft',
+            domainResearchId: 'research-1',
+            domainId: '33333333-3333-4333-8333-333333333333',
+            channels: ['pinterest'],
+            metrics: {},
+        }];
+        queueRows = [];
+        promotionJobRows = [{ id: 'promotion-job-1' }];
+
+        const response = await POST(
+            makeRequest({}),
+            { params: Promise.resolve({ id: '22222222-2222-4222-8222-222222222222' }) },
+        );
+
+        expect(response.status).toBe(202);
+        expect(mockAdvanceDomainLifecycleForAcquisition).toHaveBeenCalledWith(expect.objectContaining({
+            domainId: '33333333-3333-4333-8333-333333333333',
+            targetState: 'growth',
+            reason: 'Campaign launch queued',
+        }));
     });
 });

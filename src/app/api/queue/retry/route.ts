@@ -11,19 +11,21 @@ export async function POST(request: NextRequest) {
     try {
         const body = await request.json().catch(() => ({}));
         const limit = Math.min(body.limit || 10, 50); // Cap at 50 to prevent overload
+        const mode = body.mode === 'transient' ? 'transient' : 'all';
 
         if (limit <= 0) {
             return NextResponse.json({ error: 'Invalid limit' }, { status: 400 });
         }
 
-        const retriedCount = await retryFailedJobs(limit);
+        const retriedCount = await retryFailedJobs(limit, { mode });
 
         const backend = await getContentQueueBackendHealth();
         return NextResponse.json({
             retriedCount,
+            mode,
             message: retriedCount > 0
-                ? `Queued ${retriedCount} failed jobs for retry`
-                : 'No failed jobs to retry',
+                ? `Queued ${retriedCount} ${mode} failed jobs for retry`
+                : `No ${mode} failed jobs to retry`,
             backend,
         });
     } catch (error) {

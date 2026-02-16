@@ -6,6 +6,7 @@ import { ScrollToTop } from '@/components/dashboard/ScrollToTop';
 import { KeyboardShortcutsHelp } from '@/components/dashboard/KeyboardShortcutsHelp';
 import { PageTitle } from '@/components/dashboard/PageTitle';
 import { PageTransition } from '@/components/dashboard/PageTransition';
+import { QueueBackgroundProcessor } from '@/components/dashboard/QueueBackgroundProcessor';
 import { verifyAuth } from '@/lib/auth';
 import { redirect } from 'next/navigation';
 
@@ -37,6 +38,7 @@ export default async function DashboardLayout({
             <ScrollToTop />
             <KeyboardShortcutsHelp />
             <PageTitle />
+            <QueueBackgroundProcessor />
         </div>
     );
 }

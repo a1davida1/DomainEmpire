@@ -29,6 +29,13 @@ const ACQUISITION_PROGRESS_ORDER: AcquisitionProgressState[] = [
 ];
 
 export type AcquisitionLifecycleTargetState = 'underwriting' | 'approved' | 'acquired';
+export type LifecycleProgressTargetState =
+    | 'underwriting'
+    | 'approved'
+    | 'acquired'
+    | 'build'
+    | 'growth'
+    | 'monetized';
 
 function resolveLifecycleState(rawState: string | null | undefined): DomainLifecycleState {
     if (isDomainLifecycleState(rawState)) return rawState;
@@ -49,7 +56,7 @@ export type AcquisitionLifecycleAdvanceResult = {
 
 export async function advanceDomainLifecycleForAcquisition(input: {
     domainId: string;
-    targetState: AcquisitionLifecycleTargetState;
+    targetState: LifecycleProgressTargetState;
     actorId?: string | null;
     actorRole?: string | null;
     reason: string;

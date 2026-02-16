@@ -43,6 +43,16 @@ export async function POST(
             if (result.error === 'forbidden') {
                 return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
             }
+            if (result.error === 'already_running') {
+                return NextResponse.json(
+                    {
+                        error: 'A sync is already running for this connection',
+                        code: 'sync_already_running',
+                        runId: result.runId,
+                    },
+                    { status: 409 },
+                );
+            }
         }
 
         return NextResponse.json({

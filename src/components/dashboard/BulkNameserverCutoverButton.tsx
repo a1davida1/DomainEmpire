@@ -32,8 +32,8 @@ type ZoneCreateBatchResult = {
     createdCount: number;
     existingCount: number;
     failedCount: number;
-    created: Array<{ domain: string; nameservers?: string[] }>;
-    existing: Array<{ domain: string; nameservers?: string[] }>;
+    created: Array<{ domainId?: string; domain: string; nameservers?: string[] }>;
+    existing: Array<{ domainId?: string; domain: string; nameservers?: string[] }>;
     failed: Array<{ domain: string; error: string }>;
 };
 
@@ -43,7 +43,8 @@ type PreflightAggregate = {
     skipped: number;
     failures: NameserverFailure[];
     skips: Array<{ domain: string; reason: string }>;
-    readyPreview: Array<{ domain: string; nameservers: string[] }>;
+    readyPreview: Array<{ domainId?: string; domain: string; nameservers: string[] }>;
+    perDomainNameservers: Record<string, string[]>;
 };
 
 export function BulkNameserverCutoverButton({ domainIds }: Readonly<BulkNameserverCutoverButtonProps>) {
@@ -72,7 +73,16 @@ export function BulkNameserverCutoverButton({ domainIds }: Readonly<BulkNameserv
         batchNum: number,
         totalBatches: number,
         dryRun: boolean,
+        perDomainNameserverOverrides?: Record<string, string[]>,
     ): Promise<BatchResult> {
+        const perDomainNameservers = perDomainNameserverOverrides
+            ? Object.fromEntries(
+                batch
+                    .map((domainId) => [domainId, perDomainNameserverOverrides[domainId]] as const)
+                    .filter((entry): entry is readonly [string, string[]] => Array.isArray(entry[1]) && entry[1].length >= 2),
+            )
+            : {};
+
         const response = await fetch('/api/domains/bulk-nameservers', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -80,6 +90,7 @@ export function BulkNameserverCutoverButton({ domainIds }: Readonly<BulkNameserv
                 domainIds: batch,
                 dryRun,
                 reason: `Bulk nameserver cutover batch ${batchNum}/${totalBatches} from domains dashboard`,
+                ...(Object.keys(perDomainNameservers).length > 0 ? { perDomainNameservers } : {}),
             }),
         });
 
@@ -131,17 +142,27 @@ export function BulkNameserverCutoverButton({ domainIds }: Readonly<BulkNameserv
     async function runPreflightAcrossBatches(
         batches: string[][],
         labelPrefix: string,
+        perDomainNameserverOverrides?: Record<string, string[]>,
     ): Promise<PreflightAggregate> {
         let ready = 0;
         let failed = 0;
         let skipped = 0;
         const failures: NameserverFailure[] = [];
         const skips: Array<{ domain: string; reason: string }> = [];
-        const readyPreview: Array<{ domain: string; nameservers: string[] }> = [];
+        const readyPreview: Array<{ domainId?: string; domain: string; nameservers: string[] }> = [];
+        const resolvedPerDomainNameservers: Record<string, string[]> = {
+            ...(perDomainNameserverOverrides || {}),
+        };
 
         for (let i = 0; i < batches.length; i++) {
             setProgress(`${labelPrefix} batch ${i + 1}/${batches.length}...`);
-            const result = await runBatch(batches[i], i + 1, batches.length, true);
+            const result = await runBatch(
+                batches[i],
+                i + 1,
+                batches.length,
+                true,
+                resolvedPerDomainNameservers,
+            );
             ready += result.readyCount;
             failed += result.failedCount;
             skipped += result.skippedCount;
@@ -151,6 +172,11 @@ export function BulkNameserverCutoverButton({ domainIds }: Readonly<BulkNameserv
                 domain: entry.domain,
                 nameservers: entry.nameservers,
             })));
+            for (const entry of result.ready) {
+                if (!entry.domainId) continue;
+                if (!Array.isArray(entry.nameservers) || entry.nameservers.length < 2) continue;
+                resolvedPerDomainNameservers[entry.domainId] = entry.nameservers;
+            }
         }
 
         return {
@@ -160,6 +186,7 @@ export function BulkNameserverCutoverButton({ domainIds }: Readonly<BulkNameserv
             failures,
             skips,
             readyPreview,
+            perDomainNameservers: resolvedPerDomainNameservers,
         };
     }
 
@@ -169,10 +196,12 @@ export function BulkNameserverCutoverButton({ domainIds }: Readonly<BulkNameserv
 
         const batches = chunkIds(domainIds);
         setLoading(true);
+        let nameserverOverrides: Record<string, string[]> = {};
         let preflight: PreflightAggregate;
 
         try {
             preflight = await runPreflightAcrossBatches(batches, 'Preflight');
+            nameserverOverrides = preflight.perDomainNameservers;
         } catch (error) {
             setProgress('');
             setLoading(false);
@@ -206,6 +235,7 @@ export function BulkNameserverCutoverButton({ domainIds }: Readonly<BulkNameserv
                 let existing = 0;
                 let failed = 0;
                 const failedRows: Array<{ domain: string; error: string }> = [];
+                const createdNameserverOverrides: Record<string, string[]> = {};
 
                 try {
                     for (let i = 0; i < zoneBatches.length; i++) {
@@ -215,6 +245,10 @@ export function BulkNameserverCutoverButton({ domainIds }: Readonly<BulkNameserv
                         existing += result.existingCount;
                         failed += result.failedCount;
                         failedRows.push(...result.failed);
+                        for (const row of [...result.created, ...result.existing]) {
+                            if (!row.domainId || !Array.isArray(row.nameservers) || row.nameservers.length < 2) continue;
+                            createdNameserverOverrides[row.domainId] = row.nameservers;
+                        }
                     }
                 } catch (zoneError) {
                     setProgress('');
@@ -222,6 +256,11 @@ export function BulkNameserverCutoverButton({ domainIds }: Readonly<BulkNameserv
                     alert(zoneError instanceof Error ? zoneError.message : 'Bulk zone creation failed');
                     return;
                 }
+
+                nameserverOverrides = {
+                    ...nameserverOverrides,
+                    ...createdNameserverOverrides,
+                };
 
                 const failedPreview = failedRows
                     .slice(0, 5)
@@ -234,7 +273,12 @@ export function BulkNameserverCutoverButton({ domainIds }: Readonly<BulkNameserv
                 );
 
                 try {
-                    preflight = await runPreflightAcrossBatches(batches, 'Preflight re-check');
+                    preflight = await runPreflightAcrossBatches(
+                        batches,
+                        'Preflight re-check',
+                        nameserverOverrides,
+                    );
+                    nameserverOverrides = preflight.perDomainNameservers;
                 } catch (error) {
                     setProgress('');
                     setLoading(false);
@@ -303,7 +347,13 @@ export function BulkNameserverCutoverButton({ domainIds }: Readonly<BulkNameserv
             for (let i = 0; i < batches.length; i++) {
                 setProgress(`Switching nameservers batch ${i + 1}/${batches.length}...`);
                 try {
-                    const result = await runBatch(batches[i], i + 1, batches.length, false);
+                    const result = await runBatch(
+                        batches[i],
+                        i + 1,
+                        batches.length,
+                        false,
+                        nameserverOverrides,
+                    );
                     totalSuccess += result.successCount;
                     totalFailed += result.failedCount;
                     totalSkipped += result.skippedCount;

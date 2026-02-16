@@ -66,6 +66,14 @@ const mockDb = {
                 };
             }
 
+            if (table === integrationSyncRunsTable) {
+                return {
+                    where: () => ({
+                        limit: async () => [],
+                    }),
+                };
+            }
+
             throw new Error(`Unexpected select.from table: ${String(table)}`);
         },
     })),

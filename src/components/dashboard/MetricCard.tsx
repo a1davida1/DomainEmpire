@@ -2,8 +2,7 @@
 
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
-import { LucideIcon } from 'lucide-react';
-import { useState, useEffect, useRef } from 'react';
+import { type ReactNode, useState, useEffect, useRef } from 'react';
 
 function AnimatedNumber({ value }: { value: number }) {
     const [display, setDisplay] = useState(0);
@@ -35,7 +34,7 @@ interface MetricCardProps {
     title: string;
     value: string | number;
     subtitle?: string;
-    icon: LucideIcon;
+    icon: ReactNode;
     trend?: {
         value: number;
         isPositive: boolean;
@@ -64,7 +63,7 @@ export function MetricCard({
     title,
     value,
     subtitle,
-    icon: Icon,
+    icon,
     trend,
     className,
 }: MetricCardProps) {
@@ -94,7 +93,7 @@ export function MetricCard({
                         )}
                     </div>
                     <div className="rounded-full bg-primary/10 p-3">
-                        <Icon className="h-6 w-6 text-primary" />
+                        {icon}
                     </div>
                 </div>
             </CardContent>

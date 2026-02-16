@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -257,11 +257,17 @@ async function retryDomainFailedJobsAction(formData: FormData) {
         try {
             await requeueContentJobIds(updatedIds);
         } catch (error) {
-            console.error('Failed to publish retry event for domain failed jobs', {
+            console.error('Failed to publish retry event for domain failed jobs, reverting to failed', {
                 domainId,
                 retriedJobs: updatedIds.length,
                 error: error instanceof Error ? error.message : String(error),
             });
+            await db.update(contentQueue)
+                .set({ status: 'failed' })
+                .where(and(
+                    inArray(contentQueue.id, updatedIds),
+                    eq(contentQueue.status, 'pending'),
+                ));
         }
     }
 

@@ -290,6 +290,9 @@ export default async function DashboardPage() {
                     <p className="text-muted-foreground">
                         Portfolio overview and key metrics
                     </p>
+                    <p className="text-[10px] text-muted-foreground/60 tabular-nums">
+                        Last updated {new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                    </p>
                 </div>
                 <div className="flex items-center gap-2">
                     <DashboardRefresh />
@@ -340,34 +343,59 @@ export default async function DashboardPage() {
                 </CardContent>
             </Card>
 
+            {/* Onboarding CTA when no domains */}
+            {metrics.domains === 0 && (
+                <Card className="border-dashed border-2">
+                    <CardContent className="flex flex-col items-center gap-4 py-10">
+                        <div className="rounded-full bg-primary/10 p-4">
+                            <Globe className="h-10 w-10 text-primary" />
+                        </div>
+                        <div className="text-center">
+                            <h2 className="text-lg font-semibold">Welcome to Domain Empire</h2>
+                            <p className="text-sm text-muted-foreground max-w-md mt-1">
+                                Get started by adding your first domain. You can add them one by one or import a CSV file with your entire portfolio.
+                            </p>
+                        </div>
+                        <div className="flex gap-3">
+                            <Link href="/dashboard/domains/new">
+                                <Button><Plus className="mr-2 h-4 w-4" />Add Your First Domain</Button>
+                            </Link>
+                            <Link href="/dashboard/domains/import">
+                                <Button variant="outline">Import CSV</Button>
+                            </Link>
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
+
             {/* Metrics Grid */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
                 <MetricCard
                     title="Total Domains"
                     value={metrics.domains}
-                    icon={Globe}
+                    icon={<Globe className="h-6 w-6 text-primary" />}
                     subtitle={`${metrics.deployedDomains} deployed`}
                 />
                 <MetricCard
                     title="Revenue (30d)"
                     value={`$${metrics.revenue.toLocaleString()}`}
-                    icon={DollarSign}
+                    icon={<DollarSign className="h-6 w-6 text-primary" />}
                 />
                 <MetricCard
                     title="Published Articles"
                     value={metrics.articles}
-                    icon={FileText}
+                    icon={<FileText className="h-6 w-6 text-primary" />}
                 />
                 <MetricCard
                     title="Subscribers"
                     value={metrics.subscribers}
-                    icon={Mail}
+                    icon={<Mail className="h-6 w-6 text-primary" />}
                     subtitle="email captures"
                 />
                 <MetricCard
                     title="API Cost (30d)"
                     value={`$${metrics.apiCost.toFixed(2)}`}
-                    icon={Cpu}
+                    icon={<Cpu className="h-6 w-6 text-primary" />}
                 />
             </div>
 

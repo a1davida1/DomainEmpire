@@ -130,6 +130,27 @@ describe('bulk nameserver route', () => {
         expect(mockUpdateNameservers).not.toHaveBeenCalled();
     });
 
+    it('uses per-domain nameserver overrides without Cloudflare zone lookup', async () => {
+        const response = await POST(makeJsonRequest('http://localhost/api/domains/bulk-nameservers', {
+            domainIds: ['00000000-0000-4000-8000-000000000001'],
+            dryRun: true,
+            perDomainNameservers: {
+                '00000000-0000-4000-8000-000000000001': [
+                    'vera.ns.cloudflare.com',
+                    'walt.ns.cloudflare.com',
+                ],
+            },
+        }));
+
+        expect(response.status).toBe(200);
+        const body = await response.json();
+        expect(body.dryRun).toBe(true);
+        expect(body.readyCount).toBe(1);
+        expect(body.failedCount).toBe(0);
+        expect(body.resolutionMode).toBe('request_domain_map');
+        expect(mockGetZoneNameserverMap).not.toHaveBeenCalled();
+    });
+
     it('returns 503 when Cloudflare zone lookup fails', async () => {
         mockGetZoneNameserverMap.mockRejectedValueOnce(new Error('Please wait and consider throttling your request speed'));
 

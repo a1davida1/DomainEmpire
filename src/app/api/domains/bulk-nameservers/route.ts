@@ -28,6 +28,10 @@ const hostnameRegex = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9-]+)+$/i;
 const bulkNameserverSchema = z.object({
     domainIds: z.array(z.string().uuid()).min(1).max(50),
     nameservers: z.array(z.string().trim().min(3).max(255)).min(2).max(8).optional(),
+    perDomainNameservers: z.record(
+        z.string().uuid(),
+        z.array(z.string().trim().min(3).max(255)).min(2).max(8),
+    ).optional(),
     reason: z.string().trim().min(8).max(1000).nullable().optional(),
     dryRun: z.boolean().default(false),
 });
@@ -127,6 +131,8 @@ export async function POST(request: NextRequest) {
         );
     }
 
+    const uniqueDomainIds = [...new Set(parsed.data.domainIds)];
+
     const limiter = parsed.data.dryRun
         ? bulkNameserverPreflightLimiter
         : bulkNameserverMutationLimiter;
@@ -155,7 +161,24 @@ export async function POST(request: NextRequest) {
         }
     }
 
-    const uniqueDomainIds = [...new Set(parsed.data.domainIds)];
+    const providedNameserversByDomain = new Map<string, string[]>();
+    if (parsed.data.perDomainNameservers) {
+        for (const [domainId, nameserverValues] of Object.entries(parsed.data.perDomainNameservers)) {
+            if (!uniqueDomainIds.includes(domainId)) {
+                continue;
+            }
+            try {
+                providedNameserversByDomain.set(domainId, resolveCloudflareNameservers(nameserverValues));
+            } catch (error) {
+                const message = error instanceof Error ? error.message : 'Invalid nameserver configuration';
+                return NextResponse.json(
+                    { error: `Invalid nameserver configuration for ${domainId}: ${message}` },
+                    { status: 400 },
+                );
+            }
+        }
+    }
+
     const rows = await db.select({
         id: domains.id,
         domain: domains.domain,
@@ -183,7 +206,7 @@ export async function POST(request: NextRequest) {
         domainId: string;
         domain: string;
         nameservers: string[];
-        source: 'request' | 'cloudflare_zone_lookup';
+        source: 'request' | 'request_domain_map' | 'cloudflare_zone_lookup';
         previousNameservers: string[];
         shardKey?: string;
         zoneId?: string;
@@ -203,18 +226,24 @@ export async function POST(request: NextRequest) {
         shardPlanByDomainId.set(row.id, plan.all);
     }));
 
+    const needsCloudflareLookup = !providedNameservers
+        && rows.some((row) => !providedNameserversByDomain.has(row.id));
+
     const zoneLookupByShardKey = new Map<string, Map<string, {
         zoneId: string;
         zoneName: string;
         nameservers: string[];
     }>>();
-    if (!providedNameservers) {
+    if (needsCloudflareLookup) {
         const grouped = new Map<string, {
             shard: CloudflareHostShard;
             domains: string[];
         }>();
 
         for (const row of rows) {
+            if (providedNameserversByDomain.has(row.id)) {
+                continue;
+            }
             const shardPlan = shardPlanByDomainId.get(row.id) || [];
             for (const shard of shardPlan) {
                 const key = cloudflareShardLookupKey(shard);
@@ -285,11 +314,15 @@ export async function POST(request: NextRequest) {
 
         try {
             let nameservers: string[];
-            let nameserverSource: 'request' | 'cloudflare_zone_lookup';
+            let nameserverSource: 'request' | 'request_domain_map' | 'cloudflare_zone_lookup';
             let zoneId: string | null = null;
             let zoneName: string | null = null;
 
-            if (providedNameservers) {
+            const perDomainNameservers = providedNameserversByDomain.get(row.id) ?? null;
+            if (perDomainNameservers) {
+                nameservers = perDomainNameservers;
+                nameserverSource = 'request_domain_map';
+            } else if (providedNameservers) {
                 nameservers = providedNameservers;
                 nameserverSource = 'request';
             } else {
@@ -489,11 +522,19 @@ export async function POST(request: NextRequest) {
     }
 
     if (parsed.data.dryRun) {
+        const resolutionMode = providedNameservers
+            ? 'request'
+            : providedNameserversByDomain.size === 0
+                ? 'per_domain_cloudflare_lookup'
+                : providedNameserversByDomain.size >= rows.length
+                    ? 'request_domain_map'
+                    : 'mixed';
         return NextResponse.json({
             success: failures.length === 0,
             dryRun: true,
-            resolutionMode: providedNameservers ? 'request' : 'per_domain_cloudflare_lookup',
+            resolutionMode,
             ...(providedNameservers ? { nameservers: providedNameservers } : {}),
+            ...(providedNameserversByDomain.size > 0 ? { perDomainNameserverCount: providedNameserversByDomain.size } : {}),
             ...(warnings.length > 0 ? { warnings } : {}),
             readyCount: ready.length,
             failedCount: failures.length,
@@ -504,10 +545,18 @@ export async function POST(request: NextRequest) {
         });
     }
 
+    const resolutionMode = providedNameservers
+        ? 'request'
+        : providedNameserversByDomain.size === 0
+            ? 'per_domain_cloudflare_lookup'
+            : providedNameserversByDomain.size >= rows.length
+                ? 'request_domain_map'
+                : 'mixed';
     return NextResponse.json({
         success: failures.length === 0,
-        resolutionMode: providedNameservers ? 'request' : 'per_domain_cloudflare_lookup',
+        resolutionMode,
         ...(providedNameservers ? { nameservers: providedNameservers } : {}),
+        ...(providedNameserversByDomain.size > 0 ? { perDomainNameserverCount: providedNameserversByDomain.size } : {}),
         ...(warnings.length > 0 ? { warnings } : {}),
         successCount: successes.length,
         failedCount: failures.length,

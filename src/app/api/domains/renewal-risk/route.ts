@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { and, asc, eq, isNotNull, type SQL } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNotNull, sql, type SQL } from 'drizzle-orm';
 import { requireRole } from '@/lib/auth';
-import { db, domainRegistrarProfiles, domains } from '@/lib/db';
+import { db, domainFinanceLedgerEntries, domainRegistrarProfiles, domains } from '@/lib/db';
 import { notDeleted } from '@/lib/db/soft-delete';
 import {
     REGISTRAR_EXPIRATION_RISKS,
+    computeRenewalRoiRecommendation,
     computeRegistrarExpirationRisk,
     isRegistrarTransferStatus,
     type RegistrarExpirationRisk,
@@ -69,11 +70,36 @@ export async function GET(request: NextRequest) {
             .orderBy(asc(domains.renewalDate), asc(domains.domain))
             .limit(limit);
 
+        const domainIds = [...new Set(rows.map((row) => row.domainId))];
+        const roiSince = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+        const ledgerAggRows = domainIds.length > 0
+            ? await db.select({
+                domainId: domainFinanceLedgerEntries.domainId,
+                revenue90d: sql<number>`coalesce(sum(case when ${domainFinanceLedgerEntries.impact} = 'revenue' then ${domainFinanceLedgerEntries.amount}::numeric else 0 end), 0)::float8`,
+                cost90d: sql<number>`coalesce(sum(case when ${domainFinanceLedgerEntries.impact} = 'cost' then ${domainFinanceLedgerEntries.amount}::numeric else 0 end), 0)::float8`,
+            })
+                .from(domainFinanceLedgerEntries)
+                .where(and(
+                    inArray(domainFinanceLedgerEntries.domainId, domainIds),
+                    gte(domainFinanceLedgerEntries.entryDate, roiSince),
+                ))
+                .groupBy(domainFinanceLedgerEntries.domainId)
+            : [];
+        const ledgerAggByDomainId = new Map(ledgerAggRows.map((row) => [row.domainId, row]));
+
         const items = rows.map((row) => {
             const risk = computeRegistrarExpirationRisk({
                 renewalDate: row.renewalDate,
                 autoRenewEnabled: row.autoRenewEnabled !== false,
                 transferStatus: isRegistrarTransferStatus(row.transferStatus) ? row.transferStatus : 'none',
+            });
+            const agg = ledgerAggByDomainId.get(row.domainId);
+            const renewalRoi = computeRenewalRoiRecommendation({
+                renewalPrice: row.renewalPrice,
+                trailingRevenue90d: agg?.revenue90d ?? 0,
+                trailingCost90d: agg?.cost90d ?? 0,
+                risk: risk.risk,
+                daysUntilRenewal: risk.daysUntilRenewal,
             });
 
             return {
@@ -90,6 +116,7 @@ export async function GET(request: NextRequest) {
                 lockStatus: row.lockStatus ?? 'unknown',
                 dnssecStatus: row.dnssecStatus ?? 'unknown',
                 risk,
+                renewalRoi,
                 storedRisk: row.storedRisk ?? 'unknown',
                 storedRiskScore: Number(row.storedRiskScore ?? 0),
                 riskUpdatedAt: row.riskUpdatedAt,

@@ -6,7 +6,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { TableHead } from '@/components/ui/table';
 import { Plus, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import { db, domains } from '@/lib/db';
-import { isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { articles, contentQueue } from '@/lib/db/schema';
 import { formatDate } from '@/lib/format-utils';
 import { DeployAllButton } from '@/components/dashboard/DeployAllButton';
 import { BulkNameserverCutoverButton } from '@/components/dashboard/BulkNameserverCutoverButton';
@@ -16,6 +17,8 @@ import { getDomainRoiPriorities } from '@/lib/domain/roi-priority-service';
 import { RoiCampaignAutoplanButton } from '@/components/dashboard/RoiCampaignAutoplanButton';
 import { getCampaignLaunchReviewSlaSummary } from '@/lib/review/campaign-launch-sla';
 import { ClassifyDomainsButton } from '@/components/dashboard/ClassifyDomainsButton';
+import { QuickAddDomainFab } from '@/components/dashboard/QuickAddDomainFab';
+import { StatusFilterChips } from '@/components/dashboard/StatusFilterChips';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,9 +49,22 @@ const SORT_COLUMNS = ['domain', 'status', 'tier', 'niche', 'renewalDate', 'isDep
 type SortColumn = (typeof SORT_COLUMNS)[number];
 type SortDir = 'asc' | 'desc';
 
+type DomainQueueHint = {
+    pending: number;
+    processing: number;
+    failed: number;
+    total: number;
+};
+
+type QueueSpotlight = {
+    hintsByDomain: Record<string, DomainQueueHint>;
+    activeByType: Array<{ jobType: string; count: number }>;
+};
+
 interface DomainsPageProps {
     readonly searchParams: Promise<{
         readonly q?: string; readonly status?: string; readonly tier?: string;
+        readonly account?: string;
         readonly page?: string; readonly sort?: string; readonly dir?: string;
     }>;
 }
@@ -57,14 +73,80 @@ function isSortColumn(v: string | undefined): v is SortColumn {
     return !!v && (SORT_COLUMNS as readonly string[]).includes(v);
 }
 
-function SortIndicator({ col, activeCol, activeDir }: { col: SortColumn; activeCol: SortColumn; activeDir: SortDir }) {
-    if (activeCol !== col) return <ChevronsUpDown className="ml-1 inline h-3 w-3 opacity-40" />;
-    return activeDir === 'asc'
-        ? <ChevronUp className="ml-1 inline h-3 w-3" />
-        : <ChevronDown className="ml-1 inline h-3 w-3" />;
+async function getQueueSpotlight(domainIds: string[]): Promise<QueueSpotlight> {
+    const uniqueDomainIds = [...new Set(domainIds)].filter((value) => value.length > 0);
+    if (uniqueDomainIds.length === 0) {
+        return {
+            hintsByDomain: {},
+            activeByType: [],
+        };
+    }
+
+    const domainScope = sql`coalesce(${contentQueue.domainId}, ${articles.domainId}) in (${sql.join(uniqueDomainIds.map((value) => sql`${value}`), sql`, `)})`;
+    const activeStatuses = ['pending', 'processing', 'failed'] as const;
+
+    const [statusRows, jobTypeRows] = await Promise.all([
+        db.select({
+            domainId: sql<string | null>`coalesce(${contentQueue.domainId}, ${articles.domainId})`,
+            status: contentQueue.status,
+            count: sql<number>`count(*)::int`,
+        })
+            .from(contentQueue)
+            .leftJoin(articles, eq(contentQueue.articleId, articles.id))
+            .where(and(
+                inArray(contentQueue.status, activeStatuses),
+                domainScope,
+            ))
+            .groupBy(sql`coalesce(${contentQueue.domainId}, ${articles.domainId})`, contentQueue.status),
+        db.select({
+            jobType: contentQueue.jobType,
+            count: sql<number>`count(*)::int`,
+        })
+            .from(contentQueue)
+            .leftJoin(articles, eq(contentQueue.articleId, articles.id))
+            .where(and(
+                inArray(contentQueue.status, activeStatuses),
+                domainScope,
+            ))
+            .groupBy(contentQueue.jobType)
+            .orderBy(sql`count(*) desc`, contentQueue.jobType)
+            .limit(8),
+    ]);
+
+    const hintsByDomain: Record<string, DomainQueueHint> = {};
+    for (const row of statusRows) {
+        if (!row.domainId || !row.status) continue;
+        if (!hintsByDomain[row.domainId]) {
+            hintsByDomain[row.domainId] = {
+                pending: 0,
+                processing: 0,
+                failed: 0,
+                total: 0,
+            };
+        }
+        const next = hintsByDomain[row.domainId];
+        if (row.status === 'pending') next.pending = row.count;
+        if (row.status === 'processing') next.processing = row.count;
+        if (row.status === 'failed') next.failed = row.count;
+        next.total += row.count;
+    }
+
+    return {
+        hintsByDomain,
+        activeByType: jobTypeRows
+            .filter((row) => typeof row.jobType === 'string' && row.jobType.length > 0)
+            .map((row) => ({ jobType: row.jobType, count: row.count })),
+    };
 }
 
-async function getDomains(filters: { q?: string; status?: string; tier?: string; sort?: string; dir?: string; page?: string }) {
+function SortIndicator({ col, activeCol, activeDir }: { col: SortColumn; activeCol: SortColumn; activeDir: SortDir }) {
+    if (activeCol !== col) return <ChevronsUpDown className="ml-1 inline h-3 w-3 opacity-40 group-hover:opacity-70 transition-opacity" />;
+    return activeDir === 'asc'
+        ? <ChevronUp className="ml-1 inline h-3 w-3 text-primary" />
+        : <ChevronDown className="ml-1 inline h-3 w-3 text-primary" />;
+}
+
+async function getDomains(filters: { q?: string; status?: string; tier?: string; account?: string; sort?: string; dir?: string; page?: string }) {
     try {
         let allDomains = await db.select().from(domains).where(isNull(domains.deletedAt));
 
@@ -79,6 +161,13 @@ async function getDomains(filters: { q?: string; status?: string; tier?: string;
             const tier = Number.parseInt(filters.tier, 10);
             if (!Number.isNaN(tier)) {
                 allDomains = allDomains.filter(d => d.tier === tier);
+            }
+        }
+        if (filters.account) {
+            if (filters.account === '_none') {
+                allDomains = allDomains.filter(d => !d.cloudflareAccount);
+            } else {
+                allDomains = allDomains.filter(d => d.cloudflareAccount === filters.account);
             }
         }
 
@@ -150,6 +239,7 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
         if (params.q) p.set('q', params.q);
         if (params.status) p.set('status', params.status);
         if (params.tier) p.set('tier', params.tier);
+        if (params.account) p.set('account', params.account);
         p.set('sort', col);
         p.set('dir', newDir);
         return `/dashboard/domains?${p.toString()}`;
@@ -160,14 +250,41 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
         if (params.q) p.set('q', params.q);
         if (params.status) p.set('status', params.status);
         if (params.tier) p.set('tier', params.tier);
+        if (params.account) p.set('account', params.account);
         if (params.sort) p.set('sort', params.sort);
         if (params.dir) p.set('dir', params.dir);
         p.set('page', String(pg));
-        return `/dashboard/domains?${p.toString()}`;
+        return `/dashboard/domains?${p.toString()}#domains-table`;
     }
 
     const roiPriority = await getRoiPriorityPreview();
     const launchReviewSummary = await getCampaignLaunchReviewSummaryPreview();
+    const queueSpotlight = await getQueueSpotlight(allDomains.map((domain) => domain.id));
+    const topQueuedDomains = allDomains
+        .map((domain) => ({
+            domainId: domain.id,
+            domain: domain.domain,
+            stats: queueSpotlight.hintsByDomain[domain.id] ?? {
+                pending: 0,
+                processing: 0,
+                failed: 0,
+                total: 0,
+            },
+        }))
+        .filter((row) => row.stats.total > 0)
+        .sort((left, right) => {
+            if (left.stats.failed !== right.stats.failed) {
+                return right.stats.failed - left.stats.failed;
+            }
+            if (left.stats.processing !== right.stats.processing) {
+                return right.stats.processing - left.stats.processing;
+            }
+            if (left.stats.pending !== right.stats.pending) {
+                return right.stats.pending - left.stats.pending;
+            }
+            return left.domain.localeCompare(right.domain);
+        })
+        .slice(0, 8);
 
     if (error) {
         return (
@@ -186,6 +303,16 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
         acc[d.status] = (acc[d.status] || 0) + 1;
         return acc;
     }, {} as Record<string, number>);
+
+    // Distinct Cloudflare accounts for filter
+    const accountCounts = unfilteredDomains.reduce((acc, d) => {
+        const key = d.cloudflareAccount || '_none';
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+    }, {} as Record<string, number>);
+    const cfAccounts = Object.entries(accountCounts)
+        .sort(([, a], [, b]) => b - a)
+        .map(([account, count]) => ({ account, count }));
 
     return (
         <div className="space-y-6">
@@ -247,7 +374,7 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                                     {uncategorized.length} domain{uncategorized.length === 1 ? '' : 's'} need classification
                                 </p>
                                 <p className="text-sm text-amber-800/80">
-                                    These domains have no niche, tier, or site template assigned. Use AI to classify them automatically.
+                                    These domains have no niche assigned. Use AI to classify them automatically.
                                 </p>
                             </div>
                             <ClassifyDomainsButton mode="all" label={`Classify ${uncategorized.length} Domains`} />
@@ -255,6 +382,52 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                     </Card>
                 );
             })()}
+
+            {/* Status Filter Chips */}
+            <StatusFilterChips />
+
+            {/* Cloudflare Account Filter */}
+            {cfAccounts.length > 1 && (
+                <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-medium text-muted-foreground">Account:</span>
+                    <Link
+                        href={(() => {
+                            const p = new URLSearchParams();
+                            if (params.q) p.set('q', params.q);
+                            if (params.status) p.set('status', params.status);
+                            if (params.tier) p.set('tier', params.tier);
+                            return `/dashboard/domains?${p.toString()}`;
+                        })()}
+                        className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                            !params.account ? 'bg-foreground text-background' : 'hover:bg-muted'
+                        }`}
+                        {...(!params.account ? { 'aria-current': 'page' as const } : {})}
+                    >
+                        All ({unfilteredDomains.length})
+                    </Link>
+                    {cfAccounts.map(({ account, count }) => {
+                        const label = account === '_none' ? 'Unassigned' : account;
+                        const isActive = params.account === account;
+                        const p = new URLSearchParams();
+                        if (params.q) p.set('q', params.q);
+                        if (params.status) p.set('status', params.status);
+                        if (params.tier) p.set('tier', params.tier);
+                        p.set('account', account);
+                        return (
+                            <Link
+                                key={account}
+                                href={`/dashboard/domains?${p.toString()}`}
+                                className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                                    isActive ? 'bg-foreground text-background' : 'hover:bg-muted'
+                                }`}
+                                {...(isActive ? { 'aria-current': 'page' as const } : {})}
+                            >
+                                {label} ({count})
+                            </Link>
+                        );
+                    })}
+                </div>
+            )}
 
             {/* Search and Filter */}
             <Suspense>
@@ -360,7 +533,70 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                 </CardContent>
             </Card>
 
+            <Card>
+                <CardContent className="space-y-4 p-4">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                            <h2 className="text-sm font-semibold">Queue Spotlight</h2>
+                            <p className="text-xs text-muted-foreground">
+                                Active queue load for domains in this view, with direct drilldowns.
+                            </p>
+                        </div>
+                        <Link href="/dashboard/queue">
+                            <Button variant="outline" size="sm">Open Queue Dashboard</Button>
+                        </Link>
+                    </div>
+
+                    {topQueuedDomains.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">
+                            No pending, processing, or failed jobs for domains in this list.
+                        </p>
+                    ) : (
+                        <div className="space-y-2">
+                            {topQueuedDomains.map((row) => (
+                                <div key={row.domainId} className="flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between">
+                                    <div className="min-w-0">
+                                        <Link href={`/dashboard/domains/${row.domainId}`} className="font-medium hover:underline">
+                                            {row.domain}
+                                        </Link>
+                                        <p className="text-xs text-muted-foreground">
+                                            {row.stats.total} active queue job{row.stats.total === 1 ? '' : 's'}
+                                        </p>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                                        {row.stats.failed > 0 ? <Badge className="bg-red-100 text-red-900">Failed {row.stats.failed}</Badge> : null}
+                                        {row.stats.processing > 0 ? <Badge className="bg-blue-100 text-blue-900">Processing {row.stats.processing}</Badge> : null}
+                                        {row.stats.pending > 0 ? <Badge className="bg-yellow-100 text-yellow-900">Pending {row.stats.pending}</Badge> : null}
+                                        <Link href={`/dashboard/queue?domainId=${row.domainId}`}>
+                                            <Button size="sm" variant="outline">Inspect</Button>
+                                        </Link>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {queueSpotlight.activeByType.length > 0 ? (
+                        <div className="rounded-md border p-3">
+                            <p className="mb-2 text-xs font-medium text-muted-foreground">Most active job types (this view)</p>
+                            <div className="flex flex-wrap gap-2">
+                                {queueSpotlight.activeByType.map((row) => (
+                                    <Link
+                                        key={row.jobType}
+                                        href={`/dashboard/queue?jobTypes=${encodeURIComponent(row.jobType)}`}
+                                        className="rounded-full border px-3 py-1 text-xs hover:bg-muted"
+                                    >
+                                        <span className="font-mono">{row.jobType}</span>: {row.count}
+                                    </Link>
+                                ))}
+                            </div>
+                        </div>
+                    ) : null}
+                </CardContent>
+            </Card>
+
             {/* Domains Table */}
+            <div id="domains-table" />
             <Card>
                 <CardContent className="p-0">
                     <DomainsTableClient
@@ -374,17 +610,19 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                             isDeployed: d.isDeployed,
                             registrar: d.registrar,
                             renewalDate: formatDate(d.renewalDate),
+                            cloudflareAccount: d.cloudflareAccount,
                         }))}
-                        hasFilters={!!(params.q || params.status || params.tier)}
+                        queueHints={queueSpotlight.hintsByDomain}
+                        hasFilters={!!(params.q || params.status || params.tier || params.account)}
                         headerSlot={
                             <>
-                                <TableHead><Link href={sortHref('domain')} className="inline-flex items-center hover:text-foreground">Domain<SortIndicator col="domain" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
-                                <TableHead><Link href={sortHref('status')} className="inline-flex items-center hover:text-foreground">Status<SortIndicator col="status" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
-                                <TableHead><Link href={sortHref('tier')} className="inline-flex items-center hover:text-foreground">Tier<SortIndicator col="tier" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
-                                <TableHead><Link href={sortHref('niche')} className="inline-flex items-center hover:text-foreground">Niche<SortIndicator col="niche" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
+                                <TableHead><Link href={sortHref('domain')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Domain<SortIndicator col="domain" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
+                                <TableHead><Link href={sortHref('status')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Status<SortIndicator col="status" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
+                                <TableHead><Link href={sortHref('tier')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Tier<SortIndicator col="tier" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
+                                <TableHead><Link href={sortHref('niche')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Niche<SortIndicator col="niche" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
                                 <TableHead>Template</TableHead>
-                                <TableHead><Link href={sortHref('isDeployed')} className="inline-flex items-center hover:text-foreground">Deployed<SortIndicator col="isDeployed" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
-                                <TableHead><Link href={sortHref('renewalDate')} className="inline-flex items-center hover:text-foreground">Renewal<SortIndicator col="renewalDate" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
+                                <TableHead><Link href={sortHref('isDeployed')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Deployed<SortIndicator col="isDeployed" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
+                                <TableHead><Link href={sortHref('renewalDate')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Renewal<SortIndicator col="renewalDate" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
                                 <TableHead className="w-12"></TableHead>
                             </>
                         }
@@ -404,25 +642,32 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                                 <Button variant="outline" size="sm">← Prev</Button>
                             </Link>
                         )}
-                        {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
-                            let pg: number;
-                            if (totalPages <= 7) {
-                                pg = i + 1;
-                            } else if (page <= 4) {
-                                pg = i + 1;
-                            } else if (page >= totalPages - 3) {
-                                pg = totalPages - 6 + i;
-                            } else {
-                                pg = page - 3 + i;
-                            }
-                            return (
-                                <Link key={pg} href={pageHref(pg)}>
-                                    <Button variant={pg === page ? 'default' : 'outline'} size="sm" className="min-w-[2rem]">
-                                        {pg}
-                                    </Button>
-                                </Link>
-                            );
-                        })}
+                        {/* Full pagination on desktop */}
+                        <span className="hidden sm:flex gap-1">
+                            {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
+                                let pg: number;
+                                if (totalPages <= 7) {
+                                    pg = i + 1;
+                                } else if (page <= 4) {
+                                    pg = i + 1;
+                                } else if (page >= totalPages - 3) {
+                                    pg = totalPages - 6 + i;
+                                } else {
+                                    pg = page - 3 + i;
+                                }
+                                return (
+                                    <Link key={pg} href={pageHref(pg)}>
+                                        <Button variant={pg === page ? 'default' : 'outline'} size="sm" className="min-w-[2rem]">
+                                            {pg}
+                                        </Button>
+                                    </Link>
+                                );
+                            })}
+                        </span>
+                        {/* Compact pagination on mobile */}
+                        <span className="flex sm:hidden items-center gap-1 text-xs text-muted-foreground tabular-nums">
+                            {page} / {totalPages}
+                        </span>
                         {page < totalPages && (
                             <Link href={pageHref(page + 1)}>
                                 <Button variant="outline" size="sm">Next →</Button>
@@ -431,6 +676,7 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                     </div>
                 </div>
             )}
+            <QuickAddDomainFab />
         </div>
     );
 }

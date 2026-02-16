@@ -3,6 +3,7 @@ import { and, desc, eq, gte, lte, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { getRequestUser, requireAuth } from '@/lib/auth';
 import { db, domainFinanceLedgerEntries, domains } from '@/lib/db';
+import { advanceDomainLifecycleForAcquisition } from '@/lib/domain/lifecycle-sync';
 
 const ENTRY_TYPES = [
     'acquisition_cost',
@@ -210,6 +211,31 @@ export async function POST(request: NextRequest) {
                 updatedAt: new Date(),
             })
             .returning();
+
+        if (payload.entryType === 'revenue' && payload.amount > 0) {
+            try {
+                await advanceDomainLifecycleForAcquisition({
+                    domainId: payload.domainId,
+                    targetState: 'monetized',
+                    actorId: user.id,
+                    actorRole: user.role,
+                    reason: 'Revenue ledger entry recorded',
+                    metadata: {
+                        source: 'finance_ledger',
+                        ledgerEntryId: entry.id,
+                        entryType: payload.entryType,
+                        amount: payload.amount,
+                        currency: payload.currency.toUpperCase(),
+                    },
+                });
+            } catch (lifecycleError) {
+                console.error('Failed to auto-advance lifecycle to monetized on revenue entry:', {
+                    domainId: payload.domainId,
+                    entryId: entry.id,
+                    error: lifecycleError instanceof Error ? lifecycleError.message : String(lifecycleError),
+                });
+            }
+        }
 
         return NextResponse.json({ entry }, { status: 201 });
     } catch (error) {

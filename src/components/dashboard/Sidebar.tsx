@@ -40,6 +40,61 @@ import { Button } from '@/components/ui/button';
 type NavItem = { name: string; href: string; icon: React.ComponentType<{ className?: string }> };
 type NavSection = { label: string; items: NavItem[] };
 
+type QueueHealthPayload = {
+    pending?: number;
+    processing?: number;
+    failed?: number;
+    latestWorkerActivityAgeMs?: number | null;
+};
+
+type QueueHeartbeatState = {
+    label: 'Running' | 'Recently Active' | 'Stalled' | 'Idle' | 'Unknown';
+    className: string;
+    detail: string;
+};
+
+function resolveQueueHeartbeat(health: QueueHealthPayload | null): QueueHeartbeatState {
+    if (!health) {
+        return {
+            label: 'Unknown',
+            className: 'bg-slate-100 text-slate-700',
+            detail: 'Queue heartbeat is unavailable.',
+        };
+    }
+    const processing = Number(health.processing ?? 0);
+    const pending = Number(health.pending ?? 0);
+    const latestAge = typeof health.latestWorkerActivityAgeMs === 'number'
+        ? health.latestWorkerActivityAgeMs
+        : null;
+
+    if (processing > 0) {
+        return {
+            label: 'Running',
+            className: 'bg-emerald-100 text-emerald-800',
+            detail: `${processing} job${processing === 1 ? '' : 's'} processing now.`,
+        };
+    }
+    if (latestAge !== null && latestAge < 5 * 60 * 1000) {
+        return {
+            label: 'Recently Active',
+            className: 'bg-blue-100 text-blue-800',
+            detail: 'Worker processed jobs in the last 5 minutes.',
+        };
+    }
+    if (pending > 0) {
+        return {
+            label: 'Stalled',
+            className: 'bg-amber-100 text-amber-900',
+            detail: `${pending} pending job${pending === 1 ? '' : 's'} with no recent worker activity.`,
+        };
+    }
+    return {
+        label: 'Idle',
+        className: 'bg-slate-100 text-slate-700',
+        detail: 'No pending jobs.',
+    };
+}
+
 const navSections: NavSection[] = [
     {
         label: 'Core',
@@ -93,9 +148,30 @@ const DEFAULT_OPEN = new Set(['Core', 'Content & SEO', 'Business', 'Operations',
 
 export function Sidebar() {
     const pathname = usePathname();
-    const [collapsed, setCollapsed] = useState(false);
+    const [collapsed, setCollapsed] = useState(() => {
+        if (typeof window !== 'undefined') {
+            const stored = localStorage.getItem('de-sidebar-collapsed');
+            if (stored !== null) return stored === '1';
+            return window.innerWidth < 1280;
+        }
+        return false;
+    });
+
+    // Persist collapsed state
+    useEffect(() => { localStorage.setItem('de-sidebar-collapsed', collapsed ? '1' : '0'); }, [collapsed]);
+
+    // Auto-collapse on medium screens (only when no stored preference)
+    useEffect(() => {
+        if (localStorage.getItem('de-sidebar-collapsed') !== null) return;
+        const mql = window.matchMedia('(max-width: 1279px)');
+        function onChange(e: MediaQueryListEvent) { setCollapsed(e.matches); }
+        mql.addEventListener('change', onChange);
+        return () => mql.removeEventListener('change', onChange);
+    }, []);
     const { theme, setTheme } = useTheme();
     const [failedCount, setFailedCount] = useState(0);
+    const [domainCount, setDomainCount] = useState(0);
+    const [queueHeartbeat, setQueueHeartbeat] = useState<QueueHeartbeatState>(() => resolveQueueHeartbeat(null));
     const [openSections, setOpenSections] = useState<Set<string>>(DEFAULT_OPEN);
     const [navFilter, setNavFilter] = useState('');
 
@@ -140,15 +216,34 @@ export function Sidebar() {
 
     useEffect(() => {
         let active = true;
-        function fetchFailed() {
-            fetch('/api/queue/process')
+        function fetchQueueHealth() {
+            fetch('/api/queue/process?detailed=true')
                 .then(r => r.ok ? r.json() : null)
-                .then(data => { if (active && data?.stats?.failed) setFailedCount(data.stats.failed); })
+                .then(data => {
+                    if (!active || !data) return;
+                    const stats = data.stats ?? {};
+                    const failed = Number(stats.failed ?? 0);
+                    setFailedCount(Number.isFinite(failed) ? failed : 0);
+                    setQueueHeartbeat(resolveQueueHeartbeat({
+                        pending: stats.pending,
+                        processing: stats.processing,
+                        failed: stats.failed,
+                        latestWorkerActivityAgeMs: data.latestWorkerActivityAgeMs,
+                    }));
+                })
                 .catch(() => {});
         }
-        fetchFailed();
-        const id = setInterval(fetchFailed, 30_000);
+        fetchQueueHealth();
+        const id = setInterval(fetchQueueHealth, 30_000);
         return () => { active = false; clearInterval(id); };
+    }, []);
+
+    // Fetch domain count
+    useEffect(() => {
+        fetch('/api/domains?countOnly=1')
+            .then(r => r.ok ? r.json() : null)
+            .then(data => { if (data?.total != null) setDomainCount(data.total); })
+            .catch(() => {});
     }, []);
 
     return (
@@ -230,6 +325,25 @@ export function Sidebar() {
                                                 {failedCount > 99 ? '99+' : failedCount}
                                             </span>
                                         )}
+                                        {item.name === 'Queue' && (
+                                            <span
+                                                className={cn(
+                                                    'ml-auto h-2.5 w-2.5 rounded-full',
+                                                    queueHeartbeat.label === 'Running'
+                                                        ? 'bg-emerald-500'
+                                                        : queueHeartbeat.label === 'Recently Active'
+                                                            ? 'bg-blue-500'
+                                                            : queueHeartbeat.label === 'Stalled'
+                                                                ? 'bg-amber-500'
+                                                                : 'bg-slate-400',
+                                                )}
+                                            />
+                                        )}
+                                        {item.name === 'Domains' && domainCount > 0 && !collapsed && (
+                                            <span className="ml-auto text-[10px] text-muted-foreground tabular-nums">
+                                                {domainCount}
+                                            </span>
+                                        )}
                                     </Link>
                                 );
                             })}
@@ -240,6 +354,17 @@ export function Sidebar() {
 
             {/* Footer */}
             <div className="border-t p-2">
+                {!collapsed && (
+                    <div className="mb-2 rounded-md border bg-muted/30 px-2 py-2 text-xs">
+                        <div className="flex items-center justify-between gap-2">
+                            <span className="text-muted-foreground">Worker</span>
+                            <span className={cn('rounded-full px-2 py-0.5 font-medium', queueHeartbeat.className)}>
+                                {queueHeartbeat.label}
+                            </span>
+                        </div>
+                        <p className="mt-1 text-[11px] text-muted-foreground">{queueHeartbeat.detail}</p>
+                    </div>
+                )}
                 <Button
                     variant="ghost"
                     size="sm"
@@ -261,8 +386,10 @@ export function Sidebar() {
                     className="w-full justify-start gap-3"
                     onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
                 >
-                    {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-                    {!collapsed && <span>{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>}
+                    <Sun className="h-5 w-5 hidden dark:block" />
+                    <Moon className="h-5 w-5 block dark:hidden" />
+                    {!collapsed && <span className="hidden dark:inline">Light Mode</span>}
+                    {!collapsed && <span className="inline dark:hidden">Dark Mode</span>}
                 </Button>
                 <form action="/api/auth/logout" method="POST">
                     <Button
