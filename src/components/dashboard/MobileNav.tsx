@@ -89,7 +89,7 @@ export function MobileNav() {
     const [isOpen, setIsOpen] = useState(false);
 
     return (
-        <div className="md:hidden flex items-center justify-between p-4 border-b bg-card">
+        <div className="md:hidden flex items-center justify-between px-4 py-3 border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80">
             <Link href="/dashboard" className="flex items-center gap-2">
                 <Globe className="h-6 w-6 text-primary" />
                 <span className="text-lg font-bold">Domain Empire</span>
@@ -101,8 +101,8 @@ export function MobileNav() {
 
             {/* Mobile Menu Overlay */}
             {isOpen && (
-                <div className="fixed inset-0 top-16 z-50 bg-background border-t animate-in slide-in-from-top-5">
-                    <div className="flex flex-col p-4 space-y-4 h-[calc(100vh-4rem)] overflow-y-auto">
+                <div className="fixed inset-0 top-[57px] z-50 bg-background border-t animate-in slide-in-from-top-5 duration-200">
+                    <div className="flex flex-col p-4 space-y-4 h-[calc(100vh-57px)] overflow-y-auto">
                         <nav className="flex flex-col gap-1">
                             {navSections.map((section) => (
                                 <div key={section.label}>
@@ -140,7 +140,7 @@ export function MobileNav() {
                                 <Button
                                     type="submit"
                                     variant="ghost"
-                                    className="w-full justify-start gap-3 text-red-500 hover:bg-red-50 hover:text-red-600"
+                                    className="w-full justify-start gap-3 text-red-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/30 dark:hover:text-red-400"
                                 >
                                     <LogOut className="h-5 w-5" />
                                     Sign Out

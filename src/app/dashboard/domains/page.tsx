@@ -506,41 +506,38 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
     return (
         <div className="space-y-6">
             {/* Header */}
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold">Domains</h1>
-                    <p className="text-muted-foreground">
-                        Manage your domain portfolio ({unfilteredDomains.length} total)
+                    <h1 className="text-2xl font-bold tracking-tight">Domains</h1>
+                    <p className="text-sm text-muted-foreground">
+                        {unfilteredDomains.length} total &middot; {deployActionDomainIds.length} deploy candidates &middot; {dnsActionDomainIds.length} DNS automation
                     </p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                     <ClassifyDomainsButton mode="all" />
                     <DeployAllButton domainIds={deployActionDomainIds} />
                     <Link href="/dashboard/domains/import">
-                        <Button variant="outline">
+                        <Button variant="outline" size="sm">
                             Import CSV
                         </Button>
                     </Link>
                     <Link href="/dashboard/domains/new">
-                        <Button>
-                            <Plus className="mr-2 h-4 w-4" />
+                        <Button size="sm">
+                            <Plus className="mr-1.5 h-3.5 w-3.5" />
                             Add Domain
                         </Button>
                     </Link>
                 </div>
             </div>
-            <p className="text-xs text-muted-foreground">
-                Current filter scope: {deployActionDomainIds.length} deploy candidates, {dnsActionDomainIds.length} registrar DNS automation candidates.
-            </p>
 
-            <Card className="border-sky-200 bg-sky-50/40">
+            <Card className="border-sky-200 dark:border-sky-900 bg-sky-50/40 dark:bg-sky-950/30">
                 <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
                     <div className="space-y-1">
-                        <p className="text-sm font-semibold text-sky-900">DNS Onboarding</p>
-                        <p className="text-xs text-sky-900/80">
+                        <p className="text-sm font-semibold text-sky-900 dark:text-sky-300">DNS Onboarding</p>
+                        <p className="text-xs text-sky-900/80 dark:text-sky-400/80">
                             Single click flow for GoDaddy and Namecheap: preflight, create missing Cloudflare zones, switch nameservers, then refresh status.
                         </p>
-                        <p className="text-xs text-sky-900/70">
+                        <p className="text-xs text-sky-900/70 dark:text-sky-400/60">
                             Scope: {dnsActionDomainIds.length} eligible domains in the current filter (all pages, not just visible rows).
                         </p>
                     </div>
@@ -573,13 +570,13 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                 const uncategorized = allDomains.filter(d => !d.niche);
                 if (uncategorized.length === 0) return null;
                 return (
-                    <Card className="border-amber-200 bg-amber-50">
+                    <Card className="border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30">
                         <CardContent className="flex items-center justify-between p-4">
                             <div>
-                                <p className="font-medium text-amber-900">
+                                <p className="font-medium text-amber-900 dark:text-amber-300">
                                     {uncategorized.length} domain{uncategorized.length === 1 ? '' : 's'} need classification
                                 </p>
-                                <p className="text-sm text-amber-800/80">
+                                <p className="text-sm text-amber-800/80 dark:text-amber-400/70">
                                     These domains have no niche assigned. Use AI to classify them automatically.
                                 </p>
                             </div>

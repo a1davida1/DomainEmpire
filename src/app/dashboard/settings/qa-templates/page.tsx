@@ -168,7 +168,7 @@ export default function QaTemplatesPage() {
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                     <ClipboardCheck className="h-6 w-6" />
-                    <h1 className="text-3xl font-bold">QA Checklist Templates</h1>
+                    <h1 className="text-2xl font-bold tracking-tight">QA Checklist Templates</h1>
                 </div>
                 {!showForm && (
                     <Button onClick={() => setShowForm(true)} size="sm">

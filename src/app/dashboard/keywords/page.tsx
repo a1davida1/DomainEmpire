@@ -81,7 +81,7 @@ export default function KeywordsPage() {
         <div className="space-y-6">
             <div className="flex items-center justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold">Keywords</h1>
+                    <h1 className="text-2xl font-bold tracking-tight">Keywords</h1>
                     <p className="text-muted-foreground">Track and manage keyword opportunities across domains</p>
                 </div>
                 <Button onClick={loadKeywords} disabled={loading}>

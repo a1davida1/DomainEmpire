@@ -201,7 +201,7 @@ export default async function ArticlesPage(props: Readonly<PageProps>) {
         <div className="space-y-6">
             <div className="flex items-center justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold">Content Library</h1>
+                    <h1 className="text-2xl font-bold tracking-tight">Content Library</h1>
                     <p className="text-muted-foreground">
                         {domainIdFilter && domainFilterRecord[0]
                             ? `Review content for ${domainFilterRecord[0].domain}`

@@ -159,7 +159,7 @@ export default function ReviewPoliciesPage() {
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                     <ShieldCheck className="h-6 w-6" />
-                    <h1 className="text-3xl font-bold">Review Policies</h1>
+                    <h1 className="text-2xl font-bold tracking-tight">Review Policies</h1>
                 </div>
                 <Button onClick={() => setShowForm(true)} disabled={showForm}>
                     <Plus className="h-4 w-4 mr-2" />

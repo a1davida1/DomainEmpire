@@ -66,7 +66,7 @@ export default function CitationsPage() {
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
-                <h1 className="text-3xl font-bold">Citations</h1>
+                <h1 className="text-2xl font-bold tracking-tight">Citations</h1>
                 <Button onClick={() => setShowForm(!showForm)}>
                     <Plus className="h-4 w-4 mr-2" />
                     Add Citation

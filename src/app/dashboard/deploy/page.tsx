@@ -263,14 +263,19 @@ export default function DeployPage() {
     const failedCount = jobs.filter(j => j.status === 'failed').length;
 
     return (
-        <div className="space-y-6 p-6">
-            <div className="flex justify-between items-center">
-                <div>
-                    <h1 className="text-3xl font-bold">Deployment Center</h1>
-                    <p className="text-muted-foreground">Manage and monitor site deployments</p>
+        <div className="space-y-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-950">
+                        <Rocket className="h-5 w-5 text-emerald-700 dark:text-emerald-400" />
+                    </div>
+                    <div>
+                        <h1 className="text-2xl font-bold tracking-tight">Deployment Center</h1>
+                        <p className="text-sm text-muted-foreground">Manage and monitor site deployments</p>
+                    </div>
                 </div>
-                <Button onClick={handleDeployAll} disabled={deploying || domains.length === 0}>
-                    {deploying ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Rocket className="mr-2 h-4 w-4" />}
+                <Button size="sm" onClick={handleDeployAll} disabled={deploying || domains.length === 0}>
+                    {deploying ? <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Rocket className="mr-1.5 h-3.5 w-3.5" />}
                     Deploy All Active ({domains.length})
                 </Button>
             </div>
@@ -278,27 +283,55 @@ export default function DeployPage() {
             {/* Summary Stats */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <Card>
-                    <CardContent className="pt-6 text-center">
-                        <p className="text-2xl font-bold">{domains.length}</p>
-                        <p className="text-sm text-muted-foreground">Active Domains</p>
+                    <CardContent className="pt-5 pb-4">
+                        <div className="flex items-center gap-3">
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
+                                <Globe className="h-4 w-4 text-muted-foreground" />
+                            </div>
+                            <div>
+                                <p className="text-2xl font-bold tabular-nums">{domains.length}</p>
+                                <p className="text-xs text-muted-foreground">Active Domains</p>
+                            </div>
+                        </div>
                     </CardContent>
                 </Card>
                 <Card>
-                    <CardContent className="pt-6 text-center">
-                        <p className="text-2xl font-bold text-green-500">{deployedCount}</p>
-                        <p className="text-sm text-muted-foreground">Deployed</p>
+                    <CardContent className="pt-5 pb-4">
+                        <div className="flex items-center gap-3">
+                            <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${deployedCount > 0 ? 'bg-emerald-100 dark:bg-emerald-950' : 'bg-muted'}`}>
+                                <CheckCircle2 className={`h-4 w-4 ${deployedCount > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}`} />
+                            </div>
+                            <div>
+                                <p className={`text-2xl font-bold tabular-nums ${deployedCount > 0 ? 'text-emerald-600 dark:text-emerald-400' : ''}`}>{deployedCount}</p>
+                                <p className="text-xs text-muted-foreground">Deployed</p>
+                            </div>
+                        </div>
                     </CardContent>
                 </Card>
                 <Card>
-                    <CardContent className="pt-6 text-center">
-                        <p className="text-2xl font-bold text-blue-500">{processingCount}</p>
-                        <p className="text-sm text-muted-foreground">Deploying Now</p>
+                    <CardContent className="pt-5 pb-4">
+                        <div className="flex items-center gap-3">
+                            <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${processingCount > 0 ? 'bg-blue-100 dark:bg-blue-950' : 'bg-muted'}`}>
+                                <RefreshCw className={`h-4 w-4 ${processingCount > 0 ? 'text-blue-600 dark:text-blue-400 animate-spin' : 'text-muted-foreground'}`} />
+                            </div>
+                            <div>
+                                <p className={`text-2xl font-bold tabular-nums ${processingCount > 0 ? 'text-blue-600 dark:text-blue-400' : ''}`}>{processingCount}</p>
+                                <p className="text-xs text-muted-foreground">Deploying Now</p>
+                            </div>
+                        </div>
                     </CardContent>
                 </Card>
-                <Card>
-                    <CardContent className="pt-6 text-center">
-                        <p className="text-2xl font-bold text-red-500">{failedCount}</p>
-                        <p className="text-sm text-muted-foreground">Failed</p>
+                <Card className={failedCount > 0 ? 'border-red-200 dark:border-red-900' : ''}>
+                    <CardContent className="pt-5 pb-4">
+                        <div className="flex items-center gap-3">
+                            <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${failedCount > 0 ? 'bg-red-100 dark:bg-red-950' : 'bg-muted'}`}>
+                                <AlertCircle className={`h-4 w-4 ${failedCount > 0 ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`} />
+                            </div>
+                            <div>
+                                <p className={`text-2xl font-bold tabular-nums ${failedCount > 0 ? 'text-red-600 dark:text-red-400' : ''}`}>{failedCount}</p>
+                                <p className="text-xs text-muted-foreground">Failed</p>
+                            </div>
+                        </div>
                     </CardContent>
                 </Card>
             </div>

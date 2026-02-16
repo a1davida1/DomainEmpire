@@ -109,11 +109,11 @@ export default function QueuePage() {
     ];
 
     return (
-        <div className="p-6 space-y-6">
-            <div className="flex justify-between items-center">
+        <div className="space-y-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h1 className="text-2xl font-bold">Content Queue</h1>
-                    <p className="text-muted-foreground">Monitor and manage background jobs</p>
+                    <h1 className="text-2xl font-bold tracking-tight">Content Queue</h1>
+                    <p className="text-sm text-muted-foreground">Monitor and manage background jobs</p>
                 </div>
                 <div className="flex gap-2">
                     <Tooltip>
@@ -143,7 +143,7 @@ export default function QueuePage() {
                 </div>
             </div>
 
-            <Card className="border-sky-200 bg-sky-50/40">
+            <Card className="border-sky-200 dark:border-sky-900 bg-sky-50/40 dark:bg-sky-950/30">
                 <CardHeader>
                     <CardTitle>View Created Content</CardTitle>
                     <CardDescription>

@@ -85,7 +85,7 @@ export default function DisclosuresPage() {
 
     return (
         <div className="space-y-6 max-w-3xl">
-            <h1 className="text-3xl font-bold">Disclosure Configuration</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Disclosure Configuration</h1>
             <DomainDetailTabs domainId={domainId} />
 
             <div className="bg-card rounded-lg border p-4 space-y-4">

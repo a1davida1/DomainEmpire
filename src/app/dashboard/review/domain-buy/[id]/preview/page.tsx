@@ -72,7 +72,7 @@ export default async function DomainBuyPreviewPage({
         <div className="space-y-6">
             <div className="flex items-center justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold">Domain Buy Preview</h1>
+                    <h1 className="text-2xl font-bold tracking-tight">Domain Buy Preview</h1>
                     <p className="text-sm text-muted-foreground">{candidate.domain}</p>
                 </div>
                 <Link href="/dashboard/review/domain-buy" className="text-sm text-primary hover:underline">

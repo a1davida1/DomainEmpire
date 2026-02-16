@@ -602,22 +602,22 @@ export default async function WorkflowPage({
 
     return (
         <div className="space-y-6">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold">Workflow</h1>
-                    <p className="text-muted-foreground">
-                        One place to run sourcing → build → deploy → growth operations.
+                    <h1 className="text-2xl font-bold tracking-tight">Workflow</h1>
+                    <p className="text-sm text-muted-foreground">
+                        Sourcing → build → deploy → growth operations
                     </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                     <Link href="/dashboard/queue">
-                        <Button variant="outline">Queue</Button>
+                        <Button variant="outline" size="sm">Queue</Button>
                     </Link>
                     <Link href="/dashboard/domains">
-                        <Button variant="outline">Domains</Button>
+                        <Button variant="outline" size="sm">Domains</Button>
                     </Link>
                     <Link href="/dashboard/deploy">
-                        <Button>Deploy</Button>
+                        <Button size="sm">Deploy</Button>
                     </Link>
                 </div>
             </div>
@@ -709,7 +709,7 @@ export default async function WorkflowPage({
                         </p>
                     )}
                     {displayedGlobalBlockers.length === 0 ? (
-                        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-800">
+                        <div className="rounded-md border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-3 text-sm text-emerald-800 dark:text-emerald-400">
                             No global blockers for this owner filter.
                         </div>
                     ) : (
@@ -718,10 +718,10 @@ export default async function WorkflowPage({
                                 key={blocker.key}
                                 className={`flex items-center justify-between gap-3 rounded-md border px-3 py-2 ${
                                     blocker.severity === 'critical'
-                                        ? 'border-red-200 bg-red-50'
+                                        ? 'border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/30'
                                         : blocker.severity === 'warning'
-                                            ? 'border-amber-200 bg-amber-50'
-                                            : 'border-blue-200 bg-blue-50'
+                                            ? 'border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30'
+                                            : 'border-blue-200 bg-blue-50 dark:border-blue-900 dark:bg-blue-950/30'
                                 }`}
                             >
                                 <div>
@@ -733,10 +733,10 @@ export default async function WorkflowPage({
                                     <p
                                         className={`text-sm font-medium ${
                                             blocker.severity === 'critical'
-                                                ? 'text-red-800'
+                                                ? 'text-red-800 dark:text-red-300'
                                                 : blocker.severity === 'warning'
-                                                    ? 'text-amber-900'
-                                                    : 'text-blue-900'
+                                                    ? 'text-amber-900 dark:text-amber-300'
+                                                    : 'text-blue-900 dark:text-blue-300'
                                         }`}
                                     >
                                         {blocker.title}

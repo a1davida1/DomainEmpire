@@ -568,7 +568,7 @@ export default function IntegrationsPage() {
     return (
         <div className="space-y-6">
             <div>
-                <h1 className="text-3xl font-bold">Integrations</h1>
+                <h1 className="text-2xl font-bold tracking-tight">Integrations</h1>
                 <p className="text-sm text-muted-foreground">
                     Manage registrar, analytics, email, affiliate, hosting, and design integrations.
                 </p>

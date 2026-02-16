@@ -73,7 +73,7 @@ export default function RevisionsPage() {
         <div className="space-y-6">
             <div className="flex items-center gap-2">
                 <History className="h-6 w-6" />
-                <h1 className="text-3xl font-bold">Revision History</h1>
+                <h1 className="text-2xl font-bold tracking-tight">Revision History</h1>
             </div>
 
             {revisions.length === 0 ? (

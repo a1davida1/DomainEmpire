@@ -84,7 +84,7 @@ export default async function SubscribersPage({
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold">Subscribers</h1>
+                    <h1 className="text-2xl font-bold tracking-tight">Subscribers</h1>
                     <p className="text-muted-foreground">Email captures from deployed sites</p>
                 </div>
                 <div className="flex gap-2">

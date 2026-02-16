@@ -116,7 +116,7 @@ export default function KpiDashboardPage() {
         <div className="space-y-6">
             <div className="flex items-center gap-2">
                 <BarChart3 className="h-6 w-6" />
-                <h1 className="text-3xl font-bold">KPI Dashboard</h1>
+                <h1 className="text-2xl font-bold tracking-tight">KPI Dashboard</h1>
             </div>
 
             {error && (

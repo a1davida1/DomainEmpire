@@ -751,15 +751,15 @@ export default async function QueuePage({
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold">Job Queue</h1>
+                    <h1 className="text-2xl font-bold tracking-tight">Job Queue</h1>
                     <p className="text-sm text-muted-foreground">
                         Showing {recentJobs.length} of {totalMatching} job{totalMatching === 1 ? '' : 's'}
                         {activeFilterCount > 0 ? ` (${activeFilterCount} filter${activeFilterCount === 1 ? '' : 's'} active)` : ''}
                     </p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                     <form action={processNowAction} className="flex items-center gap-2">
                         <input
                             type="number"

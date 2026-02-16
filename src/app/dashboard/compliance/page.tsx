@@ -136,7 +136,7 @@ export default function CompliancePage() {
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                     <ShieldCheck className="h-6 w-6" />
-                    <h1 className="text-3xl font-bold">Compliance Dashboard</h1>
+                    <h1 className="text-2xl font-bold tracking-tight">Compliance Dashboard</h1>
                 </div>
                 <Button onClick={takeSnapshot} disabled={snapping} variant="outline" size="sm">
                     {snapping ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}

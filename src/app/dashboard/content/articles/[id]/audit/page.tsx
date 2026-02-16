@@ -52,7 +52,7 @@ export default function AuditLogPage() {
         <div className="space-y-6">
             <div className="flex items-center gap-2">
                 <ScrollText className="h-6 w-6" />
-                <h1 className="text-3xl font-bold">Audit Log</h1>
+                <h1 className="text-2xl font-bold tracking-tight">Audit Log</h1>
             </div>
 
             {events.length === 0 ? (

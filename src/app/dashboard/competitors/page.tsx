@@ -31,7 +31,7 @@ export default async function CompetitorsPage() {
 
     return (
         <div className="space-y-6">
-            <h1 className="text-3xl font-bold">Competitor Monitoring</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Competitor Monitoring</h1>
 
             {/* Add Competitor Form */}
             <div className="bg-card rounded-lg border p-4">
