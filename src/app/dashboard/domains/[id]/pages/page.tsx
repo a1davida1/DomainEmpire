@@ -42,6 +42,7 @@ export default async function DomainPagesPage({ params }: PageProps) {
                     theme: p.theme,
                     skin: p.skin,
                     isPublished: p.isPublished,
+                    status: p.status,
                     version: p.version,
                     blockCount: Array.isArray(p.blocks) ? p.blocks.length : 0,
                     createdAt: p.createdAt?.toISOString() || null,

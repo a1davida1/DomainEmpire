@@ -33,7 +33,10 @@ export default function CitationsPage() {
 
     const loadCitations = useCallback(async () => {
         const res = await fetch(`/api/articles/${articleId}/citations`);
-        if (res.ok) setCitations(await res.json());
+        if (res.ok) {
+            const body = await res.json();
+            setCitations(Array.isArray(body) ? body : body.data ?? []);
+        }
         setLoading(false);
     }, [articleId]);
 

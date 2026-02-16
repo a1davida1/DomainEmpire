@@ -477,6 +477,7 @@ export async function directUploadDeploy(
     projectName: string,
     files: Array<{ path: string; content: string | Buffer | Uint8Array }>,
     clientOptions?: CloudflareClientOptions,
+    deployOptions?: { branch?: string },
 ): Promise<DeploymentResult> {
     const config = await getConfig(clientOptions);
 
@@ -501,6 +502,11 @@ export async function directUploadDeploy(
         // Create FormData with manifest + file blobs
         const formData = new FormData();
         formData.append('manifest', JSON.stringify(manifest));
+
+        // Specify branch for staging/preview deploys (non-production)
+        if (deployOptions?.branch) {
+            formData.append('branch', deployOptions.branch);
+        }
 
         for (const [hash, file] of filesByHash) {
             // Create Blob from content (auto-handles Buffer/string)

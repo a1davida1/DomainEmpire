@@ -246,6 +246,20 @@
       "when": 1771221600000,
       "tag": "0034_flawless_gravity",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1771251194118,
+      "tag": "0035_curly_wallow",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1771254472891,
+      "tag": "0036_condemned_kinsey_walden",
+      "breakpoints": true
     }
   ]
 }

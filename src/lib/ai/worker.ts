@@ -45,7 +45,7 @@ import {
     domainChannelProfiles,
 } from '@/lib/db';
 import { eq, and, lte, gt, gte, isNull, or, sql, asc, desc, count, inArray } from 'drizzle-orm';
-import { processOutlineJob, processDraftJob, processHumanizeJob, processSeoOptimizeJob, processMetaJob, processKeywordResearchJob, processResearchJob } from './pipeline';
+import { processOutlineJob, processDraftJob, processHumanizeJob, processSeoOptimizeJob, processResolveExternalLinksJob, processMetaJob, processKeywordResearchJob, processResearchJob } from './pipeline';
 import { processDeployJob } from '@/lib/deploy/processor';
 import { checkContentSchedule } from './scheduler';
 import { evaluateDomain } from '@/lib/evaluation/evaluator';
@@ -156,6 +156,25 @@ interface UnderwritingSnapshot {
 
 const UNDERWRITING_VERSION = 'acquisition_underwriting_v1';
 const DEFAULT_ACQUISITION_COST = 12;
+
+async function purgeExpiredPreviewBuilds(): Promise<number> {
+    const now = new Date();
+    const expired = await db.update(previewBuilds).set({
+        buildStatus: 'expired',
+        updatedAt: now,
+    }).where(and(
+        lte(previewBuilds.expiresAt, now),
+        or(
+            eq(previewBuilds.buildStatus, 'ready'),
+            eq(previewBuilds.buildStatus, 'queued'),
+            eq(previewBuilds.buildStatus, 'building'),
+        ),
+    )).returning({ id: previewBuilds.id });
+    if (expired.length > 0) {
+        console.log(`[PreviewBuildPurge] Expired ${expired.length} preview build(s)`);
+    }
+    return expired.length;
+}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
     return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -2264,6 +2283,9 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
         case 'seo_optimize':
             await processSeoOptimizeJob(job.id);
             break;
+        case 'resolve_external_links':
+            await processResolveExternalLinksJob(job.id);
+            break;
         case 'generate_meta':
             await processMetaJob(job.id);
             break;
@@ -3313,6 +3335,7 @@ export async function runWorkerContinuously(options: WorkerOptions = {}): Promis
                 await snapshotCompliance().catch((err: unknown) => console.error('[Compliance] Error:', err));
                 await checkStaleDatasets().catch((err: unknown) => console.error('[DatasetFreshness] Error:', err));
                 await purgeExpiredSessions().catch((err: unknown) => console.error('[SessionPurge] Error:', err));
+                await purgeExpiredPreviewBuilds().catch((err: unknown) => console.error('[PreviewBuildPurge] Error:', err));
                 await purgeDeletedGrowthMediaStorage()
                     .then((summary) => {
                         if (summary.scanned > 0) {

@@ -5,6 +5,7 @@ const mockRequireRole = vi.fn();
 const mockGetRequestUser = vi.fn();
 const mockCreateRateLimiter = vi.fn();
 const mockSelectWhere = vi.fn();
+const mockUpdateSet = vi.fn();
 const mockGetZoneNameservers = vi.fn();
 const mockCreateZone = vi.fn();
 const mockResolveCloudflareHostShardPlan = vi.fn();
@@ -35,6 +36,10 @@ vi.mock('@/lib/deploy/host-sharding', () => ({
     recordCloudflareHostShardOutcome: mockRecordCloudflareHostShardOutcome,
 }));
 
+vi.mock('@/lib/db/soft-delete', () => ({
+    notDeleted: vi.fn(() => undefined),
+}));
+
 vi.mock('@/lib/db', () => ({
     db: {
         select: () => ({
@@ -42,10 +47,17 @@ vi.mock('@/lib/db', () => ({
                 where: mockSelectWhere,
             }),
         }),
+        update: () => ({
+            set: () => ({
+                where: mockUpdateSet,
+            }),
+        }),
     },
     domains: {
         id: 'id',
         domain: 'domain',
+        niche: 'niche',
+        cloudflareAccount: 'cloudflare_account',
     },
 }));
 
@@ -64,12 +76,14 @@ describe('bulk cloudflare zones route', () => {
         vi.clearAllMocks();
         mockRequireRole.mockResolvedValue(null);
         mockGetRequestUser.mockReturnValue({ id: 'user-1', role: 'expert' });
+        mockUpdateSet.mockResolvedValue(undefined);
         mockResolveCloudflareHostShardPlan.mockResolvedValue({
             primary: {
                 shardKey: 'default',
                 strategy: 'default',
                 source: 'environment',
-                cloudflare: {},
+                cloudflare: { accountId: 'acct-1' },
+                connectionId: null,
                 warnings: [],
             },
             fallbacks: [],
@@ -77,7 +91,8 @@ describe('bulk cloudflare zones route', () => {
                 shardKey: 'default',
                 strategy: 'default',
                 source: 'environment',
-                cloudflare: {},
+                cloudflare: { accountId: 'acct-1' },
+                connectionId: null,
                 warnings: [],
             }],
         });
@@ -85,6 +100,8 @@ describe('bulk cloudflare zones route', () => {
             {
                 id: '00000000-0000-4000-8000-000000000001',
                 domain: 'example.com',
+                niche: null,
+                cloudflareAccount: null,
             },
         ]);
     });
@@ -109,7 +126,7 @@ describe('bulk cloudflare zones route', () => {
         expect(body.createdCount).toBe(1);
         expect(body.existingCount).toBe(0);
         expect(body.failedCount).toBe(0);
-        expect(mockCreateZone).toHaveBeenCalledWith('example.com', { jumpStart: false }, {});
+        expect(mockCreateZone).toHaveBeenCalledWith('example.com', { jumpStart: false }, { accountId: 'acct-1' });
     });
 
     it('returns existing when zone lookup resolves before create', async () => {

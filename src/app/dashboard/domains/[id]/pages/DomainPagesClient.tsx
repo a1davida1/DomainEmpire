@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { BlockEditor } from '@/components/dashboard/BlockEditor';
 
 interface PageDef {
     id: string;
@@ -11,6 +12,7 @@ interface PageDef {
     theme: string;
     skin: string;
     isPublished: boolean;
+    status: string;
     version: number;
     blockCount: number;
     createdAt: string | null;
@@ -29,6 +31,9 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, initialP
     const [loading, setLoading] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
+    const [stagingUrl, setStagingUrl] = useState<string | null>(null);
+    const [editingPageId, setEditingPageId] = useState<string | null>(null);
+    const [editingBlocks, setEditingBlocks] = useState<Record<string, unknown>[] | null>(null);
 
     async function handleSeed() {
         setLoading('seed');
@@ -80,29 +85,6 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, initialP
         }
     }
 
-    async function handlePublish(pageId: string, publish: boolean) {
-        setLoading(`pub-${pageId}`);
-        setError(null);
-        try {
-            const res = await fetch(`/api/pages/${pageId}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ isPublished: publish }),
-            });
-            if (!res.ok) {
-                const data = await res.json();
-                setError(data.error || 'Failed to update');
-                return;
-            }
-            setSuccess(`Page ${publish ? 'published' : 'unpublished'}`);
-            await refreshPages();
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Update failed');
-        } finally {
-            setLoading(null);
-        }
-    }
-
     async function handleDelete(pageId: string) {
         if (!confirm('Delete this page definition? This cannot be undone.')) return;
         setLoading(`del-${pageId}`);
@@ -123,6 +105,69 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, initialP
         }
     }
 
+    async function handleStatusTransition(pageId: string, newStatus: string) {
+        setLoading(`status-${pageId}`);
+        setError(null);
+        setSuccess(null);
+        try {
+            const res = await fetch(`/api/pages/${pageId}/status`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: newStatus }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                setError(data.error || `Failed to transition to ${newStatus}`);
+                return;
+            }
+            setSuccess(`Page status changed to ${newStatus}`);
+            await refreshPages();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Status update failed');
+        } finally {
+            setLoading(null);
+        }
+    }
+
+    async function handleStagingDeploy() {
+        setLoading('staging');
+        setError(null);
+        setSuccess(null);
+        setStagingUrl(null);
+        try {
+            const res = await fetch(`/api/domains/${domainId}/staging-deploy`, {
+                method: 'POST',
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                setError(data.error || 'Staging deploy failed');
+                return;
+            }
+            setStagingUrl(data.stagingUrl || null);
+            setSuccess(`Staging deploy complete — ${data.fileCount} files uploaded`);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Staging deploy failed');
+        } finally {
+            setLoading(null);
+        }
+    }
+
+    async function openBlockEditor(pageId: string) {
+        setError(null);
+        try {
+            const res = await fetch(`/api/pages/${pageId}`);
+            const data = await res.json();
+            if (!res.ok) {
+                setError(data.error || 'Failed to load page');
+                return;
+            }
+            setEditingPageId(pageId);
+            setEditingBlocks(Array.isArray(data.blocks) ? data.blocks : []);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Failed to load page');
+        }
+    }
+
     async function refreshPages() {
         try {
             const res = await fetch(`/api/pages?domainId=${domainId}`);
@@ -135,6 +180,7 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, initialP
                     theme: p.theme,
                     skin: p.skin,
                     isPublished: p.isPublished,
+                    status: (p.status as string) || 'draft',
                     version: p.version,
                     blockCount: Array.isArray(p.blocks) ? (p.blocks as unknown[]).length : 0,
                     createdAt: p.createdAt,
@@ -144,6 +190,37 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, initialP
         } catch {
             // Silently fail refresh — user can reload
         }
+    }
+
+    // If editing a page, show the BlockEditor
+    if (editingPageId && editingBlocks) {
+        const editingPage = pages.find(p => p.id === editingPageId);
+        return (
+            <div className="space-y-4">
+                <div className="flex items-center gap-3">
+                    <Button variant="ghost" size="sm" onClick={() => { setEditingPageId(null); setEditingBlocks(null); }}>
+                        ← Back
+                    </Button>
+                    <h3 className="text-lg font-semibold">
+                        Editing: {editingPage?.route || editingPageId}
+                    </h3>
+                </div>
+                <BlockEditor
+                    pageId={editingPageId}
+                    initialBlocks={editingBlocks as { id: string; type: string; variant?: string; config?: Record<string, unknown>; content?: Record<string, unknown> }[]}
+                    onSave={() => {
+                        setEditingPageId(null);
+                        setEditingBlocks(null);
+                        setSuccess('Blocks saved successfully');
+                        refreshPages();
+                    }}
+                    onCancel={() => {
+                        setEditingPageId(null);
+                        setEditingBlocks(null);
+                    }}
+                />
+            </div>
+        );
     }
 
     return (
@@ -156,6 +233,18 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, initialP
             {success && (
                 <div className="rounded-md border border-green-500/50 bg-green-500/10 p-3 text-sm text-green-700 dark:text-green-400">
                     {success}
+                    {stagingUrl && (
+                        <div className="mt-1">
+                            <a
+                                href={stagingUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="font-medium underline"
+                            >
+                                {stagingUrl}
+                            </a>
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -179,9 +268,19 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, initialP
                         <p className="text-sm text-muted-foreground">
                             {pages.length} page definition{pages.length !== 1 ? 's' : ''} — template: <code className="rounded bg-muted px-1">{siteTemplate}</code>
                         </p>
-                        <Button variant="outline" size="sm" onClick={handleSeed} disabled={!!loading}>
-                            Re-seed
-                        </Button>
+                        <div className="flex items-center gap-2">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={handleStagingDeploy}
+                                disabled={!!loading}
+                            >
+                                {loading === 'staging' ? 'Deploying...' : 'Staging Deploy'}
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={handleSeed} disabled={!!loading}>
+                                Re-seed
+                            </Button>
+                        </div>
                     </div>
 
                     <div className="divide-y rounded-lg border">
@@ -190,8 +289,12 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, initialP
                                 <div className="min-w-0 flex-1">
                                     <div className="flex items-center gap-2">
                                         <span className="font-mono text-sm font-medium">{page.route}</span>
-                                        {page.isPublished ? (
+                                        {page.status === 'published' ? (
                                             <Badge variant="default" className="bg-green-600">Published</Badge>
+                                        ) : page.status === 'approved' ? (
+                                            <Badge variant="default" className="bg-emerald-600">Approved</Badge>
+                                        ) : page.status === 'review' ? (
+                                            <Badge variant="default" className="bg-amber-500">In Review</Badge>
                                         ) : (
                                             <Badge variant="secondary">Draft</Badge>
                                         )}
@@ -217,19 +320,49 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, initialP
                                     <Button
                                         variant="outline"
                                         size="sm"
+                                        onClick={() => openBlockEditor(page.id)}
+                                        disabled={!!loading}
+                                    >
+                                        Edit Blocks
+                                    </Button>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
                                         onClick={() => handleGenerate(page.id)}
                                         disabled={!!loading}
                                     >
                                         {loading === `gen-${page.id}` ? 'Generating...' : 'Generate'}
                                     </Button>
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => handlePublish(page.id, !page.isPublished)}
-                                        disabled={!!loading}
-                                    >
-                                        {loading === `pub-${page.id}` ? '...' : page.isPublished ? 'Unpublish' : 'Publish'}
-                                    </Button>
+                                    {page.status === 'draft' && (
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => handleStatusTransition(page.id, 'review')}
+                                            disabled={!!loading}
+                                        >
+                                            {loading === `status-${page.id}` ? '...' : 'Submit for Review'}
+                                        </Button>
+                                    )}
+                                    {page.status === 'approved' && (
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => handleStatusTransition(page.id, 'published')}
+                                            disabled={!!loading}
+                                        >
+                                            {loading === `status-${page.id}` ? '...' : 'Publish'}
+                                        </Button>
+                                    )}
+                                    {(page.status === 'published' || page.status === 'review') && (
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => handleStatusTransition(page.id, 'draft')}
+                                            disabled={!!loading}
+                                        >
+                                            {loading === `status-${page.id}` ? '...' : 'Back to Draft'}
+                                        </Button>
+                                    )}
                                     <Button
                                         variant="ghost"
                                         size="sm"

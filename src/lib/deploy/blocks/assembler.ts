@@ -84,11 +84,13 @@ export function assemblePageFromBlocks(
     for (const block of blocks) {
         const html = renderBlock(block, ctx);
         if (block.type === 'Header') {
-            headerHtml = html;
+            headerHtml = `<div data-block-id="${escapeAttr(block.id)}" data-block-type="Header">${html}</div>`;
         } else if (block.type === 'Footer') {
-            footerHtml = html;
+            footerHtml = `<div data-block-id="${escapeAttr(block.id)}" data-block-type="Footer">${html}</div>`;
         } else {
-            contentBlocks.push(html);
+            contentBlocks.push(
+                `<section data-block-id="${escapeAttr(block.id)}" data-block-type="${escapeAttr(block.type)}"${block.variant ? ` data-block-variant="${escapeAttr(block.variant)}"` : ''}>${html}</section>`,
+            );
         }
     }
 

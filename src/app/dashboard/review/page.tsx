@@ -1,5 +1,5 @@
 import { db } from '@/lib/db';
-import { articles, domains, qaChecklistResults, reviewEvents, reviewTasks } from '@/lib/db/schema';
+import { articles, domains, qaChecklistResults, reviewEvents, reviewTasks, pageDefinitions } from '@/lib/db/schema';
 import { eq, inArray, asc, and, isNull, count } from 'drizzle-orm';
 import Link from 'next/link';
 import { revalidatePath } from 'next/cache';
@@ -64,8 +64,45 @@ async function rejectAction(formData: FormData) {
     revalidatePath('/dashboard/review');
 }
 
+async function approvePageAction(formData: FormData) {
+    'use server';
+    const user = await getAuthUser();
+    if (!user) throw new Error('Unauthorized');
+    if (!['admin', 'reviewer', 'editor'].includes(user.role)) throw new Error('Forbidden');
+
+    const pageId = formData.get('pageId') as string;
+    if (!pageId) return;
+
+    await db.update(pageDefinitions).set({
+        status: 'approved',
+        lastReviewedAt: new Date(),
+        lastReviewedBy: user.id,
+        updatedAt: new Date(),
+    }).where(eq(pageDefinitions.id, pageId));
+    revalidatePath('/dashboard/review');
+}
+
+async function rejectPageAction(formData: FormData) {
+    'use server';
+    const user = await getAuthUser();
+    if (!user) throw new Error('Unauthorized');
+    if (!['admin', 'reviewer'].includes(user.role)) throw new Error('Forbidden');
+
+    const pageId = formData.get('pageId') as string;
+    if (!pageId) return;
+
+    await db.update(pageDefinitions).set({
+        status: 'draft',
+        isPublished: false,
+        lastReviewedAt: new Date(),
+        lastReviewedBy: user.id,
+        updatedAt: new Date(),
+    }).where(eq(pageDefinitions.id, pageId));
+    revalidatePath('/dashboard/review');
+}
+
 export default async function ReviewQueuePage() {
-    const [reviewArticles, domainBuyCount, launchReviewSummary] = await Promise.all([
+    const [reviewArticles, reviewPages, domainBuyCount, launchReviewSummary] = await Promise.all([
         db.select({
             id: articles.id,
             title: articles.title,
@@ -79,6 +116,20 @@ export default async function ReviewQueuePage() {
         }).from(articles)
             .where(and(inArray(articles.status, ['review', 'approved']), isNull(articles.deletedAt)))
             .orderBy(asc(articles.updatedAt)),
+
+        db.select({
+            id: pageDefinitions.id,
+            route: pageDefinitions.route,
+            title: pageDefinitions.title,
+            status: pageDefinitions.status,
+            domainId: pageDefinitions.domainId,
+            blocks: pageDefinitions.blocks,
+            theme: pageDefinitions.theme,
+            updatedAt: pageDefinitions.updatedAt,
+            reviewRequestedAt: pageDefinitions.reviewRequestedAt,
+        }).from(pageDefinitions)
+            .where(inArray(pageDefinitions.status, ['review', 'approved']))
+            .orderBy(asc(pageDefinitions.updatedAt)),
 
         db.select({ count: count() })
             .from(reviewTasks)
@@ -94,7 +145,8 @@ export default async function ReviewQueuePage() {
     ]);
 
     // Fetch domain names
-    const domainIds = [...new Set(reviewArticles.map(a => a.domainId))];
+    const pageDomainIds = reviewPages.map(p => p.domainId);
+    const domainIds = [...new Set([...reviewArticles.map(a => a.domainId), ...pageDomainIds])];
     const domainList = domainIds.length > 0
         ? await db.select({ id: domains.id, domain: domains.domain }).from(domains).where(inArray(domains.id, domainIds))
         : [];
@@ -123,8 +175,8 @@ export default async function ReviewQueuePage() {
 
     // eslint-disable-next-line react-hooks/purity
     const now = Date.now(); // Server Component — runs once at render time
-    const pendingContentCount = reviewArticles.filter(a => a.status === 'review').length;
-    const approvedContentCount = reviewArticles.filter(a => a.status === 'approved').length;
+    const pendingContentCount = reviewArticles.filter(a => a.status === 'review').length + reviewPages.filter(p => p.status === 'review').length;
+    const approvedContentCount = reviewArticles.filter(a => a.status === 'approved').length + reviewPages.filter(p => p.status === 'approved').length;
     const campaignPendingCount = launchReviewSummary?.pendingCount ?? 0;
     const campaignBreachedCount = launchReviewSummary?.dueBreachedCount ?? 0;
     const campaignEscalatedCount = launchReviewSummary?.escalatedCount ?? 0;
@@ -384,6 +436,112 @@ export default async function ReviewQueuePage() {
                     </div>
                 )}
             </div>
+
+            {/* Page Definitions Review Section */}
+            {reviewPages.length > 0 && (
+                <div id="pages" className="space-y-4">
+                    <div className="flex items-center justify-between">
+                        <h2 className="text-lg font-semibold">Page Definitions Review</h2>
+                        <span className="text-xs text-muted-foreground tabular-nums">
+                            {reviewPages.length} total &middot; {reviewPages.filter(p => p.status === 'review').length} pending &middot; {reviewPages.filter(p => p.status === 'approved').length} approved
+                        </span>
+                    </div>
+
+                    <div className="rounded-xl border bg-card overflow-hidden">
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                                <thead>
+                                    <tr className="border-b bg-muted/40">
+                                        <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">Page</th>
+                                        <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">Domain</th>
+                                        <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">Status</th>
+                                        <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">Blocks</th>
+                                        <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">Waiting</th>
+                                        <th className="text-right px-4 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y">
+                                    {reviewPages.map(page => {
+                                        const waitingSince = page.reviewRequestedAt ? new Date(page.reviewRequestedAt) : null;
+                                        const waitingDays = waitingSince
+                                            ? Math.floor((now - waitingSince.getTime()) / (1000 * 60 * 60 * 24))
+                                            : null;
+
+                                        return (
+                                            <tr key={page.id} className="transition-colors hover:bg-muted/30">
+                                                <td className="px-4 py-3">
+                                                    <div className="font-medium">{page.title || page.route}</div>
+                                                    <div className="text-xs text-muted-foreground mt-0.5 font-mono">{page.route}</div>
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <span className="text-muted-foreground text-xs">
+                                                        {domainMap.get(page.domainId) || '\u2014'}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${page.status === 'approved'
+                                                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                                            : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                                                        }`}>
+                                                        {page.status}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <span className="text-xs text-muted-foreground">
+                                                        {Array.isArray(page.blocks) ? page.blocks.length : 0} blocks &middot; {page.theme}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    {waitingDays !== null ? (
+                                                        <span className="text-xs text-muted-foreground tabular-nums">
+                                                            {waitingDays === 0 ? 'Today' : `${waitingDays}d`}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-xs text-muted-foreground">\u2014</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <div className="flex items-center justify-end gap-1.5">
+                                                        {page.status === 'review' && (
+                                                            <>
+                                                                <form action={approvePageAction}>
+                                                                    <input type="hidden" name="pageId" value={page.id} />
+                                                                    <button
+                                                                        type="submit"
+                                                                        className="inline-flex items-center px-2.5 py-1 rounded-md bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                                                                    >
+                                                                        Approve
+                                                                    </button>
+                                                                </form>
+                                                                <form action={rejectPageAction}>
+                                                                    <input type="hidden" name="pageId" value={page.id} />
+                                                                    <button
+                                                                        type="submit"
+                                                                        className="inline-flex items-center px-2.5 py-1 rounded-md border border-red-200 text-red-600 dark:border-red-800 dark:text-red-400 text-xs font-medium hover:bg-red-50 dark:hover:bg-red-950 transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+                                                                    >
+                                                                        Reject
+                                                                    </button>
+                                                                </form>
+                                                            </>
+                                                        )}
+                                                        <Link
+                                                            href={`/api/pages/${page.id}/preview`}
+                                                            target="_blank"
+                                                            className="inline-flex items-center px-2.5 py-1 rounded-md border text-xs font-medium hover:bg-muted transition-colors"
+                                                        >
+                                                            Preview
+                                                        </Link>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

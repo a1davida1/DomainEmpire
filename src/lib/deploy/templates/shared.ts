@@ -142,15 +142,34 @@ function stripPortfolioCrossDomainLinks(
     });
 }
 
+/**
+ * Add rel="nofollow noopener noreferrer" and target="_blank" to external
+ * (absolute http/https) links.  Internal/relative links are left alone.
+ */
+function addExternalLinkAttributes(html: string): string {
+    return html.replace(
+        /<a\s+href="(https?:\/\/[^"]+)"([^>]*)>/gi,
+        (_full, href: string, rest: string) => {
+            const hasRel = /\brel\s*=/i.test(rest);
+            const hasTarget = /\btarget\s*=/i.test(rest);
+            let attrs = rest;
+            if (!hasRel) attrs += ' rel="nofollow noopener noreferrer"';
+            if (!hasTarget) attrs += ' target="_blank"';
+            return `<a href="${href}"${attrs}>`;
+        },
+    );
+}
+
 export async function renderMarkdownToHtml(markdown: string, options: RenderMarkdownOptions = {}): Promise<string> {
     const cleaned = markdown
         .replace(/\[INTERNAL_LINK.*?\]/g, '')
-        .replace(/\[EXTERNAL_LINK.*?\]/g, '')
+        .replace(/\[EXTERNAL_LINK.*?\]/g, '')  // safety net for unresolved leftovers
         .replace(/\[IMAGE.*?\]/g, '');
 
     const result = marked.parse(cleaned, { async: false });
     const html = typeof result === 'string' ? result : await result;
-    const sanitized = sanitizeArticleHtml(html);
+    const withExtAttrs = addExternalLinkAttributes(html);
+    const sanitized = sanitizeArticleHtml(withExtAttrs);
 
     if (!isPortfolioCrossDomainLinkBlockingEnabled()) {
         return sanitized;

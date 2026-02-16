@@ -33,6 +33,7 @@ interface DeployPayload {
     triggerBuild: boolean;
     addCustomDomain: boolean;
     cloudflareAccount?: string | null;
+    deployTarget?: 'production' | 'staging';
 }
 
 interface DeployStep {
@@ -50,6 +51,8 @@ interface DeployContext {
     cfProject?: string;
     hostShardPlan: CloudflareHostShard[];
     hostShard: CloudflareHostShard;
+    deployTarget: 'production' | 'staging';
+    stagingUrl?: string;
 }
 
 /**
@@ -185,6 +188,7 @@ async function stepDirectUpload(ctx: DeployContext, files: { path: string; conte
             ctx.cfProject || ctx.projectName,
             files,
             shard.cloudflare,
+            ctx.deployTarget === 'staging' ? { branch: 'staging' } : undefined,
         );
 
         if (!uploadResult.success) {
@@ -212,11 +216,16 @@ async function stepDirectUpload(ctx: DeployContext, files: { path: string; conte
             sourceConnectionId: shard.connectionId ?? null,
         }, 'success');
 
+        if (ctx.deployTarget === 'staging' && uploadResult.url) {
+            ctx.stagingUrl = uploadResult.url;
+        }
+
         const failoverAttempts = Math.max(deployErrors.length, 0);
+        const branchLabel = ctx.deployTarget === 'staging' ? ' [staging]' : '';
         await doneStep(
             ctx,
             1,
-            `Deployed: ${uploadResult.url || ctx.projectName} (host shard: ${shard.shardKey}${failoverAttempts > 0 ? `, failover retries: ${failoverAttempts}` : ''})`,
+            `Deployed${branchLabel}: ${uploadResult.url || ctx.projectName} (host shard: ${shard.shardKey}${failoverAttempts > 0 ? `, failover retries: ${failoverAttempts}` : ''})`,
         );
         return;
     }
@@ -454,6 +463,23 @@ export async function processDeployJob(jobId: string): Promise<void> {
         startedAt: new Date(),
     }).where(eq(contentQueue.id, jobId));
 
+    const deployTarget = payload.deployTarget || 'production';
+    const isStaging = deployTarget === 'staging';
+
+    const steps: DeployStep[] = isStaging
+        ? [
+            { step: 'Generate Files', status: 'pending' },
+            { step: 'Upload to Cloudflare (staging)', status: 'pending' },
+        ]
+        : [
+            { step: 'Generate Files', status: 'pending' },
+            { step: 'Upload to Cloudflare', status: 'pending' },
+            { step: 'Add Custom Domain', status: 'pending' },
+            { step: 'Configure DNS Record', status: 'pending' },
+            { step: 'Update Nameservers', status: 'pending' },
+            { step: 'Verify DNS', status: 'pending' },
+        ];
+
     const ctx: DeployContext = {
         jobId,
         domainId: job.domainId!,
@@ -461,19 +487,31 @@ export async function processDeployJob(jobId: string): Promise<void> {
         projectName: sanitizeProjectName(payload.domain),
         hostShardPlan: hostShardPlan.all,
         hostShard,
-        steps: [
-            { step: 'Generate Files', status: 'pending' },
-            { step: 'Upload to Cloudflare', status: 'pending' },
-            { step: 'Add Custom Domain', status: 'pending' },
-            { step: 'Configure DNS Record', status: 'pending' },
-            { step: 'Update Nameservers', status: 'pending' },
-            { step: 'Verify DNS', status: 'pending' },
-        ],
+        deployTarget,
+        steps,
     };
 
     try {
         const files = await stepGenerateFiles(ctx);
         await stepDirectUpload(ctx, files);
+
+        // Staging deploys: skip custom domain, DNS, and NS steps
+        if (isStaging) {
+            await db.update(contentQueue).set({
+                status: 'completed',
+                completedAt: new Date(),
+                result: {
+                    steps: ctx.steps,
+                    cfProject: ctx.cfProject,
+                    filesDeployed: files.length,
+                    deployTarget: 'staging',
+                    stagingUrl: ctx.stagingUrl || null,
+                    completedAt: new Date().toISOString(),
+                },
+            }).where(eq(contentQueue.id, jobId));
+            return;
+        }
+
         const customDomainLinked = await stepAddCustomDomain(ctx);
         await stepConfigureDnsRecord(ctx, customDomainLinked);
         const dnsUpdateResult = await stepUpdateDns(ctx, customDomainLinked);
@@ -541,5 +579,76 @@ export async function processDeployJob(jobId: string): Promise<void> {
         }).where(eq(domains.id, ctx.domainId));
 
         throw error;
+    }
+}
+
+/**
+ * Process a staging-only deploy. Generates files and uploads to a 'staging' branch
+ * on CF Pages, returning a preview URL without touching DNS or custom domains.
+ *
+ * This can be called directly (not from the content queue) for on-demand staging previews.
+ */
+export async function processStagingDeploy(domainId: string): Promise<{
+    success: boolean;
+    stagingUrl?: string;
+    cfProject?: string;
+    fileCount: number;
+    error?: string;
+}> {
+    const domainRow = await db.select().from(domains).where(eq(domains.id, domainId)).limit(1);
+    if (domainRow.length === 0) {
+        return { success: false, fileCount: 0, error: 'Domain not found' };
+    }
+    const domain = domainRow[0];
+
+    const hostShardPlan = await resolveCloudflareHostShardPlan({
+        domain: domain.domain,
+        cloudflareAccount: domain.cloudflareAccount ?? null,
+        domainNiche: domain.niche ?? null,
+        maxFallbacks: 1,
+    });
+
+    const credentialErrors = validateDeployCredentials(hostShardPlan.all);
+    if (credentialErrors.length > 0) {
+        return { success: false, fileCount: 0, error: `Missing credentials: ${credentialErrors.join(', ')}` };
+    }
+
+    try {
+        const files = await generateSiteFiles(domainId);
+        if (files.length === 0) {
+            return { success: false, fileCount: 0, error: 'Generator produced zero files' };
+        }
+
+        const projectName = sanitizeProjectName(domain.domain);
+        const shard = hostShardPlan.primary;
+
+        const projectResult = await createDirectUploadProject(projectName, shard.cloudflare);
+        if (!projectResult.success) {
+            return { success: false, fileCount: files.length, error: projectResult.error || 'Project create failed' };
+        }
+
+        const uploadResult = await directUploadDeploy(
+            projectResult.projectName || projectName,
+            files,
+            shard.cloudflare,
+            { branch: 'staging' },
+        );
+
+        if (!uploadResult.success) {
+            return { success: false, fileCount: files.length, error: uploadResult.error || 'Upload failed' };
+        }
+
+        return {
+            success: true,
+            stagingUrl: uploadResult.url || undefined,
+            cfProject: projectResult.projectName || projectName,
+            fileCount: files.length,
+        };
+    } catch (err) {
+        return {
+            success: false,
+            fileCount: 0,
+            error: err instanceof Error ? err.message : String(err),
+        };
     }
 }

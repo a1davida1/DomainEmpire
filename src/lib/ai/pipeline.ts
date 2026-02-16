@@ -1,16 +1,17 @@
 /**
  * Content Generation Pipeline
  * 
- * 6-stage AI pipeline for generating high-quality SEO content:
+ * 7-stage AI pipeline for generating high-quality SEO content:
  * 1. Keyword Research (Grok fast)
  * 2. Outline Generation (Claude Sonnet)
  * 3. Draft Generation (Claude Sonnet)
  * 4. Humanization (Claude Sonnet)
  * 5. SEO Optimization (Claude Haiku)
- * 6. Meta Generation (Claude Haiku)
+ * 6. External Link Resolution (Perplexity Sonar)
+ * 7. Meta Generation (Claude Haiku)
  */
 
-import { db, articles, contentQueue, apiCallLogs, keywords, domains } from '@/lib/db';
+import { db, articles, contentQueue, apiCallLogs, keywords, domains, citations } from '@/lib/db';
 import { getAIClient } from './openrouter';
 import { eq, and, sql } from 'drizzle-orm';
 import { PROMPTS } from './prompts';
@@ -71,11 +72,37 @@ function isAiReviewFallbackEnabled(): boolean {
 }
 
 function stripEmDashes(content: string): { content: string; changed: boolean } {
-    const sanitized = content.replace(/\u2014/g, ' - ');
+    // Catch all unicode dash variants AI models love to produce:
+    // \u2014 em dash, \u2013 en dash, \u2015 horizontal bar,
+    // \u2012 figure dash, \uFE58 small em dash, \uFF0D fullwidth hyphen-minus
+    const sanitized = content.replace(/[\u2012\u2013\u2014\u2015\uFE58\uFF0D]/g, ' - ');
     return {
         content: sanitized,
         changed: sanitized !== content,
     };
+}
+
+/** Strip metadata preamble lines the AI sometimes echoes from its prompt. */
+function stripMetadataPreamble(content: string): string {
+    // Remove leading lines like "Keyword: ...", "Topic: ...", "Type: article",
+    // "Word count: ...", "Title: ...", etc.
+    const lines = content.split('\n');
+    let start = 0;
+    for (let i = 0; i < Math.min(lines.length, 10); i++) {
+        const line = lines[i].trim();
+        if (!line) { start = i + 1; continue; }
+        if (/^(Keyword|Topic|Type|Word\s*count|Target|Domain|Niche|Article\s*type|Content\s*type)\s*:/i.test(line)) {
+            start = i + 1;
+            continue;
+        }
+        // Also catch "1,061 words · Type: article" style metadata
+        if (/^\d[\d,]*\s*words/i.test(line)) {
+            start = i + 1;
+            continue;
+        }
+        break;
+    }
+    return start > 0 ? lines.slice(start).join('\n').trimStart() : content;
 }
 
 function assertAllowedCollectLeadEndpoint(endpoint: string, articleId: string): void {
@@ -95,6 +122,7 @@ type ApiLogStage =
     | 'draft'
     | 'humanize'
     | 'seo'
+    | 'resolve_links'
     | 'meta'
     | 'classify'
     | 'research';
@@ -160,7 +188,7 @@ async function evaluateWithAiReviewer(opts: {
         {
             model: DEFAULT_OPUS_REVIEW_MODEL,
             temperature: 0.1,
-            maxTokens: 1200,
+            maxTokens: 4096,
         },
     );
 
@@ -681,7 +709,7 @@ export async function processDraftJob(jobId: string): Promise<void> {
         usage: response,
     });
 
-    const sanitizedDraft = stripEmDashes(response.content).content;
+    const sanitizedDraft = stripMetadataPreamble(stripEmDashes(response.content).content);
     const wordCount = sanitizedDraft.split(/\s+/).filter(Boolean).length;
     const shortFormTypes = new Set([
         'calculator',
@@ -774,7 +802,7 @@ export async function processHumanizeJob(jobId: string): Promise<void> {
         usage: response,
     });
 
-    const sanitizedHumanized = stripEmDashes(response.content).content;
+    const sanitizedHumanized = stripMetadataPreamble(stripEmDashes(response.content).content);
     const wordCount = sanitizedHumanized.split(/\s+/).filter(Boolean).length;
 
     await db.update(articles).set({
@@ -865,7 +893,7 @@ export async function processSeoOptimizeJob(jobId: string): Promise<void> {
         usage: response,
     });
 
-    const sanitizedSeoContent = stripEmDashes(response.content).content;
+    const sanitizedSeoContent = stripMetadataPreamble(stripEmDashes(response.content).content);
     const wordCount = sanitizedSeoContent.split(/\s+/).filter(Boolean).length;
 
     await db.update(articles).set({
@@ -885,7 +913,7 @@ export async function processSeoOptimizeJob(jobId: string): Promise<void> {
 
     // Queue next step BEFORE marking current complete — prevents article orphan
     await enqueueContentJob({
-        jobType: 'generate_meta',
+        jobType: 'resolve_external_links',
         domainId: job.domainId,
         articleId: job.articleId,
         priority: job.priority,
@@ -898,6 +926,211 @@ export async function processSeoOptimizeJob(jobId: string): Promise<void> {
         completedAt: new Date(),
         apiTokensUsed: response.inputTokens + response.outputTokens,
         apiCost: response.cost.toFixed(2),
+    }).where(eq(contentQueue.id, jobId));
+}
+
+// ─── External Link Resolution ──────────────────────────────────
+
+interface ExternalLinkPlaceholder {
+    fullMatch: string;
+    anchorText: string;
+    suggestedSourceType: string;
+}
+
+interface ResolvedExternalLink {
+    anchorText: string;
+    url: string;
+    sourceTitle: string;
+    sourceType: string;
+    confidence: 'high' | 'medium' | 'low';
+}
+
+const EXTERNAL_LINK_RE = /\[EXTERNAL_LINK:\s*(.+?)\s*\|\s*(.+?)\s*\]/g;
+
+function parseExternalLinkPlaceholders(markdown: string): ExternalLinkPlaceholder[] {
+    const out: ExternalLinkPlaceholder[] = [];
+    for (const m of markdown.matchAll(EXTERNAL_LINK_RE)) {
+        out.push({ fullMatch: m[0], anchorText: m[1].trim(), suggestedSourceType: m[2].trim() });
+    }
+    return out;
+}
+
+function buildLinkResolutionPrompt(
+    placeholders: ExternalLinkPlaceholder[],
+    keyword: string,
+    title: string,
+): string {
+    const items = placeholders
+        .map((p, i) => `${i + 1}. Anchor text: "${p.anchorText}" | Source type hint: "${p.suggestedSourceType}"`)
+        .join('\n');
+
+    return `You are a web research specialist. Find real, authoritative, currently-live URLs for the following link placeholders used in an article about "${keyword}" titled "${title}".
+
+REQUIREMENTS:
+- Each URL MUST be a real, live, publicly accessible webpage (not a PDF, not behind a paywall, not a 404).
+- Prefer authoritative sources: government (.gov), academic (.edu), major publications, official industry organizations.
+- Do NOT return URLs from content farms, link directories, or low-authority blogs.
+- Each URL should be the most specific page matching the anchor text, not just a homepage.
+- If you cannot find a suitable authoritative URL for a placeholder, set url to null and confidence to "low".
+
+LINK PLACEHOLDERS TO RESOLVE:
+${items}
+
+Respond with a JSON object ONLY (no markdown fences):
+{
+  "links": [
+    {
+      "index": 1,
+      "anchorText": "the anchor text",
+      "url": "https://example.com/specific-page",
+      "sourceTitle": "Page Title - Site Name",
+      "sourceType": "government report",
+      "confidence": "high"
+    }
+  ]
+}
+
+The "index" field must match the numbered list above (1-based).
+The "confidence" field must be "high", "medium", or "low".
+If url is null, confidence must be "low".`;
+}
+
+function replaceExternalLinks(
+    markdown: string,
+    placeholders: ExternalLinkPlaceholder[],
+    resolved: ResolvedExternalLink[],
+): string {
+    const byAnchor = new Map(resolved.map((r) => [r.anchorText, r]));
+    let result = markdown;
+    for (const ph of placeholders) {
+        const link = byAnchor.get(ph.anchorText);
+        result = result.replace(
+            ph.fullMatch,
+            link?.url ? `[${link.anchorText}](${link.url})` : ph.anchorText,
+        );
+    }
+    return result;
+}
+
+export async function processResolveExternalLinksJob(jobId: string): Promise<void> {
+    const ai = getAIClient();
+    const jobs = await db.select().from(contentQueue).where(eq(contentQueue.id, jobId)).limit(1);
+    const job = jobs[0];
+
+    const articleRecord = await db.select().from(articles).where(eq(articles.id, job.articleId!)).limit(1);
+    const article = articleRecord[0];
+    if (!article.contentMarkdown) throw new Error('Content not found for external link resolution');
+
+    const placeholders = parseExternalLinkPlaceholders(article.contentMarkdown);
+
+    let updatedMarkdown = article.contentMarkdown;
+    let resolvedLinks: ResolvedExternalLink[] = [];
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let totalCost = 0;
+
+    if (placeholders.length > 0) {
+        const prompt = buildLinkResolutionPrompt(
+            placeholders,
+            article.targetKeyword || '',
+            article.title || '',
+        );
+
+        try {
+            const response = await ai.generateJSON<{
+                links: Array<{
+                    index: number;
+                    anchorText: string;
+                    url: string | null;
+                    sourceTitle: string;
+                    sourceType: string;
+                    confidence: 'high' | 'medium' | 'low';
+                }>;
+            }>('research', prompt, { temperature: 0.3 });
+
+            totalInputTokens = response.inputTokens;
+            totalOutputTokens = response.outputTokens;
+            totalCost = response.cost;
+
+            resolvedLinks = (response.data.links || [])
+                .filter((l) => l.url)
+                .map((l) => ({
+                    anchorText: l.anchorText,
+                    url: l.url!,
+                    sourceTitle: l.sourceTitle || '',
+                    sourceType: l.sourceType || '',
+                    confidence: l.confidence || 'medium',
+                }));
+
+            await logApiCallWithPrompt({
+                articleId: job.articleId,
+                domainId: job.domainId,
+                stage: 'resolve_links',
+                prompt,
+                usage: response,
+            });
+        } catch (err) {
+            console.error(`[Pipeline] External link resolution failed for article ${article.id}:`, err);
+        }
+
+        updatedMarkdown = replaceExternalLinks(article.contentMarkdown, placeholders, resolvedLinks);
+    }
+
+    const externalLinksPayload = resolvedLinks.map((l) => ({
+        anchorText: l.anchorText,
+        url: l.url,
+        sourceTitle: l.sourceTitle,
+        sourceType: l.sourceType,
+        confidence: l.confidence,
+        resolvedAt: new Date().toISOString(),
+    }));
+
+    await db.update(articles).set({
+        contentMarkdown: updatedMarkdown,
+        externalLinks: externalLinksPayload.length > 0 ? externalLinksPayload : null,
+    }).where(eq(articles.id, job.articleId!));
+
+    await createRevision({
+        articleId: job.articleId!,
+        title: article.title,
+        contentMarkdown: updatedMarkdown,
+        metaDescription: article.metaDescription,
+        changeType: 'ai_refined',
+        changeSummary: `External links resolved (${resolvedLinks.length}/${placeholders.length} placeholders)`,
+    });
+
+    if (resolvedLinks.length > 0) {
+        try {
+            await db.insert(citations).values(
+                resolvedLinks.map((l, i) => ({
+                    articleId: job.articleId!,
+                    claimText: l.anchorText,
+                    sourceUrl: l.url,
+                    sourceTitle: l.sourceTitle,
+                    retrievedAt: new Date(),
+                    notes: `Auto-resolved external link (${l.sourceType}, confidence: ${l.confidence})`,
+                    position: i,
+                })),
+            );
+        } catch (citErr) {
+            console.error(`[Pipeline] Citation insert failed for article ${article.id}:`, citErr);
+        }
+    }
+
+    await enqueueContentJob({
+        jobType: 'generate_meta',
+        domainId: job.domainId,
+        articleId: job.articleId,
+        priority: job.priority,
+        payload: {},
+        status: 'pending',
+    });
+
+    await db.update(contentQueue).set({
+        status: 'completed',
+        completedAt: new Date(),
+        apiTokensUsed: totalInputTokens + totalOutputTokens,
+        apiCost: totalCost.toFixed(2),
     }).where(eq(contentQueue.id, jobId));
 }
 
@@ -1313,6 +1546,7 @@ export const pipelineProcessors = {
     generate_draft: processDraftJob,
     humanize: processHumanizeJob,
     seo_optimize: processSeoOptimizeJob,
+    resolve_external_links: processResolveExternalLinksJob,
     generate_meta: processMetaJob,
     keyword_research: processKeywordResearchJob,
     research: processResearchJob,

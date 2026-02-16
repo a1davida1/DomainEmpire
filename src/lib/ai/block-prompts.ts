@@ -1,5 +1,5 @@
 /**
- * Per-Block AI Prompt Templates — Template System v2.
+ * Per-Block AI Prompt Templates:Template System v2.
  *
  * Each block type has a prompt template that instructs the AI to generate
  * structured JSON content matching the block's Zod schema. The pipeline
@@ -113,7 +113,7 @@ ${jsonOutputRule(`{
 Generate FAQ items for a page about "${ctx.keyword}" on ${ctx.domainName}.
 
 Create 5-8 questions that real people actually search for about this topic.
-Answers should be 2-4 sentences each — concise but complete.
+Answers should be 2-4 sentences each:concise but complete.
 Use the research data for factual answers.
 
 RESEARCH DATA:
@@ -134,7 +134,7 @@ ${jsonOutputRule(`{
 Generate a comparison table for "${ctx.keyword}" on ${ctx.domainName}.
 
 Create a thorough comparison of 3-6 options with honest scoring.
-Always pick a winner — don't cop out with "it depends."
+Always pick a winner:don't cop out with "it depends."
 
 RESEARCH DATA:
 ${JSON.stringify(ctx.researchData || {})}
@@ -337,7 +337,7 @@ ${jsonOutputRule(`{
     ProsConsCard: (ctx) => `
 Generate a detailed pros/cons review for "${ctx.keyword}" on ${ctx.domainName}.
 
-Be honest — include real weaknesses, not just token cons.
+Be honest:include real weaknesses, not just token cons.
 
 RESEARCH DATA:
 ${JSON.stringify(ctx.researchData || {})}
@@ -357,7 +357,7 @@ ${jsonOutputRule(`{
     TestimonialGrid: (ctx) => `
 Generate realistic testimonial content for a ${ctx.niche} page about "${ctx.keyword}" on ${ctx.domainName}.
 
-These should sound like real customer quotes — varied in length, specific in detail, not generic praise.
+These should sound like real customer quotes:varied in length, specific in detail, not generic praise.
 
 ${jsonOutputRule(`{
   "testimonials": [
@@ -415,7 +415,7 @@ ${jsonOutputRule(`{
     MedicalDisclaimer: (ctx) => `
 Generate a medical disclaimer for health content about "${ctx.keyword}" on ${ctx.domainName}.
 
-Must be legally sound and clearly visible. Not boilerplate — make it relevant to the specific topic.
+Must be legally sound and clearly visible. Not boilerplate:make it relevant to the specific topic.
 
 ${jsonOutputRule(`{
   "disclaimerText": "Topic-specific medical disclaimer (2-3 sentences)"
@@ -478,7 +478,7 @@ ${jsonOutputRule(`{
     VsCard: (ctx) => `
 Generate a head-to-head comparison for "${ctx.keyword}" on ${ctx.domainName}.
 
-Compare two specific items/options directly. Be opinionated — pick a winner.
+Compare two specific items/options directly. Be opinionated:pick a winner.
 
 RESEARCH DATA:
 ${JSON.stringify(ctx.researchData || {})}

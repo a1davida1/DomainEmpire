@@ -134,6 +134,10 @@ export const pageDefinitions = pgTable('page_definitions', {
         config?: Record<string, unknown>;
     }>>().notNull().default([]),
     isPublished: boolean('is_published').notNull().default(false),
+    status: text('status').notNull().default('draft'),
+    reviewRequestedAt: timestamp('review_requested_at'),
+    lastReviewedAt: timestamp('last_reviewed_at'),
+    lastReviewedBy: uuid('last_reviewed_by').references(() => users.id),
     version: integer('version').notNull().default(1),
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow(),
@@ -141,10 +145,67 @@ export const pageDefinitions = pgTable('page_definitions', {
     domainRouteUnq: uniqueIndex('page_def_domain_route_uidx').on(t.domainId, t.route),
     domainIdx: index('page_def_domain_idx').on(t.domainId),
     publishedIdx: index('page_def_published_idx').on(t.isPublished),
+    statusIdx: index('page_def_status_idx').on(t.status),
 }));
 
 export type PageDefinition = typeof pageDefinitions.$inferSelect;
 export type NewPageDefinition = typeof pageDefinitions.$inferInsert;
+
+// ===========================================
+// PAGE VARIANTS: A/B test compositions with split block sequences
+// ===========================================
+export const pageVariants = pgTable('page_variants', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    pageId: uuid('page_id').notNull().references(() => pageDefinitions.id, { onDelete: 'cascade' }),
+    variantKey: text('variant_key').notNull().default('control'),
+    weight: integer('weight').notNull().default(50),
+    blocks: jsonb('blocks').$type<Array<{
+        id: string;
+        type: string;
+        variant?: string;
+        content?: Record<string, unknown>;
+        config?: Record<string, unknown>;
+    }>>().notNull().default([]),
+    isActive: boolean('is_active').notNull().default(true),
+    impressions: integer('impressions').notNull().default(0),
+    conversions: integer('conversions').notNull().default(0),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+}, (t) => ({
+    pageVariantUnq: uniqueIndex('page_variant_page_key_uidx').on(t.pageId, t.variantKey),
+    pageIdx: index('page_variant_page_idx').on(t.pageId),
+    activeIdx: index('page_variant_active_idx').on(t.isActive),
+}));
+
+export type PageVariant = typeof pageVariants.$inferSelect;
+export type NewPageVariant = typeof pageVariants.$inferInsert;
+
+// ===========================================
+// BLOCK TEMPLATES: Cross-domain reusable block library
+// ===========================================
+export const blockTemplates = pgTable('block_templates', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: text('name').notNull(),
+    description: text('description'),
+    blockType: text('block_type').notNull(),
+    variant: text('variant'),
+    config: jsonb('config').$type<Record<string, unknown>>().notNull().default({}),
+    content: jsonb('content').$type<Record<string, unknown>>().notNull().default({}),
+    tags: text('tags').array().notNull().default([]),
+    sourceDomainId: uuid('source_domain_id').references(() => domains.id, { onDelete: 'set null' }),
+    sourceBlockId: text('source_block_id'),
+    usageCount: integer('usage_count').notNull().default(0),
+    isGlobal: boolean('is_global').notNull().default(false),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+}, (t) => ({
+    typeIdx: index('block_tpl_type_idx').on(t.blockType),
+    globalIdx: index('block_tpl_global_idx').on(t.isGlobal),
+}));
+
+export type BlockTemplate = typeof blockTemplates.$inferSelect;
+export type NewBlockTemplate = typeof blockTemplates.$inferInsert;
 
 // ===========================================
 // DOMAIN LIFECYCLE EVENTS: Canonical lifecycle transition audit trail
@@ -545,7 +606,7 @@ export const contentQueue = pgTable('content_queue', {
     jobType: text('job_type', {
         enum: [
             'generate_outline', 'generate_draft', 'humanize',
-            'seo_optimize', 'generate_meta', 'deploy',
+            'seo_optimize', 'resolve_external_links', 'generate_meta', 'deploy',
             'fetch_analytics', 'keyword_research', 'bulk_seed',
             'research', 'evaluate', 'content_refresh',
             'fetch_gsc', 'check_backlinks', 'check_renewals',
@@ -1188,7 +1249,7 @@ export const apiCallLogs = pgTable('api_call_logs', {
     domainId: uuid('domain_id').references(() => domains.id, { onDelete: 'set null' }),
 
     stage: text('stage', {
-        enum: ['keyword_research', 'outline', 'draft', 'humanize', 'seo', 'meta', 'classify', 'research', 'evaluate', 'ai_review']
+        enum: ['keyword_research', 'outline', 'draft', 'humanize', 'seo', 'resolve_links', 'meta', 'classify', 'research', 'evaluate', 'ai_review']
     }).notNull(),
     modelKey: text('model_key').notNull().default('legacy'),
     model: text('model').notNull(),
