@@ -25,6 +25,7 @@ export default function QueuePage() {
     const [processing, setProcessing] = useState(false);
     const [retrying, setRetrying] = useState(false);
     const [lastResult, setLastResult] = useState<{ type: string; message: string } | null>(null);
+    const [domainArticles, setDomainArticles] = useState<Array<{ domain: string; articles: number; status: string }>>([]);
 
     const fetchStats = useCallback(async () => {
         try {
@@ -42,6 +43,18 @@ export default function QueuePage() {
 
     useEffect(() => {
         fetchStats();
+        fetch('/api/domains?status=active')
+            .then(r => r.ok ? r.json() : [])
+            .then(data => {
+                if (Array.isArray(data)) {
+                    setDomainArticles(data.map((d: { domain: string; articleCount?: number; status: string }) => ({
+                        domain: d.domain,
+                        articles: d.articleCount ?? 0,
+                        status: d.status,
+                    })).sort((a: { articles: number }, b: { articles: number }) => a.articles - b.articles).slice(0, 10));
+                }
+            })
+            .catch(() => {});
         const interval = setInterval(fetchStats, 5000);
         return () => clearInterval(interval);
     }, [fetchStats]);
@@ -147,6 +160,28 @@ export default function QueuePage() {
                     </Card>
                 ))}
             </div>
+
+            {domainArticles.length > 0 && (
+                <Card className="bg-zinc-900/50">
+                    <CardHeader>
+                        <CardTitle>Content by Domain</CardTitle>
+                        <CardDescription>Domains with fewest articles (active only)</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                            {domainArticles.map(d => (
+                                <div key={d.domain} className="rounded-lg border border-zinc-700 bg-zinc-800/50 px-3 py-2 text-center">
+                                    <p className="truncate text-xs font-medium text-zinc-300" title={d.domain}>{d.domain}</p>
+                                    <p className={`text-lg font-bold ${d.articles === 0 ? 'text-red-400' : d.articles < 5 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                                        {d.articles}
+                                    </p>
+                                    <p className="text-[10px] text-zinc-500">articles</p>
+                                </div>
+                            ))}
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
 
             <Card className="bg-zinc-900/50">
                 <CardHeader>

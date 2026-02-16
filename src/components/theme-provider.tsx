@@ -1,30 +1,10 @@
 "use client"
 
 import * as React from "react"
+import { ThemeProvider as NextThemesProvider } from "next-themes"
 
-/**
- * ThemeProvider component for theme management.
- * 
- * Note: This is a minimal pass-through implementation. If theme switching 
- * is needed, install next-themes: npm install next-themes
- * Then import and re-export: export { ThemeProvider } from 'next-themes'
- */
-interface ThemeProviderProps {
-    children: React.ReactNode;
-    attribute?: string;
-    defaultTheme?: string;
-    enableSystem?: boolean;
-    disableTransitionOnChange?: boolean;
-    [key: string]: unknown;
-}
+type ThemeProviderProps = React.ComponentProps<typeof NextThemesProvider>;
 
-export function ThemeProvider({
-    children,
-    attribute: _attribute,
-    defaultTheme: _defaultTheme,
-    enableSystem: _enableSystem,
-    disableTransitionOnChange: _disableTransitionOnChange,
-    ..._props
-}: ThemeProviderProps) {
-    return <>{children}</>
+export function ThemeProvider({ children, ...props }: ThemeProviderProps) {
+    return <NextThemesProvider {...props}>{children}</NextThemesProvider>
 }

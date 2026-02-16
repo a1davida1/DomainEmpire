@@ -74,6 +74,7 @@ interface FormData {
     subNiche: string;
     siteTemplate: string;
     themeStyle: string;
+    cloudflareAccount: string;
     notes: string;
     tags: string[];
 }
@@ -98,6 +99,7 @@ export default function NewDomainPage() {
         subNiche: '',
         siteTemplate: 'authority',
         themeStyle: '',
+        cloudflareAccount: '',
         notes: '',
         tags: [],
     });
@@ -143,6 +145,7 @@ export default function NewDomainPage() {
                 subNiche: formData.subNiche || undefined,
                 siteTemplate: formData.siteTemplate,
                 themeStyle: formData.themeStyle || undefined,
+                cloudflareAccount: formData.cloudflareAccount || undefined,
                 notes: formData.notes || undefined,
                 tags: formData.tags,
             };
@@ -289,6 +292,20 @@ export default function NewDomainPage() {
                                     onChange={(e) => updateField('themeStyle', e.target.value)}
                                     disabled={loading}
                                 />
+                            </div>
+
+                            <div className="space-y-2 sm:col-span-2">
+                                <Label htmlFor="cloudflareAccount">Cloudflare Host Shard</Label>
+                                <Input
+                                    id="cloudflareAccount"
+                                    placeholder="e.g., legal-content-1 or Cloudflare account ID"
+                                    value={formData.cloudflareAccount}
+                                    onChange={(e) => updateField('cloudflareAccount', e.target.value)}
+                                    disabled={loading}
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                    Optional. Leave blank for deterministic automatic shard assignment.
+                                </p>
                             </div>
                         </div>
                     </CardContent>

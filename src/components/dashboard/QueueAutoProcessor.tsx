@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 const AUTO_INTERVAL_MS = 10_000;
+const AUTO_ENABLED_KEY = 'queue_auto_processor_enabled';
+const AUTO_MAX_JOBS_KEY = 'queue_auto_processor_max_jobs';
 
 type QueueProcessResponse = {
     processed?: number;
@@ -19,6 +21,31 @@ export function QueueAutoProcessor({ defaultMaxJobs = 10 }: { defaultMaxJobs?: n
     const [lastRunAt, setLastRunAt] = useState<string | null>(null);
     const [lastResult, setLastResult] = useState('idle');
     const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const storedEnabled = window.localStorage.getItem(AUTO_ENABLED_KEY);
+        const storedMaxJobs = window.localStorage.getItem(AUTO_MAX_JOBS_KEY);
+        if (storedEnabled === '1') {
+            setEnabled(true);
+        }
+        if (storedMaxJobs) {
+            const parsed = Number.parseInt(storedMaxJobs, 10);
+            if (Number.isFinite(parsed)) {
+                setMaxJobs(Math.max(1, Math.min(parsed, 50)));
+            }
+        }
+    }, []);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        window.localStorage.setItem(AUTO_ENABLED_KEY, enabled ? '1' : '0');
+    }, [enabled]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        window.localStorage.setItem(AUTO_MAX_JOBS_KEY, String(maxJobs));
+    }, [maxJobs]);
 
     useEffect(() => {
         if (!enabled) return;
@@ -101,6 +128,9 @@ export function QueueAutoProcessor({ defaultMaxJobs = 10 }: { defaultMaxJobs?: n
             <p className="mt-2 text-xs text-muted-foreground">
                 status: {running ? 'processing...' : enabled ? 'waiting for next run' : 'paused'}
                 {lastRunAt ? ` • last run ${lastRunAt}` : ''}
+            </p>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+                Auto-run preference is saved in this browser.
             </p>
             <p className="mt-1 text-xs">{lastResult}</p>
             {error && <p className="mt-1 text-xs text-red-600">{error}</p>}

@@ -854,6 +854,46 @@ export const integrationSyncRuns = pgTable('integration_sync_runs', {
     createdAtIdx: index('integration_sync_run_created_at_idx').on(t.createdAt),
 }));
 
+export const cloudflareShardHealth = pgTable('cloudflare_shard_health', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    shardKey: text('shard_key').notNull(),
+    accountId: text('account_id').notNull(),
+    sourceConnectionId: uuid('source_connection_id').references(() => integrationConnections.id, { onDelete: 'set null' }),
+    penalty: integer('penalty').notNull().default(0),
+    cooldownUntil: timestamp('cooldown_until'),
+    successCount: integer('success_count').notNull().default(0),
+    rateLimitCount: integer('rate_limit_count').notNull().default(0),
+    failureCount: integer('failure_count').notNull().default(0),
+    lastOutcome: text('last_outcome', {
+        enum: ['success', 'rate_limited', 'failure'],
+    }).notNull().default('success'),
+    lastOutcomeAt: timestamp('last_outcome_at'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}).notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+    shardAccountUidx: uniqueIndex('cloudflare_shard_health_shard_account_uidx').on(t.shardKey, t.accountId),
+    accountIdx: index('cloudflare_shard_health_account_idx').on(t.accountId),
+    cooldownIdx: index('cloudflare_shard_health_cooldown_idx').on(t.cooldownUntil),
+    updatedIdx: index('cloudflare_shard_health_updated_idx').on(t.updatedAt),
+    penaltyCheck: check(
+        'cloudflare_shard_health_penalty_check',
+        sql`${t.penalty} >= 0 AND ${t.penalty} <= 100`,
+    ),
+    successCountCheck: check(
+        'cloudflare_shard_health_success_count_check',
+        sql`${t.successCount} >= 0`,
+    ),
+    rateLimitCountCheck: check(
+        'cloudflare_shard_health_rate_limit_count_check',
+        sql`${t.rateLimitCount} >= 0`,
+    ),
+    failureCountCheck: check(
+        'cloudflare_shard_health_failure_count_check',
+        sql`${t.failureCount} >= 0`,
+    ),
+}));
+
 export const domainChannelProfiles = pgTable('domain_channel_profiles', {
     id: uuid('id').primaryKey().defaultRandom(),
     domainId: uuid('domain_id').notNull().references(() => domains.id, { onDelete: 'cascade' }),
@@ -1759,6 +1799,7 @@ export const abTests = pgTable('ab_tests', {
         impressions: number;
         clicks: number;
         conversions: number;
+        allocationPct?: number;
     }>>().notNull(),
     winnerId: text('winner_id'),
     confidenceLevel: real('confidence_level'),
@@ -2246,6 +2287,7 @@ export const integrationConnectionsRelations = relations(integrationConnections,
     }),
     registrarProfiles: many(domainRegistrarProfiles),
     syncRuns: many(integrationSyncRuns),
+    cloudflareShardHealth: many(cloudflareShardHealth),
 }));
 
 export const integrationSyncRunsRelations = relations(integrationSyncRuns, ({ one }) => ({
@@ -2257,6 +2299,13 @@ export const integrationSyncRunsRelations = relations(integrationSyncRuns, ({ on
         fields: [integrationSyncRuns.triggeredBy],
         references: [users.id],
         relationName: 'integration_sync_run_triggered_by',
+    }),
+}));
+
+export const cloudflareShardHealthRelations = relations(cloudflareShardHealth, ({ one }) => ({
+    sourceConnection: one(integrationConnections, {
+        fields: [cloudflareShardHealth.sourceConnectionId],
+        references: [integrationConnections.id],
     }),
 }));
 
@@ -2394,6 +2443,8 @@ export type IntegrationConnection = typeof integrationConnections.$inferSelect;
 export type NewIntegrationConnection = typeof integrationConnections.$inferInsert;
 export type IntegrationSyncRun = typeof integrationSyncRuns.$inferSelect;
 export type NewIntegrationSyncRun = typeof integrationSyncRuns.$inferInsert;
+export type CloudflareShardHealth = typeof cloudflareShardHealth.$inferSelect;
+export type NewCloudflareShardHealth = typeof cloudflareShardHealth.$inferInsert;
 export type MediaAsset = typeof mediaAssets.$inferSelect;
 export type MediaAssetUsage = typeof mediaAssetUsage.$inferSelect;
 export type MediaModerationTask = typeof mediaModerationTasks.$inferSelect;

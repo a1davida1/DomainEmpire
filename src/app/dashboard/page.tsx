@@ -7,6 +7,7 @@ import {
     Plus, Rocket, Activity, Clock, Mail, Megaphone, PlayCircle
 } from 'lucide-react';
 import Link from 'next/link';
+import { DashboardRefresh } from '@/components/dashboard/DashboardRefresh';
 import { db, domains, articles, monetizationProfiles, contentQueue, subscribers } from '@/lib/db';
 import { eq, count, sum, and, gte, lt, desc, sql, isNull } from 'drizzle-orm';
 
@@ -290,7 +291,8 @@ export default async function DashboardPage() {
                         Portfolio overview and key metrics
                     </p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2">
+                    <DashboardRefresh />
                     <Link href="/dashboard/workflow">
                         <Button>
                             <PlayCircle className="mr-2 h-4 w-4" />

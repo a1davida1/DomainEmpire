@@ -73,6 +73,7 @@ export default function DomainEditForm({ domain }: Props) {
         subNiche: domain.subNiche || '',
         siteTemplate: domain.siteTemplate || 'authority',
         themeStyle: domain.themeStyle || '',
+        cloudflareAccount: domain.cloudflareAccount || '',
         notes: domain.notes || '',
         tags: domain.tags || [],
     });
@@ -112,6 +113,7 @@ export default function DomainEditForm({ domain }: Props) {
                 subNiche: formData.subNiche || undefined,
                 siteTemplate: formData.siteTemplate,
                 themeStyle: formData.themeStyle || undefined,
+                cloudflareAccount: formData.cloudflareAccount || undefined,
                 notes: formData.notes || undefined,
                 tags: formData.tags,
             };
@@ -232,6 +234,20 @@ export default function DomainEditForm({ domain }: Props) {
                                 onChange={(e) => updateField('themeStyle', e.target.value)}
                                 disabled={loading}
                             />
+                        </div>
+
+                        <div className="space-y-2 sm:col-span-2">
+                            <Label htmlFor="cloudflareAccount">Cloudflare Host Shard</Label>
+                            <Input
+                                id="cloudflareAccount"
+                                placeholder="e.g., legal-content-1 or Cloudflare account ID"
+                                value={formData.cloudflareAccount}
+                                onChange={(e) => updateField('cloudflareAccount', e.target.value)}
+                                disabled={loading}
+                            />
+                            <p className="text-xs text-muted-foreground">
+                                Optional. If empty, host sharding uses deterministic portfolio routing.
+                            </p>
                         </div>
                     </div>
                 </CardContent>

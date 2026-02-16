@@ -9,6 +9,16 @@ import { getAIClient } from './openrouter';
 import { db, domains } from '@/lib/db';
 import { eq, isNull, or } from 'drizzle-orm';
 
+const DOMAIN_NAME_REGEX = /^[a-z0-9][a-z0-9.-]*[a-z0-9]$/i;
+
+function sanitizeDomainName(value: string): string {
+    const cleaned = value.replace(/[\r\n`]/g, '').trim().toLowerCase();
+    if (!DOMAIN_NAME_REGEX.test(cleaned)) {
+        throw new Error(`Invalid domain name for classification: ${cleaned.slice(0, 80)}`);
+    }
+    return cleaned;
+}
+
 const SITE_TEMPLATES = [
     'authority', 'comparison', 'calculator', 'review', 'tool', 'hub',
     'decision', 'cost_guide', 'niche', 'info', 'consumer', 'brand',
@@ -91,10 +101,11 @@ function isValidTemplate(value: string): value is SiteTemplate {
 }
 
 export async function classifyDomain(domainName: string): Promise<DomainClassification> {
+    const safeName = sanitizeDomainName(domainName);
     const ai = getAIClient();
     const response = await ai.generateJSON<DomainClassification>(
         'domainClassify',
-        CLASSIFY_PROMPT(domainName),
+        CLASSIFY_PROMPT(safeName),
         { temperature: 0.2, maxTokens: 500 },
     );
 

@@ -1,12 +1,25 @@
 import { db } from '@/lib/db';
-import { expenses, revenueSnapshots, domains } from '@/lib/db/schema';
-import { desc, sql, gte } from 'drizzle-orm';
+import {
+    domainFinanceLedgerEntries,
+    domainFinanceMonthlyCloses,
+    domains,
+    expenses,
+    revenueSnapshots,
+} from '@/lib/db/schema';
+import { desc, eq, gte, sql } from 'drizzle-orm';
 import { projectPortfolioROI } from '@/lib/analytics/forecasting';
+import { FinanceMonthlyClosePanel } from '@/components/dashboard/FinanceMonthlyClosePanel';
+
+function toMoney(value: number | string | null | undefined): number {
+    const numeric = typeof value === 'number' ? value : Number(value ?? 0);
+    return Number.isFinite(numeric) ? numeric : 0;
+}
 
 export default async function FinancesPage() {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
 
-    const [recentExpenses, expensesByCategory, recentRevenue, allDomains] = await Promise.all([
+    const [recentExpenses, expensesByCategory, recentRevenue, allDomains, ledgerRollups30d, recentMonthlyCloses, ledgerCoverageRows] = await Promise.all([
         db.select().from(expenses).orderBy(desc(expenses.expenseDate)).limit(50),
         db.select({
             category: expenses.category,
@@ -26,12 +39,55 @@ export default async function FinancesPage() {
             domain: domains.domain,
             purchasePrice: domains.purchasePrice,
         }).from(domains),
+        db.select({
+            domainId: domainFinanceLedgerEntries.domainId,
+            domain: domains.domain,
+            revenueTotal: sql<number>`sum(case when ${domainFinanceLedgerEntries.impact} = 'revenue' then ${domainFinanceLedgerEntries.amount} else 0 end)::float`,
+            costTotal: sql<number>`sum(case when ${domainFinanceLedgerEntries.impact} = 'cost' then ${domainFinanceLedgerEntries.amount} else 0 end)::float`,
+            entryCount: sql<number>`count(*)::int`,
+        })
+            .from(domainFinanceLedgerEntries)
+            .innerJoin(domains, eq(domainFinanceLedgerEntries.domainId, domains.id))
+            .where(gte(domainFinanceLedgerEntries.entryDate, thirtyDaysAgo))
+            .groupBy(domainFinanceLedgerEntries.domainId, domains.domain)
+            .orderBy(sql`sum(case when ${domainFinanceLedgerEntries.impact} = 'revenue' then ${domainFinanceLedgerEntries.amount} else 0 end) - sum(case when ${domainFinanceLedgerEntries.impact} = 'cost' then ${domainFinanceLedgerEntries.amount} else 0 end) desc`)
+            .limit(60),
+        db.select({
+            id: domainFinanceMonthlyCloses.id,
+            domainId: domainFinanceMonthlyCloses.domainId,
+            domain: domains.domain,
+            monthStart: domainFinanceMonthlyCloses.monthStart,
+            monthEnd: domainFinanceMonthlyCloses.monthEnd,
+            revenueTotal: domainFinanceMonthlyCloses.revenueTotal,
+            costTotal: domainFinanceMonthlyCloses.costTotal,
+            netTotal: domainFinanceMonthlyCloses.netTotal,
+            marginPct: domainFinanceMonthlyCloses.marginPct,
+            entryCount: domainFinanceMonthlyCloses.entryCount,
+            closedAt: domainFinanceMonthlyCloses.closedAt,
+        })
+            .from(domainFinanceMonthlyCloses)
+            .innerJoin(domains, eq(domainFinanceMonthlyCloses.domainId, domains.id))
+            .where(gte(domainFinanceMonthlyCloses.monthStart, ninetyDaysAgo))
+            .orderBy(desc(domainFinanceMonthlyCloses.monthStart), desc(domainFinanceMonthlyCloses.closedAt))
+            .limit(80),
+        db.select({
+            domainCount: sql<number>`count(distinct ${domainFinanceLedgerEntries.domainId})::int`,
+        })
+            .from(domainFinanceLedgerEntries)
+            .where(gte(domainFinanceLedgerEntries.entryDate, thirtyDaysAgo)),
     ]);
 
     const totalExpenses30d = expensesByCategory.reduce((sum, e) => sum + (e.total || 0), 0);
     const totalRevenue30d = recentRevenue[0]?.total || 0;
     const profit30d = totalRevenue30d - totalExpenses30d;
     const totalInvestment = allDomains.reduce((sum, d) => sum + Number(d.purchasePrice || 0), 0);
+    const ledgerRevenue30d = ledgerRollups30d.reduce((sum, row) => sum + toMoney(row.revenueTotal), 0);
+    const ledgerCost30d = ledgerRollups30d.reduce((sum, row) => sum + toMoney(row.costTotal), 0);
+    const ledgerNet30d = ledgerRevenue30d - ledgerCost30d;
+    const ledgerDomainCoverage = ledgerCoverageRows[0]?.domainCount ?? 0;
+    const ledgerCoveragePct = allDomains.length > 0
+        ? Number(((ledgerDomainCoverage / allDomains.length) * 100).toFixed(1))
+        : null;
 
     // Fetch portfolio projections
     let portfolio: Awaited<ReturnType<typeof projectPortfolioROI>> | null = null;
@@ -75,6 +131,30 @@ export default async function FinancesPage() {
                     <p className="text-xs text-muted-foreground">annualized (profit-based)</p>
                 </div>
             </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="bg-card rounded-lg border p-4">
+                    <p className="text-sm text-muted-foreground">Ledger Revenue (30d)</p>
+                    <p className="text-xl font-semibold text-green-600">${ledgerRevenue30d.toFixed(2)}</p>
+                </div>
+                <div className="bg-card rounded-lg border p-4">
+                    <p className="text-sm text-muted-foreground">Ledger Cost (30d)</p>
+                    <p className="text-xl font-semibold text-red-600">${ledgerCost30d.toFixed(2)}</p>
+                </div>
+                <div className="bg-card rounded-lg border p-4">
+                    <p className="text-sm text-muted-foreground">Ledger Net (30d)</p>
+                    <p className={`text-xl font-semibold ${ledgerNet30d >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        ${ledgerNet30d.toFixed(2)}
+                    </p>
+                </div>
+                <div className="bg-card rounded-lg border p-4">
+                    <p className="text-sm text-muted-foreground">Ledger Domain Coverage (30d)</p>
+                    <p className="text-xl font-semibold">{ledgerDomainCoverage}/{allDomains.length}</p>
+                    <p className="text-xs text-muted-foreground">{ledgerCoveragePct !== null ? `${ledgerCoveragePct}% of portfolio` : 'N/A'}</p>
+                </div>
+            </div>
+
+            <FinanceMonthlyClosePanel domains={allDomains.map((row) => ({ id: row.id, domain: row.domain }))} />
 
             {/* Projections */}
             {portfolio && portfolio.projections.length > 0 && (
@@ -135,6 +215,106 @@ export default async function FinancesPage() {
                     </div>
                 </div>
             )}
+
+            <div className="bg-card rounded-lg border overflow-hidden">
+                <h2 className="text-lg font-semibold p-4 border-b">Per-Domain P&L (Last 30 Days, Ledger)</h2>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                        <thead className="bg-muted/50">
+                            <tr>
+                                <th className="text-left p-3">Domain</th>
+                                <th className="text-right p-3">Revenue</th>
+                                <th className="text-right p-3">Cost</th>
+                                <th className="text-right p-3">Net</th>
+                                <th className="text-right p-3">Margin</th>
+                                <th className="text-right p-3">Entries</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {ledgerRollups30d.length === 0 && (
+                                <tr>
+                                    <td colSpan={6} className="p-3 text-muted-foreground">
+                                        No ledger entries found in the last 30 days.
+                                    </td>
+                                </tr>
+                            )}
+                            {ledgerRollups30d.map((row) => {
+                                const revenue = toMoney(row.revenueTotal);
+                                const cost = toMoney(row.costTotal);
+                                const net = revenue - cost;
+                                const margin = revenue > 0 ? (net / revenue) * 100 : null;
+                                return (
+                                    <tr key={row.domainId} className="border-t">
+                                        <td className="p-3 font-mono">{row.domain}</td>
+                                        <td className="p-3 text-right text-green-600">${revenue.toFixed(2)}</td>
+                                        <td className="p-3 text-right text-red-600">${cost.toFixed(2)}</td>
+                                        <td className={`p-3 text-right font-medium ${net >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                            ${net.toFixed(2)}
+                                        </td>
+                                        <td className="p-3 text-right">{margin !== null ? `${margin.toFixed(1)}%` : '—'}</td>
+                                        <td className="p-3 text-right">{row.entryCount}</td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div className="bg-card rounded-lg border overflow-hidden">
+                <h2 className="text-lg font-semibold p-4 border-b">Monthly Close Snapshots (Last 90 Days)</h2>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                        <thead className="bg-muted/50">
+                            <tr>
+                                <th className="text-left p-3">Month</th>
+                                <th className="text-left p-3">Domain</th>
+                                <th className="text-right p-3">Revenue</th>
+                                <th className="text-right p-3">Cost</th>
+                                <th className="text-right p-3">Net</th>
+                                <th className="text-right p-3">Margin</th>
+                                <th className="text-right p-3">Entries</th>
+                                <th className="text-right p-3">Closed</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {recentMonthlyCloses.length === 0 && (
+                                <tr>
+                                    <td colSpan={8} className="p-3 text-muted-foreground">
+                                        No monthly close snapshots found in the last 90 days.
+                                    </td>
+                                </tr>
+                            )}
+                            {recentMonthlyCloses.map((row) => {
+                                const revenue = toMoney(row.revenueTotal);
+                                const cost = toMoney(row.costTotal);
+                                const net = toMoney(row.netTotal);
+                                const margin = row.marginPct === null ? null : Number(row.marginPct) * 100;
+                                const monthLabel = new Date(row.monthStart).toLocaleDateString(undefined, {
+                                    year: 'numeric',
+                                    month: 'short',
+                                });
+                                return (
+                                    <tr key={row.id} className="border-t">
+                                        <td className="p-3">{monthLabel}</td>
+                                        <td className="p-3 font-mono">{row.domain}</td>
+                                        <td className="p-3 text-right text-green-600">${revenue.toFixed(2)}</td>
+                                        <td className="p-3 text-right text-red-600">${cost.toFixed(2)}</td>
+                                        <td className={`p-3 text-right font-medium ${net >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                            ${net.toFixed(2)}
+                                        </td>
+                                        <td className="p-3 text-right">{margin !== null ? `${margin.toFixed(1)}%` : '—'}</td>
+                                        <td className="p-3 text-right">{row.entryCount}</td>
+                                        <td className="p-3 text-right text-muted-foreground">
+                                            {row.closedAt ? new Date(row.closedAt).toLocaleDateString() : '—'}
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
 
             {/* Expenses by category */}
             <div className="bg-card rounded-lg border p-4">

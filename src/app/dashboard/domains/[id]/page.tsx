@@ -17,6 +17,7 @@ import {
     Trash2
 } from 'lucide-react';
 import ContentTypeConfig from '@/components/dashboard/ContentTypeConfig';
+import { DomainDetailTabs } from '@/components/dashboard/DomainDetailTabs';
 import DomainChannelCompatibilityConfig from '@/components/dashboard/DomainChannelCompatibilityConfig';
 import DomainLifecycleControls from '@/components/dashboard/DomainLifecycleControls';
 import DomainWorkflowConfig from '@/components/dashboard/DomainWorkflowConfig';
@@ -446,6 +447,8 @@ export default async function DomainDetailPage({ params }: PageProps) {
                 </div>
             </div>
 
+            <DomainDetailTabs domainId={id} />
+
             {/* Quick Stats */}
             <div className="grid gap-4 md:grid-cols-4">
                 <Card>
@@ -706,6 +709,10 @@ export default async function DomainDetailPage({ params }: PageProps) {
                             <div>
                                 <p className="text-sm font-medium text-muted-foreground">Theme Style</p>
                                 <p className="font-medium">{domain.themeStyle || 'Not set'}</p>
+                            </div>
+                            <div>
+                                <p className="text-sm font-medium text-muted-foreground">Host Shard</p>
+                                <p className="font-medium">{domain.cloudflareAccount || 'Auto (deterministic)'}</p>
                             </div>
                             <div>
                                 <p className="text-sm font-medium text-muted-foreground">Niche</p>

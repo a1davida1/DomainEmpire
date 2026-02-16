@@ -7,6 +7,8 @@ const mockCreateRateLimiter = vi.fn();
 const mockSelectLimit = vi.fn();
 const mockUpdateNameservers = vi.fn();
 const mockGetZoneNameservers = vi.fn();
+const mockResolveCloudflareHostShardPlan = vi.fn();
+const mockRecordCloudflareHostShardOutcome = vi.fn();
 
 mockCreateRateLimiter.mockReturnValue(() => ({
     allowed: true,
@@ -58,6 +60,11 @@ vi.mock('@/lib/deploy/cloudflare', () => ({
     getZoneNameservers: mockGetZoneNameservers,
 }));
 
+vi.mock('@/lib/deploy/host-sharding', () => ({
+    resolveCloudflareHostShardPlan: mockResolveCloudflareHostShardPlan,
+    recordCloudflareHostShardOutcome: mockRecordCloudflareHostShardOutcome,
+}));
+
 const { POST } = await import('@/app/api/domains/[id]/nameservers/route');
 
 function makeInvalidJsonRequest(url: string): NextRequest {
@@ -87,11 +94,29 @@ describe('domain nameservers route', () => {
             allowed: true,
             headers: {},
         }));
+        mockResolveCloudflareHostShardPlan.mockResolvedValue({
+            primary: {
+                shardKey: 'default',
+                strategy: 'default',
+                source: 'environment',
+                cloudflare: {},
+                warnings: [],
+            },
+            fallbacks: [],
+            all: [{
+                shardKey: 'default',
+                strategy: 'default',
+                source: 'environment',
+                cloudflare: {},
+                warnings: [],
+            }],
+        });
         mockSelectLimit.mockResolvedValue([
             {
                 id: '00000000-0000-4000-8000-000000000001',
                 domain: 'example.com',
                 registrar: 'godaddy',
+                cloudflareAccount: null,
                 profileId: 'profile-1',
                 profileMetadata: {},
             },

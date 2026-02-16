@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Loader2 } from 'lucide-react';
+import { Loader2, CheckCircle2, Circle } from 'lucide-react';
+import { DomainDetailTabs } from '@/components/dashboard/DomainDetailTabs';
 
 type Config = {
     affiliateDisclosure: string | null;
@@ -26,26 +27,56 @@ export default function DisclosuresPage() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [saved, setSaved] = useState(false);
+    const [dirty, setDirty] = useState(false);
+    const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const initialLoad = useRef(true);
 
     useEffect(() => {
         fetch(`/api/domains/${domainId}/disclosures`)
             .then(r => r.json())
-            .then(setConfig)
+            .then(data => { setConfig(data); initialLoad.current = true; })
             .finally(() => setLoading(false));
     }, [domainId]);
 
-    async function handleSave() {
-        if (!config) return;
+    function updateConfig(updater: (prev: Config) => Config) {
+        setConfig(prev => {
+            if (!prev) return prev;
+            const next = updater(prev);
+            setDirty(true);
+            return next;
+        });
+    }
+
+    const doSave = useCallback(async (cfg: Config) => {
         setSaving(true);
         setSaved(false);
         await fetch(`/api/domains/${domainId}/disclosures`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(config),
+            body: JSON.stringify(cfg),
         });
         setSaving(false);
         setSaved(true);
+        setDirty(false);
         setTimeout(() => setSaved(false), 3000);
+    }, [domainId]);
+
+    // Auto-save after 2s of inactivity
+    useEffect(() => {
+        if (initialLoad.current) {
+            initialLoad.current = false;
+            return;
+        }
+        if (!config || !dirty) return;
+        if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+        autoSaveTimer.current = setTimeout(() => doSave(config), 2000);
+        return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current); };
+    }, [config, doSave, dirty]);
+
+    async function handleSave() {
+        if (!config) return;
+        if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+        await doSave(config);
     }
 
     if (loading || !config) {
@@ -55,43 +86,48 @@ export default function DisclosuresPage() {
     return (
         <div className="space-y-6 max-w-3xl">
             <h1 className="text-3xl font-bold">Disclosure Configuration</h1>
+            <DomainDetailTabs domainId={domainId} />
 
             <div className="bg-card rounded-lg border p-4 space-y-4">
                 <div className="space-y-1">
-                    <Label>Affiliate Disclosure</Label>
+                    <Label htmlFor="affiliateDisclosure">Affiliate Disclosure</Label>
                     <textarea
+                        id="affiliateDisclosure"
                         value={config.affiliateDisclosure || ''}
-                        onChange={e => setConfig({ ...config, affiliateDisclosure: e.target.value })}
+                        onChange={e => updateConfig(c => ({ ...c, affiliateDisclosure: e.target.value }))}
                         className="w-full border rounded-lg px-3 py-2 text-sm bg-background resize-none"
                         rows={3}
                     />
                 </div>
 
                 <div className="space-y-1">
-                    <Label>Not-Advice Disclaimer (YMYL)</Label>
+                    <Label htmlFor="notAdviceDisclaimer">Not-Advice Disclaimer (YMYL)</Label>
                     <textarea
+                        id="notAdviceDisclaimer"
                         value={config.notAdviceDisclaimer || ''}
-                        onChange={e => setConfig({ ...config, notAdviceDisclaimer: e.target.value })}
+                        onChange={e => updateConfig(c => ({ ...c, notAdviceDisclaimer: e.target.value }))}
                         className="w-full border rounded-lg px-3 py-2 text-sm bg-background resize-none"
                         rows={3}
                     />
                 </div>
 
                 <div className="space-y-1">
-                    <Label>Ad Disclosure</Label>
+                    <Label htmlFor="adDisclosure">Ad Disclosure</Label>
                     <textarea
+                        id="adDisclosure"
                         value={config.adDisclosure || ''}
-                        onChange={e => setConfig({ ...config, adDisclosure: e.target.value })}
+                        onChange={e => updateConfig(c => ({ ...c, adDisclosure: e.target.value }))}
                         className="w-full border rounded-lg px-3 py-2 text-sm bg-background resize-none"
                         rows={2}
                     />
                 </div>
 
                 <div className="space-y-1">
-                    <Label>About Page (Markdown)</Label>
+                    <Label htmlFor="aboutPage">About Page (Markdown)</Label>
                     <textarea
+                        id="aboutPage"
                         value={config.aboutPage || ''}
-                        onChange={e => setConfig({ ...config, aboutPage: e.target.value })}
+                        onChange={e => updateConfig(c => ({ ...c, aboutPage: e.target.value }))}
                         className="w-full border rounded-lg px-3 py-2 text-sm bg-background font-mono resize-none"
                         rows={6}
                         placeholder="# About Us..."
@@ -99,10 +135,11 @@ export default function DisclosuresPage() {
                 </div>
 
                 <div className="space-y-1">
-                    <Label>Editorial Policy Page (Markdown)</Label>
+                    <Label htmlFor="editorialPolicyPage">Editorial Policy Page (Markdown)</Label>
                     <textarea
+                        id="editorialPolicyPage"
                         value={config.editorialPolicyPage || ''}
-                        onChange={e => setConfig({ ...config, editorialPolicyPage: e.target.value })}
+                        onChange={e => updateConfig(c => ({ ...c, editorialPolicyPage: e.target.value }))}
                         className="w-full border rounded-lg px-3 py-2 text-sm bg-background font-mono resize-none"
                         rows={6}
                         placeholder="# Editorial Policy..."
@@ -110,10 +147,11 @@ export default function DisclosuresPage() {
                 </div>
 
                 <div className="space-y-1">
-                    <Label>How We Make Money Page (Markdown)</Label>
+                    <Label htmlFor="howWeMoneyPage">How We Make Money Page (Markdown)</Label>
                     <textarea
+                        id="howWeMoneyPage"
                         value={config.howWeMoneyPage || ''}
-                        onChange={e => setConfig({ ...config, howWeMoneyPage: e.target.value })}
+                        onChange={e => updateConfig(c => ({ ...c, howWeMoneyPage: e.target.value }))}
                         className="w-full border rounded-lg px-3 py-2 text-sm bg-background font-mono resize-none"
                         rows={6}
                         placeholder="# How We Make Money..."
@@ -132,7 +170,7 @@ export default function DisclosuresPage() {
                             <input
                                 type="checkbox"
                                 checked={config[opt.key]}
-                                onChange={e => setConfig({ ...config, [opt.key]: e.target.checked })}
+                                onChange={e => updateConfig(c => ({ ...c, [opt.key]: e.target.checked }))}
                             />
                             <span className="text-sm">{opt.label}</span>
                         </label>
@@ -144,7 +182,17 @@ export default function DisclosuresPage() {
                         {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                         Save Configuration
                     </Button>
-                    {saved && <span className="text-sm text-green-600">Saved!</span>}
+                    <div className="flex items-center gap-1.5 text-sm">
+                        {saving && (
+                            <><Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" /><span className="text-muted-foreground">Saving...</span></>
+                        )}
+                        {!saving && saved && (
+                            <><CheckCircle2 className="h-3.5 w-3.5 text-green-600" /><span className="text-green-600">Saved</span></>
+                        )}
+                        {!saving && !saved && dirty && (
+                            <><Circle className="h-3.5 w-3.5 text-amber-500" /><span className="text-amber-500">Unsaved changes</span></>
+                        )}
+                    </div>
                 </div>
             </div>
         </div>

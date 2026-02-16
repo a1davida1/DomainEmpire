@@ -3,6 +3,23 @@ import { requireAuth } from '@/lib/auth';
 import { runWorkerOnce, getQueueStats, getQueueHealth } from '@/lib/ai/worker';
 import { getContentQueueBackendHealth } from '@/lib/queue/content-queue';
 
+function parseMaxJobs(value: unknown): number {
+    const parsed = Number.parseInt(String(value ?? ''), 10);
+    if (!Number.isFinite(parsed)) return 5;
+    return Math.max(1, Math.min(parsed, 200));
+}
+
+function parseJobTypes(value: unknown): string[] | undefined {
+    if (!Array.isArray(value)) return undefined;
+    const normalized = [...new Set(
+        value
+            .filter((item): item is string => typeof item === 'string')
+            .map((item) => item.trim())
+            .filter((item) => item.length > 0 && item.length <= 80 && /^[a-z0-9_]+$/i.test(item)),
+    )];
+    return normalized.length > 0 ? normalized : undefined;
+}
+
 // POST /api/queue/process - Process pending jobs
 export async function POST(request: NextRequest) {
     const authError = await requireAuth(request);
@@ -10,8 +27,8 @@ export async function POST(request: NextRequest) {
 
     try {
         const body = await request.json().catch(() => ({}));
-        const maxJobs = body.maxJobs || 5;
-        const jobTypes = body.jobTypes;
+        const maxJobs = parseMaxJobs(body.maxJobs);
+        const jobTypes = parseJobTypes(body.jobTypes);
 
         const result = await runWorkerOnce({ maxJobs, jobTypes });
 

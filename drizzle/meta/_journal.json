@@ -218,6 +218,20 @@
       "when": 1771186800000,
       "tag": "0030_registrar_ownership_ops",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1771210800000,
+      "tag": "0031_queue_acquisition_unique_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1771214400000,
+      "tag": "0032_persistent_shard_health",
+      "breakpoints": true
     }
   ]
 }

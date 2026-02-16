@@ -16,6 +16,7 @@ import {
     LogOut,
     ChevronLeft,
     ChevronRight,
+    ChevronDown,
     ListTodo,
     Wallet,
     Swords,
@@ -27,36 +28,116 @@ import {
     Rocket,
     Activity,
     Mail,
+    Target,
+    Sun,
+    Moon,
+    Search as SearchIcon,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useTheme } from 'next-themes';
 import { Button } from '@/components/ui/button';
 
-const navigation = [
-    { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-    { name: 'Workflow', href: '/dashboard/workflow', icon: PlayCircle },
-    { name: 'Domains', href: '/dashboard/domains', icon: Globe },
-    { name: 'Content', href: '/dashboard/content', icon: FileText },
-    { name: 'Keywords', href: '/dashboard/keywords', icon: Search },
-    { name: 'Analytics', href: '/dashboard/analytics', icon: BarChart3 },
-    { name: 'Revenue', href: '/dashboard/revenue', icon: DollarSign },
-    { name: 'Finances', href: '/dashboard/finances', icon: Wallet },
-    { name: 'Competitors', href: '/dashboard/competitors', icon: Swords },
-    { name: 'Growth', href: '/dashboard/growth', icon: Megaphone },
-    { name: 'Integrations', href: '/dashboard/integrations', icon: PlugZap },
-    { name: 'Review', href: '/dashboard/review', icon: ClipboardCheck },
-    { name: 'Compliance', href: '/dashboard/compliance', icon: ShieldCheck },
-    { name: 'KPIs', href: '/dashboard/kpis', icon: Gauge },
-    { name: 'Deploy', href: '/dashboard/deploy', icon: Rocket },
-    { name: 'Monitoring', href: '/dashboard/monitoring', icon: Activity },
-    { name: 'Subscribers', href: '/dashboard/subscribers', icon: Mail },
-    { name: 'Queue', href: '/dashboard/queue', icon: ListTodo },
-    { name: 'Research', href: '/dashboard/research', icon: Beaker },
-    { name: 'Settings', href: '/dashboard/settings', icon: Settings },
+type NavItem = { name: string; href: string; icon: React.ComponentType<{ className?: string }> };
+type NavSection = { label: string; items: NavItem[] };
+
+const navSections: NavSection[] = [
+    {
+        label: 'Core',
+        items: [
+            { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+            { name: 'Workflow', href: '/dashboard/workflow', icon: PlayCircle },
+            { name: 'Domains', href: '/dashboard/domains', icon: Globe },
+        ],
+    },
+    {
+        label: 'Content & SEO',
+        items: [
+            { name: 'Content', href: '/dashboard/content', icon: FileText },
+            { name: 'Keywords', href: '/dashboard/keywords', icon: Search },
+            { name: 'Research', href: '/dashboard/research', icon: Beaker },
+        ],
+    },
+    {
+        label: 'Business',
+        items: [
+            { name: 'Analytics', href: '/dashboard/analytics', icon: BarChart3 },
+            { name: 'Revenue', href: '/dashboard/revenue', icon: DollarSign },
+            { name: 'Finances', href: '/dashboard/finances', icon: Wallet },
+            { name: 'Growth', href: '/dashboard/growth', icon: Megaphone },
+            { name: 'Competitors', href: '/dashboard/competitors', icon: Swords },
+            { name: 'Subscribers', href: '/dashboard/subscribers', icon: Mail },
+            { name: 'Acquisition', href: '/dashboard/acquisition', icon: Target },
+        ],
+    },
+    {
+        label: 'Operations',
+        items: [
+            { name: 'Deploy', href: '/dashboard/deploy', icon: Rocket },
+            { name: 'Queue', href: '/dashboard/queue', icon: ListTodo },
+            { name: 'Monitoring', href: '/dashboard/monitoring', icon: Activity },
+            { name: 'Review', href: '/dashboard/review', icon: ClipboardCheck },
+            { name: 'Compliance', href: '/dashboard/compliance', icon: ShieldCheck },
+            { name: 'KPIs', href: '/dashboard/kpis', icon: Gauge },
+        ],
+    },
+    {
+        label: 'System',
+        items: [
+            { name: 'Integrations', href: '/dashboard/integrations', icon: PlugZap },
+            { name: 'Settings', href: '/dashboard/settings', icon: Settings },
+        ],
+    },
 ];
+
+const DEFAULT_OPEN = new Set(['Core', 'Content & SEO', 'Business', 'Operations', 'System']);
 
 export function Sidebar() {
     const pathname = usePathname();
     const [collapsed, setCollapsed] = useState(false);
+    const { theme, setTheme } = useTheme();
+    const [failedCount, setFailedCount] = useState(0);
+    const [openSections, setOpenSections] = useState<Set<string>>(DEFAULT_OPEN);
+    const [navFilter, setNavFilter] = useState('');
+
+    function toggleSection(label: string) {
+        setOpenSections(prev => {
+            const next = new Set(prev);
+            if (next.has(label)) next.delete(label); else next.add(label);
+            return next;
+        });
+    }
+
+    const navRef = useRef<HTMLElement>(null);
+
+    const handleNavKeyDown = useCallback((e: React.KeyboardEvent) => {
+        if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+        e.preventDefault();
+        const nav = navRef.current;
+        if (!nav) return;
+        const links = Array.from(nav.querySelectorAll<HTMLAnchorElement>('a'));
+        if (links.length === 0) return;
+        const idx = links.indexOf(document.activeElement as HTMLAnchorElement);
+        let next: number;
+        if (e.key === 'ArrowDown') {
+            next = idx < links.length - 1 ? idx + 1 : 0;
+        } else {
+            next = idx > 0 ? idx - 1 : links.length - 1;
+        }
+        links[next].focus();
+    }, []);
+
+    useEffect(() => {
+        let active = true;
+        function fetchFailed() {
+            fetch('/api/queue/process')
+                .then(r => r.ok ? r.json() : null)
+                .then(data => { if (active && data?.stats?.failed) setFailedCount(data.stats.failed); })
+                .catch(() => {});
+        }
+        fetchFailed();
+        const id = setInterval(fetchFailed, 30_000);
+        return () => { active = false; clearInterval(id); };
+    }, []);
 
     return (
         <aside
@@ -75,25 +156,72 @@ export function Sidebar() {
                 </Link>
             </div>
 
+            {/* Nav Filter */}
+            {!collapsed && (
+                <div className="px-2 pt-2">
+                    <div className="relative">
+                        <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/50" />
+                        <input
+                            type="text"
+                            value={navFilter}
+                            onChange={e => setNavFilter(e.target.value)}
+                            placeholder="Filter pages..."
+                            className="w-full rounded-md border bg-muted/30 pl-8 pr-2 py-1.5 text-xs outline-none placeholder:text-muted-foreground/50 focus:ring-1 focus:ring-ring"
+                        />
+                    </div>
+                </div>
+            )}
+
             {/* Navigation */}
-            <nav className="flex-1 space-y-1 p-2">
-                {navigation.map((item) => {
-                    const isActive = item.href === '/dashboard'
-                        ? pathname === item.href
-                        : (pathname === item.href || pathname.startsWith(item.href + '/'));
+            <nav
+                ref={navRef}
+                className="flex-1 overflow-y-auto p-2 space-y-0.5"
+                onKeyDown={handleNavKeyDown}
+            >
+                {navSections.map((section) => {
+                    const q = navFilter.toLowerCase();
+                    const visibleItems = q
+                        ? section.items.filter(item => item.name.toLowerCase().includes(q))
+                        : section.items;
+                    if (q && visibleItems.length === 0) return null;
+                    const isOpen = openSections.has(section.label);
                     return (
-                        <Link
-                            key={item.name}
-                            href={item.href}
-                            className={cn(
-                                'flex items-center gap-3 px-3 py-2 rounded-lg transition-colors',
-                                isActive
-                                    ? 'bg-primary/10 text-primary'
-                                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                        <div key={section.label}>
+                            {!collapsed && (
+                                <button
+                                    onClick={() => toggleSection(section.label)}
+                                    className="flex w-full items-center justify-between px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+                                >
+                                    <span>{section.label}</span>
+                                    <ChevronDown className={cn('h-3 w-3 transition-transform', !isOpen && '-rotate-90')} />
+                                </button>
                             )}
-                        >                 <item.icon className="h-5 w-5 shrink-0" />
-                            {!collapsed && <span>{item.name}</span>}
-                        </Link>
+                            {(collapsed || isOpen) && visibleItems.map((item) => {
+                                const isActive = item.href === '/dashboard'
+                                    ? pathname === item.href
+                                    : (pathname === item.href || pathname.startsWith(item.href + '/'));
+                                return (
+                                    <Link
+                                        key={item.name}
+                                        href={item.href}
+                                        className={cn(
+                                            'flex items-center gap-3 px-3 py-2 rounded-lg transition-colors',
+                                            isActive
+                                                ? 'bg-primary/10 text-primary'
+                                                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                                        )}
+                                    >
+                                        <item.icon className="h-5 w-5 shrink-0" />
+                                        {!collapsed && <span>{item.name}</span>}
+                                        {item.name === 'Queue' && failedCount > 0 && (
+                                            <span className="ml-auto flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+                                                {failedCount > 99 ? '99+' : failedCount}
+                                            </span>
+                                        )}
+                                    </Link>
+                                );
+                            })}
+                        </div>
                     );
                 })}
             </nav>
@@ -114,6 +242,15 @@ export function Sidebar() {
                             <span>Collapse</span>
                         </>
                     )}
+                </Button>
+                <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-start gap-3"
+                    onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                >
+                    {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+                    {!collapsed && <span>{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>}
                 </Button>
                 <form action="/api/auth/logout" method="POST">
                     <Button

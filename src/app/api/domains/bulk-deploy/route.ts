@@ -38,7 +38,12 @@ export async function POST(request: NextRequest) {
 
         // Verify all domains exist
         const existingDomains = await db
-            .select({ id: domains.id, domain: domains.domain, registrar: domains.registrar })
+            .select({
+                id: domains.id,
+                domain: domains.domain,
+                registrar: domains.registrar,
+                cloudflareAccount: domains.cloudflareAccount,
+            })
             .from(domains)
             .where(and(inArray(domains.id, uniqueDomainIds), isNull(domains.deletedAt)));
 
@@ -53,6 +58,7 @@ export async function POST(request: NextRequest) {
                     domain: domain.domain,
                     registrar: domain.registrar,
                     addCustomDomain,
+                    cloudflareAccount: domain.cloudflareAccount ?? null,
                 });
             } catch (preflightError) {
                 const message = preflightError instanceof Error ? preflightError.message : 'Unknown preflight error';
@@ -76,6 +82,7 @@ export async function POST(request: NextRequest) {
                 domainId: domain.id,
                 domain: domain.domain,
                 registrar: domain.registrar,
+                cloudflareAccount: domain.cloudflareAccount,
                 preflight,
             };
         }));
@@ -134,6 +141,7 @@ export async function POST(request: NextRequest) {
                         domain: evaluation.domain,
                         triggerBuild,
                         addCustomDomain,
+                        cloudflareAccount: evaluation.cloudflareAccount ?? null,
                     },
                     status: 'pending' as const,
                     scheduledFor: new Date(),

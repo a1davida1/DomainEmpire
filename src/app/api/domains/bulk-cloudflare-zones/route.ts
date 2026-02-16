@@ -6,6 +6,10 @@ import { db, domains } from '@/lib/db';
 import { notDeleted } from '@/lib/db/soft-delete';
 import { createRateLimiter, getClientIp } from '@/lib/rate-limit';
 import { createZone, getZoneNameservers } from '@/lib/deploy/cloudflare';
+import {
+    recordCloudflareHostShardOutcome,
+    resolveCloudflareHostShardPlan,
+} from '@/lib/deploy/host-sharding';
 
 const bulkZoneMutationLimiter = createRateLimiter('domain_bulk_cloudflare_zone_mutation', {
     maxRequests: 8,
@@ -20,11 +24,30 @@ const bulkZoneSchema = z.object({
 type ZoneResult = {
     domainId: string;
     domain: string;
+    shardKey?: string;
     zoneId?: string;
     zoneName?: string;
     nameservers?: string[];
     status?: string;
 };
+
+function isRetryableCloudflareError(message: string): boolean {
+    const lowered = message.toLowerCase();
+    return lowered.includes('429')
+        || lowered.includes('rate limit')
+        || lowered.includes('too many requests')
+        || lowered.includes('please wait')
+        || lowered.includes('timeout')
+        || lowered.includes('service unavailable')
+        || lowered.includes('gateway');
+}
+
+function isRateLimitedCloudflareError(message: string): boolean {
+    const lowered = message.toLowerCase();
+    return lowered.includes('429')
+        || lowered.includes('rate limit')
+        || lowered.includes('too many requests');
+}
 
 // POST /api/domains/bulk-cloudflare-zones
 export async function POST(request: NextRequest) {
@@ -70,6 +93,7 @@ export async function POST(request: NextRequest) {
         .select({
             id: domains.id,
             domain: domains.domain,
+            cloudflareAccount: domains.cloudflareAccount,
         })
         .from(domains)
         .where(and(inArray(domains.id, uniqueDomainIds), notDeleted(domains)));
@@ -84,52 +108,98 @@ export async function POST(request: NextRequest) {
 
     for (const row of rows) {
         try {
-            const existingZone = await getZoneNameservers(row.domain);
-            if (existingZone) {
+            const shardPlan = await resolveCloudflareHostShardPlan({
+                domain: row.domain,
+                cloudflareAccount: row.cloudflareAccount ?? null,
+                maxFallbacks: 3,
+            });
+            const shardErrors: string[] = [];
+
+            for (const shard of shardPlan.all) {
+                const existingZone = await getZoneNameservers(row.domain, shard.cloudflare);
+                if (!existingZone) continue;
+                recordCloudflareHostShardOutcome({
+                    shardKey: shard.shardKey,
+                    accountId: shard.cloudflare.accountId ?? null,
+                    sourceConnectionId: shard.connectionId ?? null,
+                }, 'success');
                 existing.push({
                     domainId: row.id,
                     domain: row.domain,
+                    shardKey: shard.shardKey,
                     zoneId: existingZone.zoneId,
                     zoneName: existingZone.zoneName,
                     nameservers: existingZone.nameservers,
                     status: 'existing',
                 });
+                shardErrors.length = 0;
+                break;
+            }
+            if (shardErrors.length === 0 && existing.some((item) => item.domainId === row.id)) {
                 continue;
             }
 
-            const createdZone = await createZone(row.domain, {
-                jumpStart: parsed.data.jumpStart,
-            });
+            for (const shard of shardPlan.all) {
+                const createdZone = await createZone(row.domain, {
+                    jumpStart: parsed.data.jumpStart,
+                }, shard.cloudflare);
 
-            if (!createdZone.success) {
+                if (!createdZone.success) {
+                    const message = createdZone.error || `Failed to create Cloudflare zone for ${row.domain}`;
+                    shardErrors.push(`[${shard.shardKey}] ${message}`);
+                    recordCloudflareHostShardOutcome(
+                        {
+                            shardKey: shard.shardKey,
+                            accountId: shard.cloudflare.accountId ?? null,
+                            sourceConnectionId: shard.connectionId ?? null,
+                        },
+                        isRateLimitedCloudflareError(message) ? 'rate_limited' : 'failure',
+                    );
+                    if (isRetryableCloudflareError(message)) {
+                        continue;
+                    }
+                    break;
+                }
+
+                recordCloudflareHostShardOutcome({
+                    shardKey: shard.shardKey,
+                    accountId: shard.cloudflare.accountId ?? null,
+                    sourceConnectionId: shard.connectionId ?? null,
+                }, 'success');
+
+                if (createdZone.alreadyExists) {
+                    existing.push({
+                        domainId: row.id,
+                        domain: row.domain,
+                        shardKey: shard.shardKey,
+                        zoneId: createdZone.zoneId,
+                        zoneName: createdZone.zoneName,
+                        nameservers: createdZone.nameservers,
+                        status: createdZone.status ?? 'existing',
+                    });
+                } else {
+                    created.push({
+                        domainId: row.id,
+                        domain: row.domain,
+                        shardKey: shard.shardKey,
+                        zoneId: createdZone.zoneId,
+                        zoneName: createdZone.zoneName,
+                        nameservers: createdZone.nameservers,
+                        status: createdZone.status ?? 'created',
+                    });
+                }
+
+                shardErrors.length = 0;
+                break;
+            }
+
+            if (shardErrors.length > 0) {
                 failed.push({
                     domainId: row.id,
                     domain: row.domain,
-                    error: createdZone.error || `Failed to create Cloudflare zone for ${row.domain}`,
+                    error: shardErrors.join(' | '),
                 });
-                continue;
             }
-
-            if (createdZone.alreadyExists) {
-                existing.push({
-                    domainId: row.id,
-                    domain: row.domain,
-                    zoneId: createdZone.zoneId,
-                    zoneName: createdZone.zoneName,
-                    nameservers: createdZone.nameservers,
-                    status: createdZone.status ?? 'existing',
-                });
-                continue;
-            }
-
-            created.push({
-                domainId: row.id,
-                domain: row.domain,
-                zoneId: createdZone.zoneId,
-                zoneName: createdZone.zoneName,
-                nameservers: createdZone.nameservers,
-                status: createdZone.status ?? 'created',
-            });
         } catch (error) {
             failed.push({
                 domainId: row.id,
@@ -150,4 +220,3 @@ export async function POST(request: NextRequest) {
         failed,
     });
 }
-

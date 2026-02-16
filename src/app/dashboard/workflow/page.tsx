@@ -546,6 +546,31 @@ export default async function WorkflowPage({
                 </div>
             </div>
 
+            {/* Pipeline Funnel Progress */}
+            {(() => {
+                const total = domainRows.length || 1;
+                const stages = [
+                    { label: 'Sourcing', count: lifecycleCounts.sourced, color: 'bg-blue-500' },
+                    { label: 'Approved', count: lifecycleCounts.approved, color: 'bg-violet-500' },
+                    { label: 'Build', count: lifecycleCounts.build, color: 'bg-amber-500' },
+                    { label: 'Growth', count: lifecycleCounts.growth, color: 'bg-emerald-500' },
+                ];
+                return (
+                    <div className="space-y-2">
+                        <div className="flex h-3 w-full overflow-hidden rounded-full bg-muted">
+                            {stages.map(s => s.count > 0 ? (
+                                <div key={s.label} className={`${s.color} transition-all`} style={{ width: `${(s.count / total) * 100}%` }} title={`${s.label}: ${s.count}`} />
+                            ) : null)}
+                        </div>
+                        <div className="flex justify-between text-xs text-muted-foreground">
+                            {stages.map(s => (
+                                <span key={s.label}>{s.label} <span className="font-medium text-foreground">{s.count}</span></span>
+                            ))}
+                        </div>
+                    </div>
+                );
+            })()}
+
             <div className="grid gap-4 md:grid-cols-4">
                 <Card>
                     <CardHeader className="pb-2">

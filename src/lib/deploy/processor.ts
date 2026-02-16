@@ -16,11 +16,17 @@ import { eq, count } from 'drizzle-orm';
 import { createDirectUploadProject, directUploadDeploy, addCustomDomain, getZoneNameservers } from './cloudflare';
 import { updateNameservers } from './godaddy';
 import { generateSiteFiles } from './generator';
+import {
+    recordCloudflareHostShardOutcome,
+    resolveCloudflareHostShardPlan,
+    type CloudflareHostShard,
+} from './host-sharding';
 
 interface DeployPayload {
     domain: string;
     triggerBuild: boolean;
     addCustomDomain: boolean;
+    cloudflareAccount?: string | null;
 }
 
 interface DeployStep {
@@ -36,17 +42,37 @@ interface DeployContext {
     steps: DeployStep[];
     projectName: string;
     cfProject?: string;
+    hostShardPlan: CloudflareHostShard[];
+    hostShard: CloudflareHostShard;
 }
 
 /**
- * Validate environment variables required for deployment
+ * Validate deploy credentials required for Cloudflare operations
  */
-function validateDeployEnv(): string[] {
+function validateDeployCredentials(shards: CloudflareHostShard[]): string[] {
     const errors: string[] = [];
 
-    if (!process.env.CLOUDFLARE_API_TOKEN) errors.push('CLOUDFLARE_API_TOKEN is not set');
+    const hasEnvToken = Boolean(process.env.CLOUDFLARE_API_TOKEN?.trim());
+    const hasShardToken = shards.some((shard) => Boolean(shard.cloudflare.apiToken?.trim()));
+    if (!hasEnvToken && !hasShardToken) {
+        errors.push('CLOUDFLARE_API_TOKEN is not set and no Cloudflare shard credential is configured');
+    }
 
     return errors;
+}
+
+function isRetryableCloudflareError(message: string): boolean {
+    const lowered = message.toLowerCase();
+    return lowered.includes('429')
+        || lowered.includes('rate limit')
+        || lowered.includes('too many requests')
+        || lowered.includes('please wait')
+        || lowered.includes('timeout')
+        || lowered.includes('timed out')
+        || lowered.includes('temporarily unavailable')
+        || lowered.includes('service unavailable')
+        || lowered.includes('internal error')
+        || lowered.includes('gateway');
 }
 
 /**
@@ -116,31 +142,84 @@ async function stepDirectUpload(ctx: DeployContext, files: { path: string; conte
     }
 
     await startStep(ctx, 1);
+    const deployErrors: string[] = [];
 
-    // Create or reuse project
-    const projectResult = await createDirectUploadProject(ctx.projectName);
+    for (const shard of ctx.hostShardPlan) {
+        const projectResult = await createDirectUploadProject(ctx.projectName, shard.cloudflare);
 
-    if (!projectResult.success) {
-        await failStep(ctx, 1, projectResult.error || 'Unknown error');
-        throw new Error(`Failed to create CF project: ${projectResult.error}`);
+        if (!projectResult.success) {
+            const message = projectResult.error || 'Unknown Cloudflare project create error';
+            deployErrors.push(`[${shard.shardKey}] project create failed: ${message}`);
+            recordCloudflareHostShardOutcome(
+                {
+                    shardKey: shard.shardKey,
+                    accountId: shard.cloudflare.accountId ?? null,
+                    sourceConnectionId: shard.connectionId ?? null,
+                },
+                isRetryableCloudflareError(message) ? 'rate_limited' : 'failure',
+            );
+
+            if (isRetryableCloudflareError(message) && ctx.hostShardPlan.length > 1) {
+                continue;
+            }
+
+            await failStep(ctx, 1, message);
+            throw new Error(`Failed to create CF project: ${message}`);
+        }
+
+        ctx.cfProject = projectResult.projectName;
+        ctx.hostShard = shard;
+
+        await db.update(domains).set({
+            cloudflareProject: projectResult.projectName,
+            updatedAt: new Date(),
+        }).where(eq(domains.id, ctx.domainId));
+
+        const uploadResult = await directUploadDeploy(
+            ctx.cfProject || ctx.projectName,
+            files,
+            shard.cloudflare,
+        );
+
+        if (!uploadResult.success) {
+            const message = uploadResult.error || 'Cloudflare direct upload failed';
+            deployErrors.push(`[${shard.shardKey}] upload failed: ${message}`);
+            recordCloudflareHostShardOutcome(
+                {
+                    shardKey: shard.shardKey,
+                    accountId: shard.cloudflare.accountId ?? null,
+                    sourceConnectionId: shard.connectionId ?? null,
+                },
+                isRetryableCloudflareError(message) ? 'rate_limited' : 'failure',
+            );
+
+            if (isRetryableCloudflareError(message) && ctx.hostShardPlan.length > 1) {
+                continue;
+            }
+
+            await failStep(ctx, 1, message);
+            throw new Error(`Direct upload failed: ${message}`);
+        }
+        recordCloudflareHostShardOutcome({
+            shardKey: shard.shardKey,
+            accountId: shard.cloudflare.accountId ?? null,
+            sourceConnectionId: shard.connectionId ?? null,
+        }, 'success');
+
+        const failoverAttempts = Math.max(deployErrors.length, 0);
+        await doneStep(
+            ctx,
+            1,
+            `Deployed: ${uploadResult.url || ctx.projectName} (host shard: ${shard.shardKey}${failoverAttempts > 0 ? `, failover retries: ${failoverAttempts}` : ''})`,
+        );
+        return;
     }
 
-    ctx.cfProject = projectResult.projectName;
-
-    await db.update(domains).set({
-        cloudflareProject: projectResult.projectName,
-        updatedAt: new Date(),
-    }).where(eq(domains.id, ctx.domainId));
-
-    // Direct upload files - USE THE RETURNED PROJECT NAME (which might have a unique suffix)
-    const uploadResult = await directUploadDeploy(ctx.cfProject || ctx.projectName, files);
-
-    if (!uploadResult.success) {
-        await failStep(ctx, 1, uploadResult.error || 'Upload failed');
-        throw new Error(`Direct upload failed: ${uploadResult.error}`);
-    }
-
-    await doneStep(ctx, 1, `Deployed: ${uploadResult.url || ctx.projectName}`);
+    const detail = deployErrors.length > 0
+        ? deployErrors.join(' | ')
+        : 'Direct upload failed across all configured host shards';
+    await failStep(ctx, 1, detail);
+    throw new Error(`Direct upload failed across all host shards: ${detail}`);
 }
 
 /**
@@ -154,10 +233,27 @@ async function stepAddCustomDomain(ctx: DeployContext): Promise<boolean> {
 
     await startStep(ctx, 2);
     try {
-        const result = await addCustomDomain(ctx.cfProject, ctx.payload.domain);
+        const result = await addCustomDomain(
+            ctx.cfProject,
+            ctx.payload.domain,
+            ctx.hostShard.cloudflare,
+        );
         if (!result.success) {
+            recordCloudflareHostShardOutcome(
+                {
+                    shardKey: ctx.hostShard.shardKey,
+                    accountId: ctx.hostShard.cloudflare.accountId ?? null,
+                    sourceConnectionId: ctx.hostShard.connectionId ?? null,
+                },
+                isRetryableCloudflareError(result.error || '') ? 'rate_limited' : 'failure',
+            );
             throw new Error(result.error || 'Unknown Cloudflare domain link error');
         }
+        recordCloudflareHostShardOutcome({
+            shardKey: ctx.hostShard.shardKey,
+            accountId: ctx.hostShard.cloudflare.accountId ?? null,
+            sourceConnectionId: ctx.hostShard.connectionId ?? null,
+        }, 'success');
         await doneStep(ctx, 2, `Linked ${ctx.payload.domain}`);
         return true;
     } catch (err: unknown) {
@@ -193,14 +289,27 @@ async function stepUpdateDns(ctx: DeployContext, customDomainLinked: boolean): P
             return;
         }
 
-        const zone = await getZoneNameservers(ctx.payload.domain);
+        let zone = await getZoneNameservers(ctx.payload.domain, ctx.hostShard.cloudflare);
+        let zoneShardKey = ctx.hostShard.shardKey;
+
+        if (!zone) {
+            for (const shard of ctx.hostShardPlan) {
+                if (shard.shardKey === ctx.hostShard.shardKey) continue;
+                const resolved = await getZoneNameservers(ctx.payload.domain, shard.cloudflare);
+                if (!resolved) continue;
+                zone = resolved;
+                zoneShardKey = shard.shardKey;
+                break;
+            }
+        }
+
         if (!zone) {
             await failStep(ctx, 3, `Unable to resolve Cloudflare nameservers for ${ctx.payload.domain}`);
             return;
         }
 
         await updateNameservers(ctx.payload.domain, zone.nameservers);
-        await doneStep(ctx, 3, `Nameservers updated (${zone.nameservers.join(', ')})`);
+        await doneStep(ctx, 3, `Nameservers updated (${zone.nameservers.join(', ')}) via shard ${zoneShardKey}`);
     } catch (err) {
         await failStep(ctx, 3, err instanceof Error ? err.message : 'DNS update failed');
         console.error(`DNS update failed for ${ctx.payload.domain}:`, err);
@@ -239,19 +348,25 @@ async function validateJob(jobId: string) {
         throw new Error(`Domain ${payload.domain} has no articles to deploy`);
     }
 
-    const envErrors = validateDeployEnv();
-    if (envErrors.length > 0) {
-        throw new Error(`Deployment configuration missing: ${envErrors.join(', ')}`);
-    }
-
-    return { job, payload };
+    return { job, payload, domain: domainRecord[0] };
 }
 
 /**
  * Process a deployment job
  */
 export async function processDeployJob(jobId: string): Promise<void> {
-    const { job, payload } = await validateJob(jobId);
+    const { job, payload, domain } = await validateJob(jobId);
+    const hostShardPlan = await resolveCloudflareHostShardPlan({
+        domain: payload.domain,
+        cloudflareAccount: payload.cloudflareAccount ?? domain.cloudflareAccount ?? null,
+        maxFallbacks: 3,
+    });
+    const hostShard = hostShardPlan.primary;
+
+    const credentialErrors = validateDeployCredentials(hostShardPlan.all);
+    if (credentialErrors.length > 0) {
+        throw new Error(`Deployment configuration missing: ${credentialErrors.join(', ')}`);
+    }
 
     // Mark as processing
     await db.update(contentQueue).set({
@@ -264,6 +379,8 @@ export async function processDeployJob(jobId: string): Promise<void> {
         domainId: job.domainId!,
         payload,
         projectName: sanitizeProjectName(payload.domain),
+        hostShardPlan: hostShardPlan.all,
+        hostShard,
         steps: [
             { step: 'Generate Files', status: 'pending' },
             { step: 'Upload to Cloudflare', status: 'pending' },

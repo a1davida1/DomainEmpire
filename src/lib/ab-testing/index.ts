@@ -13,6 +13,26 @@ interface Variant {
     impressions: number;
     clicks: number;
     conversions: number;
+    allocationPct?: number;
+}
+
+const DEFAULT_HOLDOUT_SHARE_PCT = 10;
+
+function buildDefaultAllocations(variantCount: number): number[] {
+    if (variantCount <= 0) return [];
+    if (variantCount === 1) return [100];
+
+    const holdout = DEFAULT_HOLDOUT_SHARE_PCT;
+    const treatmentCount = variantCount - 1;
+    const treatmentShare = 100 - holdout;
+    const baseTreatmentShare = Number((treatmentShare / treatmentCount).toFixed(4));
+    const allocations = [holdout, ...Array.from({ length: treatmentCount }, () => baseTreatmentShare)];
+
+    const currentSum = allocations.reduce((sum, value) => sum + value, 0);
+    allocations[allocations.length - 1] = Number(
+        (allocations[allocations.length - 1]! + (100 - currentSum)).toFixed(4),
+    );
+    return allocations;
 }
 
 /**
@@ -25,12 +45,14 @@ export async function createTest(
 ) {
     if (variantValues.length < 2) throw new Error('Need at least 2 variants');
 
+    const defaultAllocations = buildDefaultAllocations(variantValues.length);
     const variants: Variant[] = variantValues.map((value, i) => ({
         id: `v${i}`,
         value,
         impressions: 0,
         clicks: 0,
         conversions: 0,
+        allocationPct: defaultAllocations[i],
     }));
 
     const record: NewAbTest = {

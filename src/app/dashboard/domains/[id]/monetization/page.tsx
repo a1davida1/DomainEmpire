@@ -5,6 +5,7 @@ import { AffiliateManager } from '@/components/monetization/AffiliateManager';
 import { AdNetworkConfig } from '@/components/monetization/AdNetworkConfig';
 import { MonetizationSettings } from '@/components/monetization/MonetizationSettings';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { DomainDetailTabs } from '@/components/dashboard/DomainDetailTabs';
 
 interface PageProps {
     params: Promise<{ id: string }>;
@@ -36,6 +37,7 @@ export default async function MonetizationPage({ params }: PageProps) {
                     Manage revenue sources, affiliate programs, and ad placements.
                 </p>
             </div>
+            <DomainDetailTabs domainId={id} />
 
             <Tabs defaultValue="affiliates" className="space-y-4">
                 <TabsList>

@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 const STATUSES = ['active', 'parked', 'redirect', 'forsale', 'defensive'] as const;
-const TIERS = [1, 2, 3] as const;
+const TIERS = [1, 2, 3, 4] as const;
 
 export function DomainSearch() {
     const router = useRouter();

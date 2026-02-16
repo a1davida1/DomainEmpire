@@ -29,6 +29,7 @@ import {
     Rocket,
     Activity,
     Mail,
+    Target,
 } from 'lucide-react';
 
 const navigation = [
@@ -51,6 +52,7 @@ const navigation = [
     { name: 'Subscribers', href: '/dashboard/subscribers', icon: Mail },
     { name: 'Queue', href: '/dashboard/queue', icon: ListTodo },
     { name: 'Research', href: '/dashboard/research', icon: Beaker },
+    { name: 'Acquisition', href: '/dashboard/acquisition', icon: Target },
     { name: 'Settings', href: '/dashboard/settings', icon: Settings },
 ];
 

@@ -45,6 +45,7 @@ export async function POST(request: NextRequest, { params }: PageProps) {
                 id: domains.id,
                 domain: domains.domain,
                 registrar: domains.registrar,
+                cloudflareAccount: domains.cloudflareAccount,
             })
             .from(domains)
             .where(and(eq(domains.id, id), isNull(domains.deletedAt)))
@@ -65,6 +66,7 @@ export async function POST(request: NextRequest, { params }: PageProps) {
                 domain: domain.domain,
                 registrar: domain.registrar,
                 addCustomDomain: options.addCustomDomain,
+                cloudflareAccount: domain.cloudflareAccount ?? null,
             });
         } catch (preflightError) {
             const message = preflightError instanceof Error ? preflightError.message : 'Unknown preflight error';
@@ -105,6 +107,7 @@ export async function POST(request: NextRequest, { params }: PageProps) {
                 domain: domain.domain,
                 triggerBuild: options.triggerBuild,
                 addCustomDomain: options.addCustomDomain,
+                cloudflareAccount: domain.cloudflareAccount ?? null,
             },
             status: 'pending',
             scheduledFor: new Date(),

@@ -11,7 +11,9 @@ import {
     DropdownMenuSeparator,
     DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu';
-import { MoreHorizontal, Settings, Rocket, Globe, Trash2 } from 'lucide-react';
+import { MoreHorizontal, Settings, Rocket, Globe, Trash2, AlertTriangle } from 'lucide-react';
+import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 
 interface DomainActionsProps {
     domainId: string;
@@ -50,16 +52,14 @@ export function DomainActions({ domainId, domainName, isDeployed }: DomainAction
                 ? (data.preflightWarnings as PreflightIssue[]).filter((issue) => issue.severity === 'warning')
                 : [];
             if (warnings.length > 0) {
-                const warningLines = warnings.slice(0, 3).map((warning) => `- ${warning.message}`).join('\n');
-                alert(
-                    `Deploy queued with warnings for ${domainName}:\n\n${warningLines}` +
-                    `${warnings.length > 3 ? '\n- ...' : ''}`
-                );
+                toast.warning(`Deploy queued with ${warnings.length} warning(s) for ${domainName}`);
+            } else {
+                toast.success(`Deploy queued for ${domainName}`);
             }
             router.refresh();
         } catch (err) {
             console.error('Deploy failed:', err);
-            alert(err instanceof Error ? err.message : 'Deploy failed');
+            toast.error(err instanceof Error ? err.message : 'Deploy failed');
         } finally {
             setDeploying(false);
         }
@@ -76,10 +76,11 @@ export function DomainActions({ domainId, domainName, isDeployed }: DomainAction
                 const data = await res.json();
                 throw new Error(data.error || 'Delete failed');
             }
+            toast.success(`${domainName} deleted`);
             router.refresh();
         } catch (err) {
             console.error('Delete failed:', err);
-            alert(err instanceof Error ? err.message : 'Delete failed');
+            toast.error(err instanceof Error ? err.message : 'Delete failed');
         } finally {
             setConfirmDelete(false);
         }
@@ -115,10 +116,16 @@ export function DomainActions({ domainId, domainName, isDeployed }: DomainAction
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                     onSelect={handleDelete}
-                    className="text-destructive focus:text-destructive"
+                    className={cn(
+                        'text-destructive focus:text-destructive',
+                        confirmDelete && 'bg-destructive/10 font-semibold'
+                    )}
                 >
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    {confirmDelete ? 'Click again to confirm' : 'Delete'}
+                    {confirmDelete ? (
+                        <><AlertTriangle className="mr-2 h-4 w-4" />Confirm Delete?</>
+                    ) : (
+                        <><Trash2 className="mr-2 h-4 w-4" />Delete</>
+                    )}
                 </DropdownMenuItem>
             </DropdownMenuContent>
         </DropdownMenu>

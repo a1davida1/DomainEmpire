@@ -7,6 +7,10 @@ import { notDeleted } from '@/lib/db/soft-delete';
 import { createRateLimiter, getClientIp } from '@/lib/rate-limit';
 import { updateNameservers } from '@/lib/deploy/godaddy';
 import { getZoneNameservers } from '@/lib/deploy/cloudflare';
+import {
+    recordCloudflareHostShardOutcome,
+    resolveCloudflareHostShardPlan,
+} from '@/lib/deploy/host-sharding';
 
 const nameserverMutationLimiter = createRateLimiter('domain_nameserver_mutation', {
     maxRequests: 12,
@@ -131,6 +135,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             id: domains.id,
             domain: domains.domain,
             registrar: domains.registrar,
+            cloudflareAccount: domains.cloudflareAccount,
             profileId: domainRegistrarProfiles.id,
             profileMetadata: domainRegistrarProfiles.metadata,
         })
@@ -154,6 +159,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         let nameserverSource: 'request' | 'cloudflare_zone_lookup';
         let zoneId: string | null = null;
         let zoneName: string | null = null;
+        const hostShardPlan = await resolveCloudflareHostShardPlan({
+            domain: domainRow.domain,
+            cloudflareAccount: domainRow.cloudflareAccount ?? null,
+            maxFallbacks: 3,
+        });
+        let activeShardKey = hostShardPlan.primary.shardKey;
 
         if (parsed.data.nameservers && parsed.data.nameservers.length > 0) {
             try {
@@ -164,7 +175,19 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             }
             nameserverSource = 'request';
         } else {
-            const zone = await getZoneNameservers(domainRow.domain);
+            let zone = null;
+            for (const shard of hostShardPlan.all) {
+                const resolved = await getZoneNameservers(domainRow.domain, shard.cloudflare);
+                if (!resolved) continue;
+                zone = resolved;
+                activeShardKey = shard.shardKey;
+                recordCloudflareHostShardOutcome({
+                    shardKey: shard.shardKey,
+                    accountId: shard.cloudflare.accountId ?? null,
+                    sourceConnectionId: shard.connectionId ?? null,
+                }, 'success');
+                break;
+            }
             if (!zone) {
                 return NextResponse.json(
                     { error: `Unable to resolve Cloudflare nameservers for ${domainRow.domain}. Add the zone in Cloudflare first or provide nameservers explicitly.` },
@@ -192,6 +215,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
                 nameservers,
                 source: nameserverSource,
                 previousNameservers,
+                shardKey: activeShardKey,
                 ...(zoneId ? { zoneId } : {}),
                 ...(zoneName ? { zoneName } : {}),
             });
@@ -292,6 +316,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             },
             nameservers,
             source: nameserverSource,
+            shardKey: activeShardKey,
             ...(zoneId ? { zoneId } : {}),
             ...(zoneName ? { zoneName } : {}),
             profile: result.profile,

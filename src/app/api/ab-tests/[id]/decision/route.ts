@@ -12,6 +12,7 @@ const variantMetricsSchema = z.object({
     impressions: z.coerce.number().finite().min(0),
     clicks: z.coerce.number().finite().min(0),
     conversions: z.coerce.number().finite().min(0),
+    allocationPct: z.coerce.number().finite().min(0).max(100).optional(),
 });
 
 const variantMetricsListSchema = z.array(variantMetricsSchema).min(2);
@@ -73,7 +74,7 @@ export async function GET(
             );
         }
 
-        const startedAt = parseStartedAt(test.createdAt);
+        const startedAt = parseStartedAt(test.startedAt) ?? parseStartedAt(test.createdAt);
         if (!startedAt) {
             return NextResponse.json(
                 { error: 'Test is missing a valid createdAt/start timestamp' },

@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { db } from '@/lib/db';
-import { articles, contentQueue, domains } from '@/lib/db/schema';
+import { articles, contentQueue, domainResearch, domains } from '@/lib/db/schema';
 import { and, desc, eq, inArray, isNotNull, or, sql } from 'drizzle-orm';
 import { getQueueHealth, retryFailedJobs, runWorkerOnce } from '@/lib/ai/worker';
 import { getContentQueueBackendHealth, requeueContentJobIds } from '@/lib/queue/content-queue';
@@ -390,6 +390,11 @@ function extractPayloadDomain(payload: unknown): string | null {
     return null;
 }
 
+function extractPayloadDomainId(payload: unknown): string | null {
+    if (!isRecord(payload)) return null;
+    return toStringValue(payload.domainId) || toStringValue(payload.domain_id);
+}
+
 function extractPayloadTarget(payload: unknown): string | null {
     if (!isRecord(payload)) return null;
     const scalarFields = [
@@ -420,6 +425,12 @@ function extractPayloadTarget(payload: unknown): string | null {
     }
 
     return null;
+}
+
+function extractPayloadDomainResearchId(payload: unknown): string | null {
+    if (!isRecord(payload)) return null;
+    const researchId = toStringValue(payload.domainResearchId);
+    return researchId;
 }
 
 export default async function QueuePage({
@@ -607,12 +618,37 @@ export default async function QueuePage({
         : [];
     const articleMap = new Map(articleRows.map((row) => [row.id, row]));
 
+    const payloadResearchIds = [...new Set(recentJobs
+        .map((job) => extractPayloadDomainResearchId(job.payload))
+        .filter((value): value is string => typeof value === 'string' && value.length > 0))];
+    const payloadResearchRows = payloadResearchIds.length > 0
+        ? await db.select({
+            id: domainResearch.id,
+            domainId: domainResearch.domainId,
+            domain: domainResearch.domain,
+        })
+            .from(domainResearch)
+            .where(inArray(domainResearch.id, payloadResearchIds))
+        : [];
+    const payloadResearchMap = new Map(payloadResearchRows.map((row) => [row.id, row]));
+
     const domainIds = new Set<string>();
     for (const job of recentJobs) {
         if (job.domainId) domainIds.add(job.domainId);
         if (job.articleId) {
             const linkedArticle = articleMap.get(job.articleId);
             if (linkedArticle?.domainId) domainIds.add(linkedArticle.domainId);
+        }
+        const payloadDomainId = extractPayloadDomainId(job.payload);
+        if (payloadDomainId) {
+            domainIds.add(payloadDomainId);
+        }
+        const payloadResearchId = extractPayloadDomainResearchId(job.payload);
+        if (payloadResearchId) {
+            const research = payloadResearchMap.get(payloadResearchId);
+            if (research?.domainId) {
+                domainIds.add(research.domainId);
+            }
         }
     }
 
@@ -679,6 +715,9 @@ export default async function QueuePage({
         && health.processing === 0
         && health.throughputPerHour === 0
         && (health.oldestPendingAge ?? 0) > 10 * 60 * 1000;
+    const workerNeedsPersistentProcess = health.pending > 0
+        && health.processing === 0
+        && (latestWorkerActivityAge ?? Number.MAX_SAFE_INTEGER) > 5 * 60 * 1000;
 
     return (
         <div className="space-y-6">
@@ -917,6 +956,33 @@ export default async function QueuePage({
                 )}
             </div>
 
+            <div className={`rounded-lg border p-4 ${workerNeedsPersistentProcess ? 'border-amber-300 bg-amber-50/70' : 'bg-card'}`}>
+                <h2 className="text-lg font-semibold mb-2">Worker Run Guide</h2>
+                {workerNeedsPersistentProcess ? (
+                    <p className="text-sm text-amber-900">
+                        Queue has pending work but no active worker heartbeat. Start a persistent worker process.
+                    </p>
+                ) : (
+                    <p className="text-sm text-muted-foreground">
+                        Keep one persistent worker running during active pipeline hours for predictable queue latency.
+                    </p>
+                )}
+                <div className="mt-3 grid gap-3 md:grid-cols-3 text-xs">
+                    <div className="rounded border bg-background p-3">
+                        <div className="text-muted-foreground">Terminal Command</div>
+                        <code className="mt-1 block">npm run worker</code>
+                    </div>
+                    <div className="rounded border bg-background p-3">
+                        <div className="text-muted-foreground">Manual Fallback</div>
+                        <div className="mt-1">Use &quot;Process Now&quot; for short bursts.</div>
+                    </div>
+                    <div className="rounded border bg-background p-3">
+                        <div className="text-muted-foreground">In-App Auto-Run</div>
+                        <div className="mt-1">Toggle &quot;Auto-Run On&quot; (saved in browser).</div>
+                    </div>
+                </div>
+            </div>
+
             {/* Pending by type */}
             {jobsByType.length > 0 && (
                 <div className="bg-card rounded-lg border p-4">
@@ -1012,20 +1078,42 @@ export default async function QueuePage({
                             )}
                             {recentJobs.map((job) => {
                                 const linkedArticle = job.articleId ? articleMap.get(job.articleId) : undefined;
+                                const payloadDomainId = extractPayloadDomainId(job.payload);
+                                const payloadResearchId = extractPayloadDomainResearchId(job.payload);
+                                const payloadResearch = payloadResearchId
+                                    ? payloadResearchMap.get(payloadResearchId)
+                                    : undefined;
                                 const directDomain = job.domainId ? domainMap.get(job.domainId) : null;
                                 const articleDomain = linkedArticle?.domainId ? domainMap.get(linkedArticle.domainId) : null;
+                                const payloadDomainFromId = payloadDomainId ? domainMap.get(payloadDomainId) : null;
+                                const researchDomain = payloadResearch?.domainId ? domainMap.get(payloadResearch.domainId) : null;
                                 const payloadDomain = extractPayloadDomain(job.payload);
-                                const resolvedDomain = directDomain || articleDomain || payloadDomain || '—';
-                                const resolvedDomainId = job.domainId || linkedArticle?.domainId || null;
+                                const resolvedDomain = directDomain
+                                    || articleDomain
+                                    || payloadDomainFromId
+                                    || researchDomain
+                                    || payloadResearch?.domain
+                                    || payloadDomain
+                                    || '—';
+                                const resolvedDomainId = job.domainId
+                                    || linkedArticle?.domainId
+                                    || payloadDomainId
+                                    || payloadResearch?.domainId
+                                    || null;
                                 const domainResolutionSource = directDomain
                                     ? 'domain_id'
                                     : articleDomain
                                         ? 'article'
+                                        : payloadDomainFromId
+                                            ? 'payload_domain_id'
+                                        : payloadResearch
+                                            ? 'domain_research'
                                         : payloadDomain
                                             ? 'payload'
                                             : 'none';
                                 const payloadTarget = extractPayloadTarget(job.payload);
                                 const targetSummary = linkedArticle?.targetKeyword
+                                    || (payloadResearch ? `domainResearch: ${payloadResearch.domain}` : null)
                                     || payloadTarget
                                     || linkedArticle?.title
                                     || '—';
@@ -1128,6 +1216,14 @@ export default async function QueuePage({
                                                             <span className="text-muted-foreground">article:</span>{' '}
                                                             <Link href={`/dashboard/content/articles/${job.articleId}`} className="text-blue-600 hover:underline">
                                                                 {job.articleId}
+                                                            </Link>
+                                                        </div>
+                                                    )}
+                                                    {payloadResearch && (
+                                                        <div className="text-[11px]">
+                                                            <span className="text-muted-foreground">domain research:</span>{' '}
+                                                            <Link href={`/dashboard/acquisition?q=${encodeURIComponent(payloadResearch.domain)}`} className="text-blue-600 hover:underline">
+                                                                {payloadResearch.id}
                                                             </Link>
                                                         </div>
                                                     )}

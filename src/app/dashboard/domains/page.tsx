@@ -3,23 +3,15 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
-import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-} from '@/components/ui/table';
-import { Plus, ExternalLink } from 'lucide-react';
+import { TableHead } from '@/components/ui/table';
+import { Plus, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import { db, domains } from '@/lib/db';
 import { isNull } from 'drizzle-orm';
 import { formatDate } from '@/lib/format-utils';
-import { cn } from '@/lib/utils';
 import { DeployAllButton } from '@/components/dashboard/DeployAllButton';
 import { BulkNameserverCutoverButton } from '@/components/dashboard/BulkNameserverCutoverButton';
 import { DomainSearch } from '@/components/dashboard/DomainSearch';
-import { DomainActions } from '@/components/dashboard/DomainActions';
+import { DomainsTableClient } from '@/components/dashboard/DomainsTableClient';
 import { getDomainRoiPriorities } from '@/lib/domain/roi-priority-service';
 import { RoiCampaignAutoplanButton } from '@/components/dashboard/RoiCampaignAutoplanButton';
 import { getCampaignLaunchReviewSlaSummary } from '@/lib/review/campaign-launch-sla';
@@ -33,13 +25,6 @@ const statusConfig: Record<string, { color: string; label: string }> = {
     redirect: { color: 'bg-blue-500', label: 'Redirect' },
     forsale: { color: 'bg-amber-500', label: 'For Sale' },
     defensive: { color: 'bg-purple-500', label: 'Defensive' },
-};
-
-const tierConfig: Record<number, { label: string; color: string }> = {
-    1: { label: 'High Value', color: 'border-emerald-500 text-emerald-700' },
-    2: { label: 'Growth', color: 'border-blue-500 text-blue-700' },
-    3: { label: 'Incubate', color: 'border-gray-400 text-gray-600' },
-    4: { label: 'Brand/Hold', color: 'border-purple-400 text-purple-600' },
 };
 
 const roiActionBadgeClasses: Record<string, string> = {
@@ -56,13 +41,32 @@ const currencyFormatter = new Intl.NumberFormat('en-US', {
     maximumFractionDigits: 0,
 });
 
+const PAGE_SIZE = 20;
+const SORT_COLUMNS = ['domain', 'status', 'tier', 'niche', 'renewalDate', 'isDeployed'] as const;
+type SortColumn = (typeof SORT_COLUMNS)[number];
+type SortDir = 'asc' | 'desc';
+
 interface DomainsPageProps {
-    readonly searchParams: Promise<{ readonly q?: string; readonly status?: string; readonly tier?: string }>;
+    readonly searchParams: Promise<{
+        readonly q?: string; readonly status?: string; readonly tier?: string;
+        readonly page?: string; readonly sort?: string; readonly dir?: string;
+    }>;
 }
 
-async function getDomains(filters: { q?: string; status?: string; tier?: string }) {
+function isSortColumn(v: string | undefined): v is SortColumn {
+    return !!v && (SORT_COLUMNS as readonly string[]).includes(v);
+}
+
+function SortIndicator({ col, activeCol, activeDir }: { col: SortColumn; activeCol: SortColumn; activeDir: SortDir }) {
+    if (activeCol !== col) return <ChevronsUpDown className="ml-1 inline h-3 w-3 opacity-40" />;
+    return activeDir === 'asc'
+        ? <ChevronUp className="ml-1 inline h-3 w-3" />
+        : <ChevronDown className="ml-1 inline h-3 w-3" />;
+}
+
+async function getDomains(filters: { q?: string; status?: string; tier?: string; sort?: string; dir?: string; page?: string }) {
     try {
-        let allDomains = await db.select().from(domains).where(isNull(domains.deletedAt)).orderBy(domains.tier, domains.domain);
+        let allDomains = await db.select().from(domains).where(isNull(domains.deletedAt));
 
         if (filters.q) {
             const query = filters.q.toLowerCase();
@@ -78,10 +82,34 @@ async function getDomains(filters: { q?: string; status?: string; tier?: string 
             }
         }
 
-        return { data: allDomains, error: null };
+        const sortCol: SortColumn = isSortColumn(filters.sort) ? filters.sort : 'tier';
+        const sortDir: SortDir = filters.dir === 'desc' ? 'desc' : 'asc';
+        allDomains.sort((a, b) => {
+            let av: string | number | boolean | Date | null = a[sortCol as keyof typeof a] as string | number | boolean | Date | null;
+            let bv: string | number | boolean | Date | null = b[sortCol as keyof typeof b] as string | number | boolean | Date | null;
+            if (av instanceof Date) av = av.getTime();
+            if (bv instanceof Date) bv = bv.getTime();
+            if (av == null && bv == null) return 0;
+            if (av == null) return 1;
+            if (bv == null) return -1;
+            if (typeof av === 'boolean') av = av ? 1 : 0;
+            if (typeof bv === 'boolean') bv = bv ? 1 : 0;
+            const cmp = typeof av === 'number' && typeof bv === 'number'
+                ? av - bv
+                : String(av).localeCompare(String(bv));
+            return sortDir === 'desc' ? -cmp : cmp;
+        });
+
+        const totalCount = allDomains.length;
+        const page = Math.max(1, Number.parseInt(filters.page || '1', 10) || 1);
+        const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+        const safePage = Math.min(page, totalPages);
+        const paginated = allDomains.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
+        return { data: paginated, totalCount, page: safePage, totalPages, error: null };
     } catch (error) {
         console.error('Failed to fetch domains:', error);
-        return { data: [], error: 'Failed to load domains. Please try again later.' };
+        return { data: [], totalCount: 0, page: 1, totalPages: 1, error: 'Failed to load domains. Please try again later.' };
     }
 }
 
@@ -112,7 +140,32 @@ async function getCampaignLaunchReviewSummaryPreview() {
 export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
     const { searchParams } = props;
     const params = await searchParams;
-    const { data: allDomains, error } = await getDomains(params);
+    const { data: allDomains, totalCount: filteredCount, page, totalPages, error } = await getDomains(params);
+    const sortCol = isSortColumn(params.sort) ? params.sort : 'tier';
+    const sortDir: SortDir = params.dir === 'desc' ? 'desc' : 'asc';
+
+    function sortHref(col: SortColumn) {
+        const newDir = sortCol === col && sortDir === 'asc' ? 'desc' : 'asc';
+        const p = new URLSearchParams();
+        if (params.q) p.set('q', params.q);
+        if (params.status) p.set('status', params.status);
+        if (params.tier) p.set('tier', params.tier);
+        p.set('sort', col);
+        p.set('dir', newDir);
+        return `/dashboard/domains?${p.toString()}`;
+    }
+
+    function pageHref(pg: number) {
+        const p = new URLSearchParams();
+        if (params.q) p.set('q', params.q);
+        if (params.status) p.set('status', params.status);
+        if (params.tier) p.set('tier', params.tier);
+        if (params.sort) p.set('sort', params.sort);
+        if (params.dir) p.set('dir', params.dir);
+        p.set('page', String(pg));
+        return `/dashboard/domains?${p.toString()}`;
+    }
+
     const roiPriority = await getRoiPriorityPreview();
     const launchReviewSummary = await getCampaignLaunchReviewSummaryPreview();
 
@@ -133,7 +186,6 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
         acc[d.status] = (acc[d.status] || 0) + 1;
         return acc;
     }, {} as Record<string, number>);
-    const totalCount = unfilteredDomains.length;
 
     return (
         <div className="space-y-6">
@@ -142,7 +194,7 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                 <div>
                     <h1 className="text-3xl font-bold">Domains</h1>
                     <p className="text-muted-foreground">
-                        Manage your domain portfolio ({totalCount} total)
+                        Manage your domain portfolio ({unfilteredDomains.length} total)
                     </p>
                 </div>
                 <div className="flex gap-2">
@@ -311,137 +363,74 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
             {/* Domains Table */}
             <Card>
                 <CardContent className="p-0">
-                    <Table>
-                        <TableHeader>
-                            <TableRow>
-                                <TableHead>Domain</TableHead>
-                                <TableHead>Status</TableHead>
-                                <TableHead>Tier</TableHead>
-                                <TableHead>Niche</TableHead>
+                    <DomainsTableClient
+                        domains={allDomains.map(d => ({
+                            id: d.id,
+                            domain: d.domain,
+                            status: d.status,
+                            tier: d.tier,
+                            niche: d.niche,
+                            siteTemplate: d.siteTemplate,
+                            isDeployed: d.isDeployed,
+                            registrar: d.registrar,
+                            renewalDate: formatDate(d.renewalDate),
+                        }))}
+                        hasFilters={!!(params.q || params.status || params.tier)}
+                        headerSlot={
+                            <>
+                                <TableHead><Link href={sortHref('domain')} className="inline-flex items-center hover:text-foreground">Domain<SortIndicator col="domain" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
+                                <TableHead><Link href={sortHref('status')} className="inline-flex items-center hover:text-foreground">Status<SortIndicator col="status" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
+                                <TableHead><Link href={sortHref('tier')} className="inline-flex items-center hover:text-foreground">Tier<SortIndicator col="tier" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
+                                <TableHead><Link href={sortHref('niche')} className="inline-flex items-center hover:text-foreground">Niche<SortIndicator col="niche" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
                                 <TableHead>Template</TableHead>
-                                <TableHead>Deployed</TableHead>
-                                <TableHead>Renewal</TableHead>
+                                <TableHead><Link href={sortHref('isDeployed')} className="inline-flex items-center hover:text-foreground">Deployed<SortIndicator col="isDeployed" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
+                                <TableHead><Link href={sortHref('renewalDate')} className="inline-flex items-center hover:text-foreground">Renewal<SortIndicator col="renewalDate" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
                                 <TableHead className="w-12"></TableHead>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            {allDomains.length === 0 ? (
-                                <TableRow>
-                                    <TableCell colSpan={8} className="h-24 text-center">
-                                        <p className="text-muted-foreground">
-                                            {params.q || params.status || params.tier
-                                                ? 'No domains match your filters.'
-                                                : 'No domains yet.'}
-                                        </p>
-                                        {!params.q && !params.status && !params.tier && (
-                                            <Link href="/dashboard/domains/new">
-                                                <Button variant="link" className="mt-2">
-                                                    Add your first domain
-                                                </Button>
-                                            </Link>
-                                        )}
-                                    </TableCell>
-                                </TableRow>
-                            ) : (
-                                allDomains.map((domain) => (
-                                    <TableRow key={domain.id}>
-                                        <TableCell>
-                                            <Link
-                                                href={`/dashboard/domains/${domain.id}`}
-                                                className="font-medium hover:underline"
-                                            >
-                                                {domain.domain}
-                                            </Link>
-                                            <Link
-                                                href={`/dashboard/queue?domainId=${domain.id}`}
-                                                className="ml-2 text-xs text-blue-600 hover:underline"
-                                            >
-                                                Queue
-                                            </Link>
-                                            {domain.isDeployed && (
-                                                <a
-                                                    href={`https://${domain.domain}`}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="ml-2 inline-flex"
-                                                    aria-label={`Open ${domain.domain} in new tab`}
-                                                >
-                                                    <ExternalLink className="h-3 w-3 text-muted-foreground" />
-                                                </a>
-                                            )}
-                                        </TableCell>
-                                        <TableCell>
-                                            {(() => {
-                                                const cfg = statusConfig[domain.status] || { color: 'bg-gray-500', label: domain.status };
-                                                return (
-                                                    <Badge
-                                                        variant="secondary"
-                                                        className={cn(cfg.color, 'text-white')}
-                                                    >
-                                                        {cfg.label}
-                                                    </Badge>
-                                                );
-                                            })()}
-                                        </TableCell>
-                                        <TableCell>
-                                            {(() => {
-                                                const t = domain.tier || 3;
-                                                const cfg = tierConfig[t] || tierConfig[3];
-                                                return (
-                                                    <Badge variant="outline" className={cfg.color}>
-                                                        T{t} {cfg.label}
-                                                    </Badge>
-                                                );
-                                            })()}
-                                        </TableCell>
-                                        <TableCell>
-                                            {domain.niche ? (
-                                                <span className="font-medium text-foreground">{domain.niche}</span>
-                                            ) : (
-                                                <span className="italic text-amber-500">Unclassified</span>
-                                            )}
-                                        </TableCell>
-                                        <TableCell>
-                                            {domain.siteTemplate && domain.siteTemplate !== 'authority' ? (
-                                                <Badge variant="outline" className="capitalize">
-                                                    {domain.siteTemplate.replaceAll('_', ' ')}
-                                                </Badge>
-                                            ) : !domain.niche ? (
-                                                <span className="italic text-amber-500">—</span>
-                                            ) : (
-                                                <Badge variant="outline" className="capitalize">
-                                                    {domain.siteTemplate?.replaceAll('_', ' ') || 'authority'}
-                                                </Badge>
-                                            )}
-                                        </TableCell>
-                                        <TableCell>
-                                            {domain.isDeployed ? (
-                                                <Badge variant="secondary" className="bg-green-100 text-green-800">
-                                                    Live
-                                                </Badge>
-                                            ) : (
-                                                <span className="text-muted-foreground">—</span>
-                                            )}
-                                        </TableCell>
-                                        <TableCell>
-                                            <span className="text-sm">
-                                                {formatDate(domain.renewalDate)}
-                                            </span>
-                                        </TableCell>
-                                        <TableCell>
-                                            <DomainActions
-                                                domainId={domain.id}
-                                                domainName={domain.domain}
-                                                isDeployed={domain.isDeployed ?? false}
-                                            />
-                                        </TableCell>
-                                    </TableRow>
-                                ))
-                            )}
-                        </TableBody>
-                    </Table>
+                            </>
+                        }
+                    />
                 </CardContent>
             </Card>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+                <div className="flex items-center justify-between">
+                    <p className="text-sm text-muted-foreground">
+                        Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filteredCount)} of {filteredCount}
+                    </p>
+                    <div className="flex gap-1">
+                        {page > 1 && (
+                            <Link href={pageHref(page - 1)}>
+                                <Button variant="outline" size="sm">← Prev</Button>
+                            </Link>
+                        )}
+                        {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
+                            let pg: number;
+                            if (totalPages <= 7) {
+                                pg = i + 1;
+                            } else if (page <= 4) {
+                                pg = i + 1;
+                            } else if (page >= totalPages - 3) {
+                                pg = totalPages - 6 + i;
+                            } else {
+                                pg = page - 3 + i;
+                            }
+                            return (
+                                <Link key={pg} href={pageHref(pg)}>
+                                    <Button variant={pg === page ? 'default' : 'outline'} size="sm" className="min-w-[2rem]">
+                                        {pg}
+                                    </Button>
+                                </Link>
+                            );
+                        })}
+                        {page < totalPages && (
+                            <Link href={pageHref(page + 1)}>
+                                <Button variant="outline" size="sm">Next →</Button>
+                            </Link>
+                        )}
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

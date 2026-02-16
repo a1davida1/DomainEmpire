@@ -7,6 +7,11 @@ import { notDeleted } from '@/lib/db/soft-delete';
 import { createRateLimiter, getClientIp } from '@/lib/rate-limit';
 import { updateNameservers } from '@/lib/deploy/godaddy';
 import { getZoneNameserverMap } from '@/lib/deploy/cloudflare';
+import {
+    recordCloudflareHostShardOutcome,
+    resolveCloudflareHostShardPlan,
+    type CloudflareHostShard,
+} from '@/lib/deploy/host-sharding';
 
 const bulkNameserverMutationLimiter = createRateLimiter('domain_bulk_nameserver_mutation', {
     maxRequests: 8,
@@ -43,8 +48,21 @@ function normalizeDomain(value: string): string {
     return value.trim().toLowerCase();
 }
 
+function cloudflareShardLookupKey(shard: CloudflareHostShard): string {
+    const accountId = shard.cloudflare.accountId?.trim() || 'default';
+    const apiToken = shard.cloudflare.apiToken?.trim() || 'env';
+    return `${accountId}::${apiToken}`;
+}
+
 function isValidNameserver(value: string): boolean {
     return hostnameRegex.test(value);
+}
+
+function isRateLimitedCloudflareError(message: string): boolean {
+    const lowered = message.toLowerCase();
+    return lowered.includes('429')
+        || lowered.includes('rate limit')
+        || lowered.includes('too many requests');
 }
 
 function resolveCloudflareNameservers(input: string[]): string[] {
@@ -142,6 +160,7 @@ export async function POST(request: NextRequest) {
         id: domains.id,
         domain: domains.domain,
         registrar: domains.registrar,
+        cloudflareAccount: domains.cloudflareAccount,
         profileId: domainRegistrarProfiles.id,
         profileMetadata: domainRegistrarProfiles.metadata,
     })
@@ -166,33 +185,95 @@ export async function POST(request: NextRequest) {
         nameservers: string[];
         source: 'request' | 'cloudflare_zone_lookup';
         previousNameservers: string[];
+        shardKey?: string;
         zoneId?: string;
         zoneName?: string;
     }> = [];
     const skipped: Array<{ domainId: string; domain: string; reason: string }> = [];
+    const warnings: string[] = [];
     const reason = parsed.data.reason ?? 'Manual bulk nameserver cutover to Cloudflare';
 
-    let zoneLookup: Map<string, {
+    const shardPlanByDomainId = new Map<string, CloudflareHostShard[]>();
+    await Promise.all(rows.map(async (row) => {
+        const plan = await resolveCloudflareHostShardPlan({
+            domain: row.domain,
+            cloudflareAccount: row.cloudflareAccount ?? null,
+            maxFallbacks: 3,
+        });
+        shardPlanByDomainId.set(row.id, plan.all);
+    }));
+
+    const zoneLookupByShardKey = new Map<string, Map<string, {
         zoneId: string;
         zoneName: string;
         nameservers: string[];
-    }> | null = null;
+    }>>();
     if (!providedNameservers) {
-        try {
-            zoneLookup = await getZoneNameserverMap(rows.map((row) => normalizeDomain(row.domain)));
-        } catch (error) {
-            const message = error instanceof Error ? error.message : 'Unknown Cloudflare zone lookup error';
+        const grouped = new Map<string, {
+            shard: CloudflareHostShard;
+            domains: string[];
+        }>();
+
+        for (const row of rows) {
+            const shardPlan = shardPlanByDomainId.get(row.id) || [];
+            for (const shard of shardPlan) {
+                const key = cloudflareShardLookupKey(shard);
+                const current = grouped.get(key);
+                if (!current) {
+                    grouped.set(key, {
+                        shard,
+                        domains: [normalizeDomain(row.domain)],
+                    });
+                    continue;
+                }
+                current.domains.push(normalizeDomain(row.domain));
+            }
+        }
+
+        const lookupErrors: string[] = [];
+        for (const [key, { shard, domains: groupedDomains }] of grouped.entries()) {
+            try {
+                const lookup = await getZoneNameserverMap(groupedDomains, shard.cloudflare);
+                zoneLookupByShardKey.set(key, lookup);
+                recordCloudflareHostShardOutcome({
+                    shardKey: shard.shardKey,
+                    accountId: shard.cloudflare.accountId ?? null,
+                    sourceConnectionId: shard.connectionId ?? null,
+                }, 'success');
+            } catch (error) {
+                const message = error instanceof Error ? error.message : 'Unknown Cloudflare zone lookup error';
+                recordCloudflareHostShardOutcome(
+                    {
+                        shardKey: shard.shardKey,
+                        accountId: shard.cloudflare.accountId ?? null,
+                        sourceConnectionId: shard.connectionId ?? null,
+                    },
+                    isRateLimitedCloudflareError(message) ? 'rate_limited' : 'failure',
+                );
+                lookupErrors.push(`[${shard.shardKey}] ${message}`);
+            }
+        }
+
+        if (zoneLookupByShardKey.size === 0 && grouped.size > 0) {
             return NextResponse.json(
                 {
                     error: 'Cloudflare zone lookup failed. Please retry shortly.',
-                    details: message,
+                    details: lookupErrors.join(' | '),
                 },
                 { status: 503 },
+            );
+        }
+
+        if (lookupErrors.length > 0) {
+            warnings.push(
+                `Some Cloudflare shard lookups failed; continuing with available shard responses (${lookupErrors.slice(0, 2).join(' | ')}).`,
             );
         }
     }
 
     for (const row of rows) {
+        const hostShardPlan = shardPlanByDomainId.get(row.id) || [];
+
         if (row.registrar !== 'godaddy') {
             skipped.push({
                 domainId: row.id,
@@ -212,7 +293,19 @@ export async function POST(request: NextRequest) {
                 nameservers = providedNameservers;
                 nameserverSource = 'request';
             } else {
-                const zone = zoneLookup?.get(normalizeDomain(row.domain));
+                const normalizedDomain = normalizeDomain(row.domain);
+                let zone: { zoneId: string; zoneName: string; nameservers: string[] } | null = null;
+                let zoneShardKey: string | null = null;
+                for (const shard of hostShardPlan) {
+                    const lookupKey = cloudflareShardLookupKey(shard);
+                    const shardLookup = zoneLookupByShardKey.get(lookupKey);
+                    const matched = shardLookup?.get(normalizedDomain);
+                    if (!matched) continue;
+                    zone = matched;
+                    zoneShardKey = shard.shardKey;
+                    break;
+                }
+
                 if (!zone) {
                     failures.push({
                         domainId: row.id,
@@ -226,6 +319,14 @@ export async function POST(request: NextRequest) {
                 nameserverSource = 'cloudflare_zone_lookup';
                 zoneId = zone.zoneId;
                 zoneName = zone.zoneName;
+                if (zoneShardKey) {
+                    // Prefer the shard that actually resolved the zone.
+                    const matchedShard = hostShardPlan.find((shard) => shard.shardKey === zoneShardKey);
+                    if (matchedShard) {
+                        hostShardPlan.splice(hostShardPlan.indexOf(matchedShard), 1);
+                        hostShardPlan.unshift(matchedShard);
+                    }
+                }
             }
 
             const previousMetadata = isRecord(row.profileMetadata) ? row.profileMetadata : {};
@@ -236,6 +337,7 @@ export async function POST(request: NextRequest) {
                 nameservers,
                 source: nameserverSource,
                 previousNameservers,
+                ...(hostShardPlan[0] ? { shardKey: hostShardPlan[0].shardKey } : {}),
                 ...(zoneId ? { zoneId } : {}),
                 ...(zoneName ? { zoneName } : {}),
             });
@@ -392,6 +494,7 @@ export async function POST(request: NextRequest) {
             dryRun: true,
             resolutionMode: providedNameservers ? 'request' : 'per_domain_cloudflare_lookup',
             ...(providedNameservers ? { nameservers: providedNameservers } : {}),
+            ...(warnings.length > 0 ? { warnings } : {}),
             readyCount: ready.length,
             failedCount: failures.length,
             skippedCount: skipped.length,
@@ -405,6 +508,7 @@ export async function POST(request: NextRequest) {
         success: failures.length === 0,
         resolutionMode: providedNameservers ? 'request' : 'per_domain_cloudflare_lookup',
         ...(providedNameservers ? { nameservers: providedNameservers } : {}),
+        ...(warnings.length > 0 ? { warnings } : {}),
         successCount: successes.length,
         failedCount: failures.length,
         skippedCount: skipped.length,

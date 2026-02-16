@@ -7,6 +7,8 @@ const mockUpdateNameservers = vi.fn();
 const mockGetZoneNameserverMap = vi.fn();
 const mockSelectWhere = vi.fn();
 const mockCreateRateLimiter = vi.fn();
+const mockResolveCloudflareHostShardPlan = vi.fn();
+const mockRecordCloudflareHostShardOutcome = vi.fn();
 
 mockCreateRateLimiter.mockReturnValue(() => ({
     allowed: true,
@@ -29,6 +31,11 @@ vi.mock('@/lib/deploy/godaddy', () => ({
 
 vi.mock('@/lib/deploy/cloudflare', () => ({
     getZoneNameserverMap: mockGetZoneNameserverMap,
+}));
+
+vi.mock('@/lib/deploy/host-sharding', () => ({
+    resolveCloudflareHostShardPlan: mockResolveCloudflareHostShardPlan,
+    recordCloudflareHostShardOutcome: mockRecordCloudflareHostShardOutcome,
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -71,11 +78,29 @@ describe('bulk nameserver route', () => {
         vi.clearAllMocks();
         mockRequireRole.mockResolvedValue(null);
         mockGetRequestUser.mockReturnValue({ id: 'user-1', role: 'expert' });
+        mockResolveCloudflareHostShardPlan.mockResolvedValue({
+            primary: {
+                shardKey: 'default',
+                strategy: 'default',
+                source: 'environment',
+                cloudflare: {},
+                warnings: [],
+            },
+            fallbacks: [],
+            all: [{
+                shardKey: 'default',
+                strategy: 'default',
+                source: 'environment',
+                cloudflare: {},
+                warnings: [],
+            }],
+        });
         mockSelectWhere.mockResolvedValue([
             {
                 id: '00000000-0000-4000-8000-000000000001',
                 domain: 'example.com',
                 registrar: 'godaddy',
+                cloudflareAccount: null,
                 profileId: 'profile-1',
                 profileMetadata: {},
             },

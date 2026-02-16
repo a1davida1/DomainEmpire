@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -969,6 +970,9 @@ export default function ResearchPage() {
                         <CardDescription>Domains being evaluated for purchase ({candidates.length} candidates)</CardDescription>
                     </div>
                     <div className="flex items-center gap-2">
+                        <Link href="/dashboard/acquisition">
+                            <Button variant="outline">Open Full Pipeline</Button>
+                        </Link>
                         <Button variant="secondary" onClick={processAcquisitionPipelineNow} disabled={pipelineProcessing}>
                             {pipelineProcessing ? 'Running...' : 'Process Pipeline Jobs'}
                         </Button>
@@ -989,60 +993,134 @@ export default function ResearchPage() {
                         </p>
                     ) : (
                         <div className="space-y-2">
-                            {candidates.map(c => (
-                                <div
-                                    key={c.id}
-                                    className="flex items-center justify-between p-3 bg-muted/30 rounded-lg"
-                                >
-                                    <div className="flex items-center gap-3">
-                                        <span className="font-medium font-mono">{c.domain}</span>
-                                        {c.decision && (
-                                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                                                c.decision === 'buy' ? 'bg-green-100 text-green-800' :
-                                                c.decision === 'watchlist' ? 'bg-yellow-100 text-yellow-800' :
-                                                c.decision === 'pass' ? 'bg-red-100 text-red-800' :
-                                                'bg-blue-100 text-blue-800'
-                                            }`}>
-                                                {c.decision}
-                                            </span>
+                            {candidates.map((c) => {
+                                const latestEvent = getLatestEvent(c);
+                                return (
+                                    <div key={c.id} className="space-y-3 rounded-lg border bg-muted/30 p-3">
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <div className="flex flex-wrap items-center gap-3">
+                                                <span className="font-medium font-mono">{c.domain}</span>
+                                                {c.decision && (
+                                                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                                        c.decision === 'buy' ? 'bg-green-100 text-green-800' :
+                                                        c.decision === 'watchlist' ? 'bg-yellow-100 text-yellow-800' :
+                                                        c.decision === 'pass' ? 'bg-red-100 text-red-800' :
+                                                        'bg-blue-100 text-blue-800'
+                                                    }`}>
+                                                        {c.decision}
+                                                    </span>
+                                                )}
+                                                {c.listingSource && (
+                                                    <span className="text-xs text-muted-foreground">{c.listingSource}</span>
+                                                )}
+                                                {c.hardFailReason && (
+                                                    <span className="rounded bg-red-100 px-2 py-0.5 text-xs text-red-800">
+                                                        hard fail
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="flex flex-wrap items-center gap-3 text-sm">
+                                                {c.domainScore != null && (
+                                                    <span className={`font-bold ${
+                                                        c.domainScore >= 65 ? 'text-green-600' :
+                                                        c.domainScore >= 45 ? 'text-yellow-600' : 'text-red-500'
+                                                    }`}>
+                                                        {c.domainScore}/100
+                                                    </span>
+                                                )}
+                                                {c.recommendedMaxBid != null && (
+                                                    <span className="text-muted-foreground">
+                                                        max bid: ${c.recommendedMaxBid}
+                                                    </span>
+                                                )}
+                                                {c.isAvailable != null && (
+                                                    <span className={c.isAvailable ? 'text-green-600' : 'text-red-500'}>
+                                                        {c.isAvailable ? 'Available' : 'Taken'}
+                                                    </span>
+                                                )}
+                                                {c.registrationPrice != null && (
+                                                    <span className="text-muted-foreground">${c.registrationPrice}</span>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            {ACQUISITION_STAGE_ORDER.map((stage) => {
+                                                const stageState = getStageState(c, stage);
+                                                return (
+                                                    <span
+                                                        key={`${c.id}:${stage}`}
+                                                        className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${ACQUISITION_STAGE_STATE_CLASS[stageState]}`}
+                                                    >
+                                                        {ACQUISITION_STAGE_LABEL[stage]}: {stageState}
+                                                    </span>
+                                                );
+                                            })}
+                                        </div>
+
+                                        {latestEvent && (
+                                            <p className="text-xs text-muted-foreground">
+                                                Latest event: {latestEvent.eventType}
+                                                {latestEvent.createdAt ? ` at ${new Date(latestEvent.createdAt).toLocaleString()}` : ''}
+                                            </p>
                                         )}
-                                        {c.listingSource && (
-                                            <span className="text-xs text-muted-foreground">{c.listingSource}</span>
+
+                                        {c.hardFailReason && (
+                                            <p className="text-xs text-red-700">
+                                                Hard fail reason: {c.hardFailReason}
+                                            </p>
                                         )}
+
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => {
+                                                    const parts = c.domain.split('.');
+                                                    const t = parts.pop() || 'com';
+                                                    setDomainInput(parts.join('.'));
+                                                    setTld(t);
+                                                    runFullEvaluation(false, c.domain);
+                                                }}
+                                            >
+                                                Re-eval
+                                            </Button>
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => requeueCandidatePipeline(c)}
+                                                disabled={candidateRequeueingId === c.id}
+                                            >
+                                                {candidateRequeueingId === c.id ? 'Requeueing...' : 'Requeue Pipeline'}
+                                            </Button>
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => applyCandidateDecision(c, 'buy')}
+                                                disabled={candidateDecisionUpdatingId === c.id}
+                                            >
+                                                Buy
+                                            </Button>
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => applyCandidateDecision(c, 'watchlist')}
+                                                disabled={candidateDecisionUpdatingId === c.id}
+                                            >
+                                                Watchlist
+                                            </Button>
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => applyCandidateDecision(c, 'pass')}
+                                                disabled={candidateDecisionUpdatingId === c.id}
+                                            >
+                                                Pass
+                                            </Button>
+                                        </div>
                                     </div>
-                                    <div className="flex items-center gap-4 text-sm">
-                                        {c.domainScore != null && (
-                                            <span className={`font-bold ${
-                                                c.domainScore >= 65 ? 'text-green-600' :
-                                                c.domainScore >= 45 ? 'text-yellow-600' : 'text-red-500'
-                                            }`}>
-                                                {c.domainScore}/100
-                                            </span>
-                                        )}
-                                        {c.isAvailable != null && (
-                                            <span className={c.isAvailable ? 'text-green-600' : 'text-red-500'}>
-                                                {c.isAvailable ? 'Available' : 'Taken'}
-                                            </span>
-                                        )}
-                                        {c.registrationPrice != null && (
-                                            <span className="text-muted-foreground">${c.registrationPrice}</span>
-                                        )}
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => {
-                                                const parts = c.domain.split('.');
-                                                const t = parts.pop() || 'com';
-                                                setDomainInput(parts.join('.'));
-                                                setTld(t);
-                                                runFullEvaluation(false, c.domain);
-                                            }}
-                                        >
-                                            Re-eval
-                                        </Button>
-                                    </div>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     )}
                 </CardContent>
