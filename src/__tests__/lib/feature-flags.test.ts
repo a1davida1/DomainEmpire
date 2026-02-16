@@ -17,7 +17,7 @@ describe('feature flags', () => {
         const snapshot = getFeatureFlagSnapshot({ userId: 'user-1' });
         expect(snapshot.acquisition_underwriting_v1).toBe(true);
         expect(snapshot.preview_gate_v1).toBe(true);
-        expect(snapshot.growth_channels_v1).toBe(false);
+        expect(snapshot.growth_channels_v1).toBe(true);
         expect(snapshot.kdp_generator_v1).toBe(false);
     });
 

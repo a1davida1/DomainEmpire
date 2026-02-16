@@ -757,14 +757,13 @@ async function executeCloudflareAnalyticsSync(
             status: 'partial',
             recordsProcessed: 0,
             recordsUpserted: 0,
-            recordsFailed: 1,
-            errorMessage: rateLimited
-                ? 'Cloudflare analytics rate-limited; retry shortly.'
-                : analyticsResult.message,
+            recordsFailed: rateLimited ? 0 : 1,
+            errorMessage: rateLimited ? undefined : analyticsResult.message,
             details: {
                 domain: connection.domainName,
                 days,
                 reason: rateLimited ? 'rate_limited' : 'api_error',
+                warning: rateLimited ? 'Cloudflare analytics rate-limited; retry shortly.' : undefined,
                 ...(rateLimited && cooldown
                     ? {
                         rateLimitCooldownSeconds: Math.max(0, Math.ceil(cooldown.remainingMs / 1000)),
@@ -778,12 +777,16 @@ async function executeCloudflareAnalyticsSync(
     const analytics = analyticsResult.status === 'ok' ? analyticsResult.data : [];
     if (analytics.length === 0) {
         return {
-            status: 'failed',
+            status: 'partial',
             recordsProcessed: 0,
             recordsUpserted: 0,
             recordsFailed: 0,
-            errorMessage: 'No Cloudflare analytics data available',
-            details: { domain: connection.domainName, days },
+            details: {
+                domain: connection.domainName,
+                days,
+                reason: 'no_data',
+                warning: 'No Cloudflare analytics rows returned for this period (new zone or zero traffic is common).',
+            },
         };
     }
 

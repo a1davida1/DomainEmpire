@@ -15,17 +15,22 @@ import { Search, Filter, Edit, ExternalLink, FileText, ChevronLeft, ChevronRight
 import { db, articles } from '@/lib/db';
 import { desc, like, or, eq, and, isNull, type SQL } from 'drizzle-orm';
 import { formatDate, formatNumber } from '@/lib/format-utils';
+import { domains } from '@/lib/db/schema';
 
 interface PageProps {
-    readonly searchParams: Promise<{ readonly q?: string; readonly status?: string; readonly page?: string }>;
+    readonly searchParams: Promise<{ readonly q?: string; readonly status?: string; readonly page?: string; readonly domainId?: string }>;
 }
 
 export const dynamic = 'force-dynamic';
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export default async function ArticlesPage(props: Readonly<PageProps>) {
     const { searchParams } = props;
     const params = await searchParams;
     const query = params.q || '';
+    const domainIdFilter = typeof params.domainId === 'string' && UUID_REGEX.test(params.domainId.trim())
+        ? params.domainId.trim()
+        : null;
     const page = Math.max(1, Number.parseInt(params.page || '1') || 1);
     const limit = 20;
     const offset = (page - 1) * limit;
@@ -34,6 +39,7 @@ export default async function ArticlesPage(props: Readonly<PageProps>) {
         const sp = new URLSearchParams();
         if (query) sp.set('q', query);
         if (params.status) sp.set('status', params.status);
+        if (domainIdFilter) sp.set('domainId', domainIdFilter);
         sp.set('page', p.toString());
         return `/dashboard/content/articles?${sp.toString()}`;
     };
@@ -47,9 +53,21 @@ export default async function ArticlesPage(props: Readonly<PageProps>) {
     if (params.status) {
         filters.push(eq(articles.status, params.status as 'generating' | 'draft' | 'review' | 'approved' | 'published' | 'archived'));
     }
+    if (domainIdFilter) {
+        filters.push(eq(articles.domainId, domainIdFilter));
+    }
 
     const whereClause = and(...filters);
 
+    const domainFilterRecord = domainIdFilter
+        ? await db.select({
+            id: domains.id,
+            domain: domains.domain,
+        })
+            .from(domains)
+            .where(eq(domains.id, domainIdFilter))
+            .limit(1)
+        : [];
 
     const allArticles = await db.query.articles.findMany({
         where: whereClause,
@@ -67,7 +85,9 @@ export default async function ArticlesPage(props: Readonly<PageProps>) {
                 <div>
                     <h1 className="text-3xl font-bold">Content Library</h1>
                     <p className="text-muted-foreground">
-                        Manage articles across all domains
+                        {domainIdFilter && domainFilterRecord[0]
+                            ? `Review articles for ${domainFilterRecord[0].domain}`
+                            : 'Manage articles across all domains'}
                     </p>
                 </div>
                 <div className="flex gap-2">
@@ -95,6 +115,7 @@ export default async function ArticlesPage(props: Readonly<PageProps>) {
                         className="pl-9"
                     />
                     {params.status && <input type="hidden" name="status" value={params.status} />}
+                    {domainIdFilter && <input type="hidden" name="domainId" value={domainIdFilter} />}
                 </div>
                 <Button type="submit" variant="outline">
                     <Filter className="mr-2 h-4 w-4" />
@@ -148,6 +169,11 @@ export default async function ArticlesPage(props: Readonly<PageProps>) {
                                                 <Link href={`/dashboard/content/articles/${article.id}`}>
                                                     <Button variant="ghost" size="icon" aria-label={`Edit article ${article.title}`}>
                                                         <Edit className="h-4 w-4" />
+                                                    </Button>
+                                                </Link>
+                                                <Link href={`/dashboard/content/articles/${article.id}/review`}>
+                                                    <Button variant="ghost" size="sm">
+                                                        Review
                                                     </Button>
                                                 </Link>
                                                 {article.domain?.isDeployed && article.status === 'published' && (

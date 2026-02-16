@@ -46,6 +46,45 @@ const CHANNEL_LABELS: Record<Channel, { title: string; accountLabel: string }> =
     },
 };
 
+function isChannel(value: unknown): value is Channel {
+    return value === 'pinterest' || value === 'youtube_shorts';
+}
+
+function isCompatibility(value: unknown): value is Compatibility {
+    return value === 'supported' || value === 'limited' || value === 'blocked';
+}
+
+function normalizeProfile(value: unknown): ChannelProfile | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const row = value as Record<string, unknown>;
+    if (!isChannel(row.channel)) return null;
+
+    return {
+        id: typeof row.id === 'string' ? row.id : null,
+        domainId: typeof row.domainId === 'string' ? row.domainId : '',
+        channel: row.channel,
+        enabled: row.enabled !== false,
+        compatibility: isCompatibility(row.compatibility) ? row.compatibility : 'supported',
+        accountRef: typeof row.accountRef === 'string' ? row.accountRef : null,
+        dailyCap: Number.isFinite(row.dailyCap) ? Number(row.dailyCap) : null,
+        quietHoursStart: Number.isFinite(row.quietHoursStart) ? Number(row.quietHoursStart) : null,
+        quietHoursEnd: Number.isFinite(row.quietHoursEnd) ? Number(row.quietHoursEnd) : null,
+        minJitterMinutes: Number.isFinite(row.minJitterMinutes) ? Math.max(0, Number(row.minJitterMinutes)) : 15,
+        maxJitterMinutes: Number.isFinite(row.maxJitterMinutes) ? Math.max(0, Number(row.maxJitterMinutes)) : 90,
+        notes: typeof row.notes === 'string' ? row.notes : null,
+    };
+}
+
+function channelLabel(channel: string): { title: string; accountLabel: string } {
+    if (isChannel(channel)) {
+        return CHANNEL_LABELS[channel];
+    }
+    return {
+        title: channel,
+        accountLabel: 'Account reference',
+    };
+}
+
 function parseNullableInt(value: string): number | null {
     const trimmed = value.trim();
     if (!trimmed) return null;
@@ -74,7 +113,12 @@ export default function DomainChannelCompatibilityConfig({ domainId }: Props) {
                 }
                 const payload = await res.json();
                 if (!cancelled) {
-                    setProfiles(Array.isArray(payload.profiles) ? payload.profiles : []);
+                    const normalized = Array.isArray(payload.profiles)
+                        ? payload.profiles
+                            .map((profile: unknown) => normalizeProfile(profile))
+                            .filter((profile: ChannelProfile | null): profile is ChannelProfile => profile !== null)
+                        : [];
+                    setProfiles(normalized);
                 }
             } catch (loadError) {
                 if (!cancelled) {
@@ -131,7 +175,12 @@ export default function DomainChannelCompatibilityConfig({ domainId }: Props) {
             if (!res.ok) {
                 throw new Error(body.error || 'Failed to save channel compatibility settings');
             }
-            setProfiles(Array.isArray(body.profiles) ? body.profiles : profiles);
+            if (Array.isArray(body.profiles)) {
+                const normalized = body.profiles
+                    .map((profile: unknown) => normalizeProfile(profile))
+                    .filter((profile: ChannelProfile | null): profile is ChannelProfile => profile !== null);
+                setProfiles(normalized);
+            }
             setSavedAt(new Date().toISOString());
         } catch (saveError) {
             setError(saveError instanceof Error ? saveError.message : 'Failed to save settings');
@@ -154,11 +203,13 @@ export default function DomainChannelCompatibilityConfig({ domainId }: Props) {
                     <p className="text-sm text-muted-foreground">No channel settings found for this domain.</p>
                 )}
 
-                {!loading && profiles.map((profile) => (
-                    <div key={profile.channel} className="rounded-lg border p-4 space-y-4">
+                {!loading && profiles.map((profile) => {
+                    const label = channelLabel(profile.channel);
+                    return (
+                        <div key={profile.channel} className="rounded-lg border p-4 space-y-4">
                         <div className="flex items-center justify-between gap-4">
                             <div>
-                                <h4 className="font-medium">{CHANNEL_LABELS[profile.channel].title}</h4>
+                                <h4 className="font-medium">{label.title}</h4>
                                 <p className="text-xs text-muted-foreground">
                                     Channel-specific compatibility and publish timing.
                                 </p>
@@ -193,7 +244,7 @@ export default function DomainChannelCompatibilityConfig({ domainId }: Props) {
                             </div>
 
                             <div className="space-y-2">
-                                <Label>{CHANNEL_LABELS[profile.channel].accountLabel}</Label>
+                                <Label>{label.accountLabel}</Label>
                                 <Input
                                     value={profile.accountRef || ''}
                                     onChange={(event) => updateProfile(profile.channel, { accountRef: event.target.value || null })}
@@ -282,8 +333,9 @@ export default function DomainChannelCompatibilityConfig({ domainId }: Props) {
                                 placeholder="Optional notes about this channel/domain combination"
                             />
                         </div>
-                    </div>
-                ))}
+                        </div>
+                    );
+                })}
 
                 {error && (
                     <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">

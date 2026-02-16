@@ -365,6 +365,7 @@ export async function processDeployJob(jobId: string): Promise<void> {
     const hostShardPlan = await resolveCloudflareHostShardPlan({
         domain: payload.domain,
         cloudflareAccount: payload.cloudflareAccount ?? domain.cloudflareAccount ?? null,
+        domainNiche: domain.niche ?? null,
         maxFallbacks: 3,
     });
     const hostShard = hostShardPlan.primary;

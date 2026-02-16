@@ -25,7 +25,7 @@ const FEATURE_FLAGS: Record<FeatureFlag, FeatureFlagConfig> = {
     },
     growth_channels_v1: {
         envKey: 'FEATURE_GROWTH_CHANNELS_V1',
-        defaultEnabled: false,
+        defaultEnabled: true,
     },
     kdp_generator_v1: {
         envKey: 'FEATURE_KDP_GENERATOR_V1',

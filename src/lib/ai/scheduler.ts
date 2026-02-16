@@ -175,13 +175,14 @@ export async function checkContentSchedule() {
     // 2. Bulk check pending/processing jobs AND recently scheduled jobs (last 24h)
     //    This prevents duplicate scheduling if the scheduler runs multiple times.
     const recentCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const recentCutoffIso = recentCutoff.toISOString();
     const pendingJobs = await db
         .select({ domainId: contentQueue.domainId })
         .from(contentQueue)
         .where(
             and(
                 inArray(contentQueue.domainId, activeDomainIds),
-                sql`(${inArray(contentQueue.status, ['pending', 'processing'])} OR (${contentQueue.status} = 'completed' AND ${contentQueue.createdAt} >= ${recentCutoff}))`
+                sql`(${inArray(contentQueue.status, ['pending', 'processing'])} OR (${contentQueue.status} = 'completed' AND ${contentQueue.createdAt} >= ${recentCutoffIso}::timestamp))`
             )
         );
 

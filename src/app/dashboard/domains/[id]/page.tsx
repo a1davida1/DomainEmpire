@@ -923,7 +923,14 @@ export default async function DomainDetailPage({ params }: PageProps) {
                         <CardTitle>Recent Articles</CardTitle>
                         <CardDescription>Content generated for this domain</CardDescription>
                     </div>
-                    <GenerateArticleButton domainId={id} hasArticles={recentArticles.length > 0} />
+                    <div className="flex items-center gap-2">
+                        <Link href={`/dashboard/content/articles?domainId=${id}&status=review`}>
+                            <Button variant="outline" size="sm">
+                                Review Domain Articles
+                            </Button>
+                        </Link>
+                        <GenerateArticleButton domainId={id} hasArticles={recentArticles.length > 0} />
+                    </div>
                 </CardHeader>
                 <CardContent>
                     {recentArticles.length === 0 ? (
@@ -947,6 +954,9 @@ export default async function DomainDetailPage({ params }: PageProps) {
                                     <div className="flex items-center gap-2">
                                         <Link href={`/dashboard/domains/${id}/preview?articleId=${article.id}`} className="text-xs text-blue-600 hover:underline">
                                             Preview
+                                        </Link>
+                                        <Link href={`/dashboard/content/articles/${article.id}/review`} className="text-xs text-blue-600 hover:underline">
+                                            Review
                                         </Link>
                                         <Badge variant="outline" className="capitalize">{article.status}</Badge>
                                     </div>

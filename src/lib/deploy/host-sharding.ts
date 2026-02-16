@@ -1,5 +1,5 @@
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
-import { db, cloudflareShardHealth, integrationConnections } from '@/lib/db';
+import { db, cloudflareShardHealth, domains, integrationConnections } from '@/lib/db';
 import { decryptSecret } from '@/lib/security/encryption';
 import {
     resolveCloudflareAccountByReference,
@@ -44,6 +44,7 @@ export type CloudflareHostShardPlan = {
 type ResolveCloudflareHostShardInput = {
     domain: string;
     cloudflareAccount?: string | null;
+    domainNiche?: string | null;
     routingRegion?: string | null;
     strictRegion?: boolean;
     maxFallbacks?: number;
@@ -75,6 +76,24 @@ const SHARD_CACHE_TTL_MS = 60_000;
 let shardCache: CachedShardCandidates | null = null;
 let shardCacheInFlight: Promise<CloudflareShardCandidate[]> | null = null;
 const shardHealthState = new Map<string, ShardHealthState>();
+
+type ShardAssignmentSnapshot = {
+    totalByAccountId: Map<string, number>;
+    nicheByAccountId: Map<string, Map<string, number>>;
+    totalByNiche: Map<string, number>;
+    totalAssigned: number;
+};
+
+type CachedShardAssignmentSnapshot = {
+    expiresAt: number;
+    fingerprint: string;
+    snapshot: ShardAssignmentSnapshot;
+};
+
+const SHARD_ASSIGNMENT_CACHE_TTL_MS = 30_000;
+let shardAssignmentCache: CachedShardAssignmentSnapshot | null = null;
+let shardAssignmentInFlight: { fingerprint: string; promise: Promise<ShardAssignmentSnapshot> } | null = null;
+
 type CachedPersistentShardHealth = {
     expiresAt: number;
     rows: Map<string, ShardHealthState>;
@@ -88,6 +107,7 @@ const SHARD_RATE_LIMIT_MAX_COOLDOWN_MS = 10 * 60 * 1000;
 const SHARD_FAILURE_BASE_COOLDOWN_MS = 5_000;
 const SHARD_FAILURE_MAX_COOLDOWN_MS = 2 * 60 * 1000;
 const SHARD_MAX_PENALTY = 8;
+const DEFAULT_SHARD_TARGET_DOMAINS = 50;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -118,6 +138,25 @@ function normalizeRegion(value: string | null | undefined): string | null {
     if (!value) return null;
     const normalized = value.trim().toLowerCase().replace(/_/g, '-');
     return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeNiche(value: string | null | undefined): string | null {
+    if (!value) return null;
+    const normalized = value.trim().toLowerCase().replace(/\s+/g, ' ');
+    return normalized.length > 0 ? normalized : null;
+}
+
+function resolveTargetDomainsPerShard(): number {
+    const envTarget = Number.parseInt(
+        process.env.CLOUDFLARE_SHARD_TARGET_DOMAINS_PER_ACCOUNT
+        ?? process.env.CLOUDFLARE_SHARD_TARGET_DOMAINS
+        ?? '',
+        10,
+    );
+    if (Number.isFinite(envTarget) && envTarget > 0) {
+        return Math.max(1, Math.min(envTarget, 10_000));
+    }
+    return DEFAULT_SHARD_TARGET_DOMAINS;
 }
 
 function shardHealthKey(shardKey: string, accountId?: string | null): string {
@@ -245,6 +284,151 @@ function resolveShardBaseWeight(row: ShardConnectionRow): number {
         return 100;
     }
     return Math.max(1, Math.min(Math.round(rawWeight), 1000));
+}
+
+function buildShardAssignmentFingerprint(candidates: CloudflareShardCandidate[]): string {
+    return candidates
+        .map((candidate) => `${normalizeKey(candidate.key)}:${candidate.accountId}`)
+        .sort()
+        .join('|');
+}
+
+function createEmptyShardAssignmentSnapshot(): ShardAssignmentSnapshot {
+    return {
+        totalByAccountId: new Map(),
+        nicheByAccountId: new Map(),
+        totalByNiche: new Map(),
+        totalAssigned: 0,
+    };
+}
+
+function createCandidateAliasMap(candidates: CloudflareShardCandidate[]): Map<string, Set<string>> {
+    const aliasToAccountIds = new Map<string, Set<string>>();
+
+    const addAlias = (alias: string | null, accountId: string): void => {
+        if (!alias) return;
+        const normalizedAlias = normalizeKey(alias);
+        if (!normalizedAlias) return;
+        const existing = aliasToAccountIds.get(normalizedAlias);
+        if (existing) {
+            existing.add(accountId);
+            return;
+        }
+        aliasToAccountIds.set(normalizedAlias, new Set([accountId]));
+    };
+
+    for (const candidate of candidates) {
+        addAlias(candidate.accountId, candidate.accountId);
+        addAlias(candidate.key, candidate.accountId);
+        addAlias(candidate.accountRef, candidate.accountId);
+    }
+
+    return aliasToAccountIds;
+}
+
+function resolveMappedAccountId(
+    value: string,
+    aliasToAccountIds: Map<string, Set<string>>,
+): string | null {
+    const normalizedValue = normalizeKey(value);
+    if (!normalizedValue) return null;
+    const mapped = aliasToAccountIds.get(normalizedValue);
+    if (!mapped || mapped.size === 0) return null;
+    if (mapped.size === 1) return [...mapped][0] ?? null;
+    return [...mapped].sort()[0] ?? null;
+}
+
+async function loadShardAssignmentSnapshot(
+    candidates: CloudflareShardCandidate[],
+): Promise<ShardAssignmentSnapshot> {
+    if (candidates.length === 0) {
+        return createEmptyShardAssignmentSnapshot();
+    }
+
+    const now = Date.now();
+    const fingerprint = buildShardAssignmentFingerprint(candidates);
+    if (shardAssignmentCache
+        && shardAssignmentCache.expiresAt > now
+        && shardAssignmentCache.fingerprint === fingerprint) {
+        return shardAssignmentCache.snapshot;
+    }
+
+    if (shardAssignmentInFlight && shardAssignmentInFlight.fingerprint === fingerprint) {
+        return shardAssignmentInFlight.promise;
+    }
+
+    const promise = (async () => {
+        try {
+            const aliasToAccountIds = createCandidateAliasMap(candidates);
+            if (aliasToAccountIds.size === 0) {
+                return createEmptyShardAssignmentSnapshot();
+            }
+
+            const rows = await db
+                .select({
+                    cloudflareAccount: domains.cloudflareAccount,
+                    niche: domains.niche,
+                })
+                .from(domains)
+                .where(isNull(domains.deletedAt));
+
+            const snapshot = createEmptyShardAssignmentSnapshot();
+            for (const row of rows) {
+                const accountRef = asNonEmptyString(row.cloudflareAccount);
+                if (!accountRef) continue;
+
+                const mappedAccountId = resolveMappedAccountId(accountRef, aliasToAccountIds);
+                if (!mappedAccountId) continue;
+
+                snapshot.totalAssigned += 1;
+                snapshot.totalByAccountId.set(
+                    mappedAccountId,
+                    (snapshot.totalByAccountId.get(mappedAccountId) ?? 0) + 1,
+                );
+
+                const normalizedNiche = normalizeNiche(row.niche);
+                if (!normalizedNiche) continue;
+
+                snapshot.totalByNiche.set(
+                    normalizedNiche,
+                    (snapshot.totalByNiche.get(normalizedNiche) ?? 0) + 1,
+                );
+
+                const nicheByAccount = snapshot.nicheByAccountId.get(mappedAccountId);
+                if (nicheByAccount) {
+                    nicheByAccount.set(
+                        normalizedNiche,
+                        (nicheByAccount.get(normalizedNiche) ?? 0) + 1,
+                    );
+                } else {
+                    snapshot.nicheByAccountId.set(mappedAccountId, new Map([[normalizedNiche, 1]]));
+                }
+            }
+
+            shardAssignmentCache = {
+                expiresAt: Date.now() + SHARD_ASSIGNMENT_CACHE_TTL_MS,
+                fingerprint,
+                snapshot,
+            };
+            return snapshot;
+        } catch {
+            // Missing table or transient DB issue should not block routing.
+            return createEmptyShardAssignmentSnapshot();
+        }
+    })();
+
+    shardAssignmentInFlight = {
+        fingerprint,
+        promise,
+    };
+
+    try {
+        return await promise;
+    } finally {
+        if (shardAssignmentInFlight?.fingerprint === fingerprint) {
+            shardAssignmentInFlight = null;
+        }
+    }
 }
 
 async function resolveConnectionAccountId(
@@ -589,6 +773,80 @@ function resolveHealthMultiplier(
     return penaltyMultiplier * reliabilityMultiplier;
 }
 
+function resolveCapacityMultiplier(
+    candidate: CloudflareShardCandidate,
+    snapshot: ShardAssignmentSnapshot,
+): number {
+    const target = resolveTargetDomainsPerShard();
+    if (target <= 0) return 1;
+
+    const currentCount = snapshot.totalByAccountId.get(candidate.accountId) ?? 0;
+    const projectedCount = currentCount + 1;
+    const utilization = projectedCount / target;
+    if (utilization <= 1) {
+        return 1 + Math.min(0.35, (1 - utilization) * 0.35);
+    }
+    if (utilization <= 1.2) return 0.9;
+    if (utilization <= 1.5) return 0.75;
+    if (utilization <= 2) return 0.55;
+    return 0.35;
+}
+
+type NicheBalanceContext = {
+    minCount: number;
+    maxCount: number;
+    targetCountPerShard: number;
+    countByAccountId: Map<string, number>;
+};
+
+function buildNicheBalanceContext(
+    candidates: CloudflareShardCandidate[],
+    snapshot: ShardAssignmentSnapshot,
+    domainNiche: string | null | undefined,
+): NicheBalanceContext | null {
+    const normalizedNiche = normalizeNiche(domainNiche);
+    if (!normalizedNiche) return null;
+
+    const countByAccountId = new Map<string, number>();
+    for (const candidate of candidates) {
+        const count = snapshot.nicheByAccountId.get(candidate.accountId)?.get(normalizedNiche) ?? 0;
+        countByAccountId.set(candidate.accountId, count);
+    }
+
+    if (countByAccountId.size === 0) return null;
+    const values = [...countByAccountId.values()];
+    const minCount = Math.min(...values);
+    const maxCount = Math.max(...values);
+    const globalNicheCount = snapshot.totalByNiche.get(normalizedNiche) ?? 0;
+    const targetCountPerShard = (globalNicheCount + 1) / Math.max(1, candidates.length);
+
+    return {
+        minCount,
+        maxCount,
+        targetCountPerShard,
+        countByAccountId,
+    };
+}
+
+function resolveNicheBalanceMultiplier(
+    candidate: CloudflareShardCandidate,
+    context: NicheBalanceContext | null,
+): number {
+    if (!context) return 1;
+
+    const candidateCount = context.countByAccountId.get(candidate.accountId) ?? 0;
+    const spread = context.maxCount - context.minCount;
+    const spreadMultiplier = spread > 0
+        ? 1.2 - ((candidateCount - context.minCount) / spread) * 0.5
+        : 1;
+
+    const projected = candidateCount + 1;
+    const deviationFromTarget = Math.abs(projected - context.targetCountPerShard);
+    const targetMultiplier = Math.max(0.8, 1 - deviationFromTarget * 0.12);
+
+    return spreadMultiplier * targetMultiplier;
+}
+
 function deterministicShardScore(
     domain: string,
     candidate: CloudflareShardCandidate,
@@ -602,6 +860,8 @@ function rankCandidatesForDomain(
     candidates: CloudflareShardCandidate[],
     policy: RoutingPolicy,
     warnings: string[],
+    assignmentSnapshot: ShardAssignmentSnapshot,
+    domainNiche?: string | null,
 ): CloudflareShardCandidate[] {
     if (candidates.length === 0) return [];
 
@@ -628,6 +888,20 @@ function rankCandidatesForDomain(
         );
     }
 
+    const targetDomainsPerShard = resolveTargetDomainsPerShard();
+    if (targetDomainsPerShard > 0) {
+        const allAtOrAboveTarget = basePool.every((candidate) =>
+            (assignmentSnapshot.totalByAccountId.get(candidate.accountId) ?? 0) >= targetDomainsPerShard,
+        );
+        if (allAtOrAboveTarget) {
+            warnings.push(
+                `All Cloudflare shards are at/above the target capacity of ${targetDomainsPerShard} domains; routing will use best-fit balancing.`,
+            );
+        }
+    }
+
+    const nicheBalance = buildNicheBalanceContext(basePool, assignmentSnapshot, domainNiche);
+
     type RankedCandidate = {
         candidate: CloudflareShardCandidate;
         score: number;
@@ -639,7 +913,13 @@ function rankCandidatesForDomain(
         const regionPriority = resolveRegionPriority(candidate.region, policy);
         const regionMultiplier = resolveRegionMultiplier(regionPriority);
         const healthMultiplier = resolveHealthMultiplier(candidate, health, nowMs);
-        const dynamicWeight = candidate.baseWeight * regionMultiplier * healthMultiplier;
+        const capacityMultiplier = resolveCapacityMultiplier(candidate, assignmentSnapshot);
+        const nicheMultiplier = resolveNicheBalanceMultiplier(candidate, nicheBalance);
+        const dynamicWeight = candidate.baseWeight
+            * regionMultiplier
+            * healthMultiplier
+            * capacityMultiplier
+            * nicheMultiplier;
         const score = deterministicShardScore(domain, candidate) * dynamicWeight;
         return {
             candidate,
@@ -670,8 +950,17 @@ function sortFallbackCandidates(
     candidates: CloudflareShardCandidate[],
     policy: RoutingPolicy,
     warnings: string[],
+    assignmentSnapshot: ShardAssignmentSnapshot,
+    domainNiche?: string | null,
 ): CloudflareShardCandidate[] {
-    return rankCandidatesForDomain(domain, candidates, policy, warnings);
+    return rankCandidatesForDomain(
+        domain,
+        candidates,
+        policy,
+        warnings,
+        assignmentSnapshot,
+        domainNiche,
+    );
 }
 
 function normalizeFallbackCount(input?: number): number {
@@ -824,6 +1113,8 @@ export function recordCloudflareHostShardOutcome(
 export function clearCloudflareHostShardCache(): void {
     shardCache = null;
     shardCacheInFlight = null;
+    shardAssignmentCache = null;
+    shardAssignmentInFlight = null;
     shardHealthState.clear();
     persistentShardHealthCache = null;
     persistentShardHealthInFlight = null;
@@ -856,6 +1147,11 @@ export async function resolveCloudflareHostShardPlan(
         applyPersistentShardHealth(persistentHealth);
     }
 
+    let assignmentSnapshot = createEmptyShardAssignmentSnapshot();
+    if (candidates.length > 0) {
+        assignmentSnapshot = await loadShardAssignmentSnapshot(candidates);
+    }
+
     if (override) {
         const matched = findOverrideCandidate(override, candidates);
         if (matched) {
@@ -875,6 +1171,8 @@ export async function resolveCloudflareHostShardPlan(
                 candidates.filter((candidate) => candidate.accountId !== matched.accountId),
                 routingPolicy,
                 warnings,
+                assignmentSnapshot,
+                input.domainNiche,
             );
             const fallbacks = dedupeShards(fallbackCandidates.map((candidate) => candidateToShard(candidate, 'hash_bucket')))
                 .slice(0, maxFallbacks);
@@ -900,6 +1198,8 @@ export async function resolveCloudflareHostShardPlan(
                         .filter((candidate) => candidate.accountId !== domainReference.cloudflare.accountId),
                     routingPolicy,
                     warnings,
+                    assignmentSnapshot,
+                    input.domainNiche,
                 )
                     .map((candidate) => candidateToShard(candidate, 'hash_bucket')),
             ).slice(0, maxFallbacks);
@@ -914,7 +1214,14 @@ export async function resolveCloudflareHostShardPlan(
     }
 
     if (candidates.length > 0) {
-        const rankedCandidates = rankCandidatesForDomain(input.domain, candidates, routingPolicy, warnings);
+        const rankedCandidates = rankCandidatesForDomain(
+            input.domain,
+            candidates,
+            routingPolicy,
+            warnings,
+            assignmentSnapshot,
+            input.domainNiche,
+        );
         const primaryCandidate = rankedCandidates[0]!;
         const primary = candidateToShard(primaryCandidate, 'hash_bucket');
         primary.warnings.push(...warnings);

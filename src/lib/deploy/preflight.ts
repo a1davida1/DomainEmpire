@@ -25,6 +25,7 @@ type DeployPreflightInput = {
     registrar: string | null | undefined;
     addCustomDomain: boolean;
     cloudflareAccount?: string | null;
+    domainNiche?: string | null;
 };
 
 function hasCloudflareBuildCredentials(shardToken?: string | null): boolean {
@@ -37,6 +38,7 @@ export async function runDeployPreflight(input: DeployPreflightInput): Promise<D
     const hostShardPlan = await resolveCloudflareHostShardPlan({
         domain: input.domain,
         cloudflareAccount: input.cloudflareAccount ?? null,
+        domainNiche: input.domainNiche ?? null,
     });
     const hostShard = hostShardPlan.primary;
 

@@ -11,6 +11,7 @@ const CF_GRAPHQL = 'https://api.cloudflare.com/client/v4/graphql';
 const MAX_RETRIES = 3;
 const BASE_RETRY_DELAY_MS = 1_000;
 const MIN_RATE_LIMIT_COOLDOWN_MS = 2_000;
+const MAX_RATE_LIMIT_COOLDOWN_MS = 5 * 60 * 1000;
 
 let rateLimitCooldownUntilMs = 0;
 let rateLimitCooldownReason: string | null = null;
@@ -70,14 +71,14 @@ function parseRetryAfterMs(header: string | null): number | null {
 
     const seconds = Number.parseInt(header, 10);
     if (Number.isFinite(seconds) && seconds >= 0) {
-        return Math.min(60_000, Math.max(250, seconds * 1000));
+        return Math.min(MAX_RATE_LIMIT_COOLDOWN_MS, Math.max(250, seconds * 1000));
     }
 
     const dateMs = Date.parse(header);
     if (!Number.isNaN(dateMs)) {
         const delta = dateMs - Date.now();
         if (delta > 0) {
-            return Math.min(60_000, Math.max(250, delta));
+            return Math.min(MAX_RATE_LIMIT_COOLDOWN_MS, Math.max(250, delta));
         }
     }
 
@@ -94,7 +95,7 @@ function getRateLimitCooldownRemainingMs(nowMs = Date.now()): number {
 }
 
 function setRateLimitCooldown(waitMs: number, reason: string): void {
-    const boundedWaitMs = Math.max(MIN_RATE_LIMIT_COOLDOWN_MS, waitMs);
+    const boundedWaitMs = Math.min(MAX_RATE_LIMIT_COOLDOWN_MS, Math.max(MIN_RATE_LIMIT_COOLDOWN_MS, waitMs));
     const candidateUntil = Date.now() + boundedWaitMs;
     if (candidateUntil > rateLimitCooldownUntilMs) {
         rateLimitCooldownUntilMs = candidateUntil;
@@ -315,6 +316,12 @@ export async function getDomainAnalyticsTyped(domain: string, days = 30): Promis
         const data = await fetchDomainAnalyticsRaw(domain, days);
         return { status: 'ok', data };
     } catch (error) {
+        if (error instanceof CloudflareApiError && error.status === 429) {
+            const cooldown = getCloudflareApiRateLimitCooldown();
+            const seconds = Math.max(0, Math.ceil(cooldown.remainingMs / 1000));
+            const suffix = seconds > 0 ? ` (retry in ~${seconds}s)` : '';
+            return { status: 'error', message: `429 Cloudflare rate-limited${suffix}` };
+        }
         return { status: 'error', message: error instanceof Error ? error.message : 'Unknown error' };
     }
 }

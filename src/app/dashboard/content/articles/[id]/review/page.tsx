@@ -235,50 +235,66 @@ export default function ArticleReviewPage() {
     async function submitQa() {
         if (!qaData) return;
         setSubmitting(true);
-        const results: Record<string, { checked: boolean }> = {};
-        for (const item of qaData.checklist.items) {
-            results[item.id] = { checked: !!checkedItems[item.id] };
+        setActionError('');
+        try {
+            const results: Record<string, { checked: boolean }> = {};
+            for (const item of qaData.checklist.items) {
+                results[item.id] = { checked: !!checkedItems[item.id] };
+            }
+
+            const submitRes = await fetch(`/api/articles/${articleId}/qa`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    results,
+                    templateId: qaData.checklist.id,
+                    unitTestPassId: unitTestPassId.trim() || null,
+                }),
+            });
+            if (!submitRes.ok) {
+                const body = await submitRes.json().catch(() => ({}));
+                throw new Error(body.error || 'Failed to submit QA results');
+            }
+
+            const res = await fetch(`/api/articles/${articleId}/qa`);
+            if (res.ok) {
+                setQaData(await res.json());
+            }
+        } catch (err) {
+            setActionError(err instanceof Error ? err.message : 'QA submission failed');
+        } finally {
+            setSubmitting(false);
         }
-
-        await fetch(`/api/articles/${articleId}/qa`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                results,
-                templateId: qaData.checklist.id,
-                unitTestPassId: unitTestPassId.trim() || null,
-            }),
-        });
-
-        const res = await fetch(`/api/articles/${articleId}/qa`);
-        setQaData(await res.json());
-        setSubmitting(false);
     }
 
     async function transitionStatus(newStatus: string) {
         setSubmitting(true);
         setActionError('');
 
-        const res = await fetch(`/api/articles/${articleId}/status`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                status: newStatus,
-                rationale,
-                rationaleDetails: buildStructuredRationale(),
-            }),
-        });
+        try {
+            const res = await fetch(`/api/articles/${articleId}/status`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    status: newStatus,
+                    rationale,
+                    rationaleDetails: buildStructuredRationale(),
+                }),
+            });
 
-        const data = await res.json();
-        if (!res.ok) {
-            setActionError(data.error || 'Failed to update status');
+            const data = await res.json();
+            if (!res.ok) {
+                setActionError(data.error || 'Failed to update status');
+                return;
+            }
+
+            router.push('/dashboard/review');
+            router.refresh();
+        } catch (err) {
+            setActionError(err instanceof Error ? err.message : 'Status transition failed');
+        } finally {
             setSubmitting(false);
-            return;
         }
-
-        setSubmitting(false);
-        router.push('/dashboard/review');
-        router.refresh();
     }
 
     async function expertSignOffAndPublish() {
@@ -324,26 +340,30 @@ export default function ArticleReviewPage() {
         }
 
         // Step 2: Now transition to published (canTransition will find the expert_signed event)
-        const publishRes = await fetch(`/api/articles/${articleId}/status`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                status: 'published',
-                rationale,
-                rationaleDetails: buildStructuredRationale(),
-            }),
-        });
+        try {
+            const publishRes = await fetch(`/api/articles/${articleId}/status`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    status: 'published',
+                    rationale,
+                    rationaleDetails: buildStructuredRationale(),
+                }),
+            });
 
-        const publishData = await publishRes.json();
-        if (!publishRes.ok) {
-            setActionError(publishData.error || 'Failed to publish after sign-off');
+            const publishData = await publishRes.json();
+            if (!publishRes.ok) {
+                setActionError(publishData.error || 'Failed to publish after sign-off');
+                return;
+            }
+
+            router.push('/dashboard/review');
+            router.refresh();
+        } catch (err) {
+            setActionError(err instanceof Error ? err.message : 'Publish request failed');
+        } finally {
             setSubmitting(false);
-            return;
         }
-
-        setSubmitting(false);
-        router.push('/dashboard/review');
-        router.refresh();
     }
 
     if (loading) {
@@ -499,6 +519,7 @@ export default function ArticleReviewPage() {
                             <Label htmlFor="evidenceQuality">Evidence quality</Label>
                             <select
                                 id="evidenceQuality"
+                                aria-label="Evidence quality"
                                 className="w-full rounded-lg border bg-background p-2 text-sm"
                                 value={evidenceQuality}
                                 onChange={(event) => setEvidenceQuality(event.target.value as 'strong' | 'moderate' | 'weak')}
@@ -512,6 +533,7 @@ export default function ArticleReviewPage() {
                             <Label htmlFor="riskLevel">Risk level</Label>
                             <select
                                 id="riskLevel"
+                                aria-label="Risk level"
                                 className="w-full rounded-lg border bg-background p-2 text-sm"
                                 value={riskLevel}
                                 onChange={(event) => setRiskLevel(event.target.value as 'low' | 'medium' | 'high')}
@@ -573,6 +595,7 @@ export default function ArticleReviewPage() {
                                 <Label htmlFor="methodologyCheck">Methodology check</Label>
                                 <select
                                     id="methodologyCheck"
+                                    aria-label="Methodology check"
                                     className="w-full rounded-lg border bg-background p-2 text-sm"
                                     value={methodologyCheck}
                                     onChange={(event) => setMethodologyCheck(event.target.value as 'passed' | 'needs_changes' | 'missing')}
@@ -586,6 +609,7 @@ export default function ArticleReviewPage() {
                                 <Label htmlFor="formulaCoverage">Formula coverage</Label>
                                 <select
                                     id="formulaCoverage"
+                                    aria-label="Formula coverage"
                                     className="w-full rounded-lg border bg-background p-2 text-sm"
                                     value={formulaCoverage}
                                     onChange={(event) => setFormulaCoverage(event.target.value as 'full' | 'partial' | 'none')}
@@ -620,6 +644,7 @@ export default function ArticleReviewPage() {
                                 <Label htmlFor="criteriaCoverage">Criteria coverage</Label>
                                 <select
                                     id="criteriaCoverage"
+                                    aria-label="Criteria coverage"
                                     className="w-full rounded-lg border bg-background p-2 text-sm"
                                     value={criteriaCoverage}
                                     onChange={(event) => setCriteriaCoverage(event.target.value as 'complete' | 'partial' | 'insufficient')}
@@ -633,6 +658,7 @@ export default function ArticleReviewPage() {
                                 <Label htmlFor="sourceDiversity">Source diversity</Label>
                                 <select
                                     id="sourceDiversity"
+                                    aria-label="Source diversity"
                                     className="w-full rounded-lg border bg-background p-2 text-sm"
                                     value={sourceDiversity}
                                     onChange={(event) => setSourceDiversity(event.target.value as 'single' | 'multiple')}
@@ -674,6 +700,7 @@ export default function ArticleReviewPage() {
                                 <Label htmlFor="disclosurePlacement">Disclosure placement</Label>
                                 <select
                                     id="disclosurePlacement"
+                                    aria-label="Disclosure placement"
                                     className="w-full rounded-lg border bg-background p-2 text-sm"
                                     value={disclosurePlacement}
                                     onChange={(event) => setDisclosurePlacement(event.target.value as 'above_fold' | 'in_form' | 'both' | 'missing')}
@@ -693,6 +720,7 @@ export default function ArticleReviewPage() {
                                 <Label htmlFor="medicalSafetyReview">Medical safety review</Label>
                                 <select
                                     id="medicalSafetyReview"
+                                    aria-label="Medical safety review"
                                     className="w-full rounded-lg border bg-background p-2 text-sm"
                                     value={medicalSafetyReview}
                                     onChange={(event) => setMedicalSafetyReview(event.target.value as 'complete' | 'partial' | 'missing')}
@@ -706,6 +734,7 @@ export default function ArticleReviewPage() {
                                 <Label htmlFor="harmRisk">Harm risk</Label>
                                 <select
                                     id="harmRisk"
+                                    aria-label="Harm risk"
                                     className="w-full rounded-lg border bg-background p-2 text-sm"
                                     value={harmRisk}
                                     onChange={(event) => setHarmRisk(event.target.value as 'low' | 'medium' | 'high')}
@@ -775,6 +804,7 @@ export default function ArticleReviewPage() {
                                 <Label htmlFor="factualityAssessment">Factuality assessment</Label>
                                 <select
                                     id="factualityAssessment"
+                                    aria-label="Factuality assessment"
                                     className="w-full rounded-lg border bg-background p-2 text-sm"
                                     value={factualityAssessment}
                                     onChange={(event) => setFactualityAssessment(event.target.value as 'verified' | 'partially_verified' | 'unclear')}
@@ -788,6 +818,7 @@ export default function ArticleReviewPage() {
                                 <Label htmlFor="structureQuality">Structure quality</Label>
                                 <select
                                     id="structureQuality"
+                                    aria-label="Structure quality"
                                     className="w-full rounded-lg border bg-background p-2 text-sm"
                                     value={structureQuality}
                                     onChange={(event) => setStructureQuality(event.target.value as 'strong' | 'adequate' | 'weak')}

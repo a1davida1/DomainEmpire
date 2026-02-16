@@ -10,6 +10,7 @@ const ENABLED_KEY = 'queue_auto_processor_enabled';
 const MAX_JOBS_KEY = 'queue_auto_processor_max_jobs';
 const TAB_ID_KEY = 'queue_background_processor_tab_id';
 const DEFAULT_MAX_JOBS = 10;
+const INLINE_WORKER_ENABLED = process.env.NEXT_PUBLIC_INLINE_WORKER === '1';
 
 type QueueStatsPayload = {
     stats?: {
@@ -79,6 +80,7 @@ export function QueueBackgroundProcessor() {
     const tabIdRef = useRef<string | null>(null);
 
     useEffect(() => {
+        if (INLINE_WORKER_ENABLED) return;
         if (typeof window === 'undefined') return;
         const stored = window.localStorage.getItem(ENABLED_KEY);
         if (stored === null) {
@@ -87,6 +89,7 @@ export function QueueBackgroundProcessor() {
     }, []);
 
     useEffect(() => {
+        if (INLINE_WORKER_ENABLED) return;
         if (typeof window === 'undefined') return;
 
         tabIdRef.current = tabIdRef.current ?? ensureTabId();
@@ -191,6 +194,10 @@ export function QueueBackgroundProcessor() {
             }
         };
     }, [pathname]);
+
+    if (INLINE_WORKER_ENABLED) {
+        return null;
+    }
 
     return null;
 }

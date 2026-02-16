@@ -185,6 +185,7 @@ export async function POST(request: NextRequest) {
     const rows = await db.select({
         id: domains.id,
         domain: domains.domain,
+        niche: domains.niche,
         registrar: domains.registrar,
         cloudflareAccount: domains.cloudflareAccount,
         profileId: domainRegistrarProfiles.id,
@@ -224,6 +225,7 @@ export async function POST(request: NextRequest) {
         const plan = await resolveCloudflareHostShardPlan({
             domain: row.domain,
             cloudflareAccount: row.cloudflareAccount ?? null,
+            domainNiche: row.niche ?? null,
             maxFallbacks: 3,
         });
         shardPlanByDomainId.set(row.id, plan.all);

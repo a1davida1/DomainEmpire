@@ -84,6 +84,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         const [domainRow] = await db.select({
             id: domains.id,
             domain: domains.domain,
+            niche: domains.niche,
             cloudflareAccount: domains.cloudflareAccount,
         })
             .from(domains)
@@ -97,8 +98,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         const shardPlan = await resolveCloudflareHostShardPlan({
             domain: domainRow.domain,
             cloudflareAccount: domainRow.cloudflareAccount ?? null,
+            domainNiche: domainRow.niche ?? null,
             maxFallbacks: 3,
         });
+        const shouldPersistShard = !domainRow.cloudflareAccount || domainRow.cloudflareAccount.trim().length === 0;
 
         for (const shard of shardPlan.all) {
             const existing = await getZoneNameservers(domainRow.domain, shard.cloudflare);
@@ -108,6 +111,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
                 accountId: shard.cloudflare.accountId ?? null,
                 sourceConnectionId: shard.connectionId ?? null,
             }, 'success');
+            if (shouldPersistShard) {
+                await db.update(domains)
+                    .set({
+                        cloudflareAccount: shard.shardKey,
+                        updatedAt: new Date(),
+                    })
+                    .where(eq(domains.id, domainRow.id));
+            }
             return NextResponse.json({
                 success: true,
                 created: false,
@@ -150,6 +161,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
                 accountId: shard.cloudflare.accountId ?? null,
                 sourceConnectionId: shard.connectionId ?? null,
             }, 'success');
+            if (shouldPersistShard) {
+                await db.update(domains)
+                    .set({
+                        cloudflareAccount: shard.shardKey,
+                        updatedAt: new Date(),
+                    })
+                    .where(eq(domains.id, domainRow.id));
+            }
 
             return NextResponse.json({
                 success: true,

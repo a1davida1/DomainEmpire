@@ -54,8 +54,9 @@ export function Breadcrumbs() {
         fetch(`/api/domains/${domainUuid}`)
             .then(r => r.ok ? r.json() : null)
             .then(data => {
-                if (active && data?.domain) {
-                    setDomainNames(prev => ({ ...prev, [domainUuid]: data.domain }));
+                const name = typeof data?.domain === 'string' ? data.domain : data?.domain?.domain;
+                if (active && typeof name === 'string') {
+                    setDomainNames(prev => ({ ...prev, [domainUuid]: name }));
                 }
             })
             .catch((err) => console.error('[Breadcrumbs] Domain name fetch failed:', err));

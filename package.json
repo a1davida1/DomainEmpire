@@ -3,8 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "NODE_OPTIONS=--max-old-space-size=3072 next build",
+    "dev": "NEXT_PUBLIC_INLINE_WORKER=1 bash -lc 'if [ \"${DISABLE_INLINE_WORKER:-0}\" = \"1\" ]; then exec next dev; fi; npx -y tsx src/scripts/worker.ts & WORKER_PID=$!; trap \"kill ${WORKER_PID}\" EXIT INT TERM; exec next dev'",
+    "dev:web": "next dev",
+    "build": "NODE_ENV=production NODE_OPTIONS=--max-old-space-size=3072 next build",
     "start": "next start",
     "lint": "eslint",
     "db:push": "drizzle-kit push",

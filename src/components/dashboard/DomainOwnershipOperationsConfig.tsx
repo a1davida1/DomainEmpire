@@ -15,6 +15,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
+import { CheckCircle2, Circle, ClipboardCopy } from 'lucide-react';
 
 interface Props {
     domainId: string;
@@ -234,6 +235,24 @@ function formatStageLabel(stage: NameserverOnboardingStage): string {
     return stage.replaceAll('_', ' ');
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readStringArray(value: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+    return value.filter((entry): entry is string => typeof entry === 'string');
+}
+
+function nameserverSetsMatch(left: string[], right: string[]): boolean {
+    const normalize = (value: string) => value.trim().toLowerCase().replace(/\.+$/g, '');
+    const normalizedLeft = [...new Set(left.map(normalize).filter(Boolean))];
+    const normalizedRight = [...new Set(right.map(normalize).filter(Boolean))];
+    if (normalizedLeft.length !== normalizedRight.length) return false;
+    const rightSet = new Set(normalizedRight);
+    return normalizedLeft.every((item) => rightSet.has(item));
+}
+
 export default function DomainOwnershipOperationsConfig({ domainId }: Props) {
     const [payload, setPayload] = useState<OwnershipPayload | null>(null);
     const [dnsStatus, setDnsStatus] = useState<NameserverStatusPayload | null>(null);
@@ -245,15 +264,58 @@ export default function DomainOwnershipOperationsConfig({ domainId }: Props) {
     const [syncingRegistrar, setSyncingRegistrar] = useState(false);
     const [creatingZone, setCreatingZone] = useState(false);
     const [switchingNameservers, setSwitchingNameservers] = useState(false);
+    const [copyingNameservers, setCopyingNameservers] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [errorAction, setErrorAction] = useState<{ href: string; label: string } | null>(null);
     const [message, setMessage] = useState<string | null>(null);
 
     const canEdit = payload?.permissions?.canEdit ?? false;
-    const registrarForDns = (payload?.domain.registrar || '').toLowerCase();
+    const registrarForDns = typeof payload?.domain?.registrar === 'string'
+        ? payload.domain.registrar.toLowerCase()
+        : '';
     const canAutomateNameserverCutover = AUTOMATED_NS_REGISTRARS.has(registrarForDns);
-    const eventCount = payload?.events.length ?? 0;
-    const dnsStage = dnsStatus?.status.stage ?? null;
+    const events = Array.isArray(payload?.events) ? payload.events : [];
+    const eventCount = events.length;
+
+    const zone = isRecord(dnsStatus?.zone) ? dnsStatus.zone : null;
+    const registrar = isRecord(dnsStatus?.registrar) ? dnsStatus.registrar : null;
+    const liveDns = isRecord(dnsStatus?.liveDns) ? dnsStatus.liveDns : null;
+    const onboarding = isRecord(dnsStatus?.status) ? dnsStatus.status : null;
+    const actions = isRecord(dnsStatus?.actions) ? dnsStatus.actions : null;
+
+    const dnsStageRaw = typeof onboarding?.stage === 'string' ? onboarding.stage : null;
+    const dnsStage = (
+        dnsStageRaw === 'manual_required'
+        || dnsStageRaw === 'zone_missing'
+        || dnsStageRaw === 'ready_to_switch'
+        || dnsStageRaw === 'switch_recorded_waiting_dns'
+        || dnsStageRaw === 'propagating'
+        || dnsStageRaw === 'verified'
+    ) ? dnsStageRaw : null;
+
+    const zoneExists = zone?.exists === true;
+    const zoneNameservers = readStringArray(zone?.nameservers);
+    const zoneWarnings = readStringArray(zone?.warnings);
+    const zoneShardKey = typeof zone?.shardKey === 'string' ? zone.shardKey : null;
+
+    const registrarNameservers = readStringArray(registrar?.lastConfiguredNameservers);
+    const registrarSource = typeof registrar?.source === 'string' ? registrar.source : null;
+    const registrarLastUpdatedAt = typeof registrar?.lastUpdatedAt === 'string' ? registrar.lastUpdatedAt : null;
+
+    const liveDnsMatch = typeof liveDns?.matchToCloudflare === 'string' ? liveDns.matchToCloudflare : 'unknown';
+    const liveDnsNameservers = readStringArray(liveDns?.nameservers);
+    const liveDnsLookupError = typeof liveDns?.lookupError === 'string' ? liveDns.lookupError : null;
+    const liveDnsCheckedAt = typeof liveDns?.checkedAt === 'string' ? liveDns.checkedAt : null;
+
+    const statusSummary = typeof onboarding?.summary === 'string' ? onboarding.summary : 'Nameserver status unavailable.';
+    const statusNextAction = typeof onboarding?.nextAction === 'string' ? onboarding.nextAction : 'Refresh nameserver status.';
+
+    const canCreateZoneAction = actions?.canCreateZone === true;
+    const canSwitchNameserversAction = actions?.canSwitchNameservers === true;
+
+    const zoneReady = zoneNameservers.length >= 2;
+    const registrarSwitchRecorded = zoneReady && nameserverSetsMatch(registrarNameservers, zoneNameservers);
+    const liveDnsVerified = liveDnsMatch === 'match';
 
     const riskStyle = useMemo(() => {
         const risk = payload?.renewalRisk.risk ?? 'unknown';
@@ -486,6 +548,19 @@ export default function DomainOwnershipOperationsConfig({ domainId }: Props) {
         }
     }
 
+    async function copyCloudflareNameservers() {
+        if (!dnsStatus || dnsStatus.zone.nameservers.length === 0) return;
+        setCopyingNameservers(true);
+        try {
+            await navigator.clipboard.writeText(dnsStatus.zone.nameservers.join('\n'));
+            setMessage('Copied Cloudflare nameservers to clipboard.');
+        } catch {
+            setError('Unable to copy nameservers to clipboard.');
+        } finally {
+            setCopyingNameservers(false);
+        }
+    }
+
     async function syncRegistrarState() {
         if (!canEdit) return;
         setSyncingRegistrar(true);
@@ -642,55 +717,124 @@ export default function DomainOwnershipOperationsConfig({ domainId }: Props) {
                                 <div className="rounded border p-2">
                                     <p className="text-xs text-muted-foreground">Cloudflare Zone</p>
                                     <p className="mt-1 text-sm">
-                                        {dnsStatus.zone.exists ? 'Ready' : 'Missing'}
+                                        {zoneExists ? 'Ready' : 'Missing'}
                                     </p>
                                     <p className="mt-1 text-xs text-muted-foreground">
-                                        {formatNameserverList(dnsStatus.zone.nameservers)}
+                                        {formatNameserverList(zoneNameservers)}
                                     </p>
+                                    {zoneShardKey && (
+                                        <p className="mt-1 text-[11px] text-muted-foreground">
+                                            shard: {zoneShardKey}
+                                        </p>
+                                    )}
                                 </div>
                                 <div className="rounded border p-2">
                                     <p className="text-xs text-muted-foreground">Registrar Recorded</p>
                                     <p className="mt-1 text-sm">
-                                        {dnsStatus.registrar.lastConfiguredNameservers.length > 0 ? 'Switch recorded' : 'Not switched'}
+                                        {registrarNameservers.length > 0 ? 'Switch recorded' : 'Not switched'}
                                     </p>
                                     <p className="mt-1 text-xs text-muted-foreground">
-                                        {formatNameserverList(dnsStatus.registrar.lastConfiguredNameservers)}
+                                        {formatNameserverList(registrarNameservers)}
                                     </p>
+                                    {registrarSource && (
+                                        <p className="mt-1 text-[11px] text-muted-foreground">
+                                            source: {registrarSource}
+                                        </p>
+                                    )}
+                                    {registrarLastUpdatedAt && (
+                                        <p className="mt-1 text-[11px] text-muted-foreground">
+                                            updated: {formatTimestamp(registrarLastUpdatedAt)}
+                                        </p>
+                                    )}
                                 </div>
                                 <div className="rounded border p-2">
                                     <p className="text-xs text-muted-foreground">Live DNS</p>
                                     <p className="mt-1 text-sm capitalize">
-                                        {dnsStatus.liveDns.matchToCloudflare.replaceAll('_', ' ')}
+                                        {liveDnsMatch.replaceAll('_', ' ')}
                                     </p>
                                     <p className="mt-1 text-xs text-muted-foreground">
-                                        {dnsStatus.liveDns.lookupError
-                                            ? `Lookup error: ${dnsStatus.liveDns.lookupError}`
-                                            : formatNameserverList(dnsStatus.liveDns.nameservers)}
+                                        {liveDnsLookupError
+                                            ? `Lookup error: ${liveDnsLookupError}`
+                                            : formatNameserverList(liveDnsNameservers)}
+                                    </p>
+                                    <p className="mt-1 text-[11px] text-muted-foreground">
+                                        checked: {formatTimestamp(liveDnsCheckedAt)}
+                                    </p>
+                                </div>
+                            </div>
+
+                            {zoneWarnings.length > 0 && (
+                                <details className="rounded border bg-amber-50 p-2 text-xs text-amber-900">
+                                    <summary className="cursor-pointer font-medium">
+                                        Cloudflare shard warnings ({zoneWarnings.length})
+                                    </summary>
+                                    <div className="mt-2 space-y-1">
+                                        {zoneWarnings.slice(0, 6).map((warning, idx) => (
+                                            <p key={`${warning}-${idx}`}>{warning}</p>
+                                        ))}
+                                    </div>
+                                </details>
+                            )}
+
+                            <div className="grid gap-2 md:grid-cols-3">
+                                <div className="rounded border p-2 text-sm">
+                                    <p className="text-xs text-muted-foreground">Step 1</p>
+                                    <p className="mt-1 flex items-center gap-1">
+                                        {zoneReady ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <Circle className="h-4 w-4 text-muted-foreground" />}
+                                        Create Cloudflare zone
+                                    </p>
+                                </div>
+                                <div className="rounded border p-2 text-sm">
+                                    <p className="text-xs text-muted-foreground">Step 2</p>
+                                    <p className="mt-1 flex items-center gap-1">
+                                        {registrarSwitchRecorded ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <Circle className="h-4 w-4 text-muted-foreground" />}
+                                        Switch registrar nameservers
+                                    </p>
+                                </div>
+                                <div className="rounded border p-2 text-sm">
+                                    <p className="text-xs text-muted-foreground">Step 3</p>
+                                    <p className="mt-1 flex items-center gap-1">
+                                        {liveDnsVerified ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <Circle className="h-4 w-4 text-muted-foreground" />}
+                                        Verify live DNS match
                                     </p>
                                 </div>
                             </div>
 
                             <div className="rounded border bg-muted/20 p-2">
-                                <p className="text-sm">{dnsStatus.status.summary}</p>
-                                <p className="text-xs text-muted-foreground mt-1">{dnsStatus.status.nextAction}</p>
+                                <p className="text-sm">{statusSummary}</p>
+                                <p className="text-xs text-muted-foreground mt-1">{statusNextAction}</p>
                             </div>
 
                             <div className="flex flex-wrap gap-2">
                                 <Button
+                                    onClick={copyCloudflareNameservers}
+                                    disabled={copyingNameservers || zoneNameservers.length === 0}
+                                    variant="outline"
+                                >
+                                    <ClipboardCopy className="mr-2 h-4 w-4" />
+                                    {copyingNameservers ? 'Copying...' : 'Copy Cloudflare NS'}
+                                </Button>
+                                <Button
                                     onClick={createCloudflareZone}
-                                    disabled={!canEdit || creatingZone || !dnsStatus.actions.canCreateZone}
+                                    disabled={!canEdit || creatingZone || !canCreateZoneAction}
                                     variant="secondary"
                                 >
                                     {creatingZone ? 'Creating Zone...' : 'Create Cloudflare Zone'}
                                 </Button>
                                 <Button
                                     onClick={switchNameserversToCloudflare}
-                                    disabled={!canEdit || switchingNameservers || !dnsStatus.actions.canSwitchNameservers || !canAutomateNameserverCutover}
+                                    disabled={!canEdit || switchingNameservers || !canSwitchNameserversAction || !canAutomateNameserverCutover}
                                     variant="secondary"
                                 >
                                     {switchingNameservers ? 'Switching DNS...' : 'Switch Nameservers to Cloudflare'}
                                 </Button>
                             </div>
+                            {!canAutomateNameserverCutover && (
+                                <p className="text-xs text-muted-foreground">
+                                    This registrar is not supported for automated cutover yet. Use the copied Cloudflare nameservers in your
+                                    registrar panel, then click Refresh Status.
+                                </p>
+                            )}
                         </div>
                     )}
                 </div>
@@ -887,7 +1031,7 @@ export default function DomainOwnershipOperationsConfig({ domainId }: Props) {
                         <p className="mt-2 text-sm text-muted-foreground">No ownership events recorded yet.</p>
                     ) : (
                         <div className="mt-3 space-y-2">
-                            {payload.events.map((event) => (
+                            {events.map((event) => (
                                 <div key={event.id} className="rounded border p-2">
                                     <div className="flex items-center justify-between gap-2">
                                         <p className="text-sm font-medium">{event.summary}</p>

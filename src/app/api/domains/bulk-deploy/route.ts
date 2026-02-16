@@ -41,6 +41,7 @@ export async function POST(request: NextRequest) {
             .select({
                 id: domains.id,
                 domain: domains.domain,
+                niche: domains.niche,
                 registrar: domains.registrar,
                 cloudflareAccount: domains.cloudflareAccount,
             })
@@ -59,6 +60,7 @@ export async function POST(request: NextRequest) {
                     registrar: domain.registrar,
                     addCustomDomain,
                     cloudflareAccount: domain.cloudflareAccount ?? null,
+                    domainNiche: domain.niche ?? null,
                 });
             } catch (preflightError) {
                 const message = preflightError instanceof Error ? preflightError.message : 'Unknown preflight error';

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Loader2, Sparkles, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 
 export function GenerateArticleButton({ domainId, hasArticles }: { domainId: string; hasArticles: boolean }) {
     const router = useRouter();
@@ -37,10 +38,15 @@ export function GenerateArticleButton({ domainId, hasArticles }: { domainId: str
     }
 
     return (
-        <Button size="sm" onClick={handleSeed} disabled={loading}>
-            {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-            {hasArticles ? 'Generate More' : 'Generate Articles'}
-        </Button>
+        <Tooltip>
+            <TooltipTrigger asChild>
+                <Button size="sm" onClick={handleSeed} disabled={loading}>
+                    {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                    {hasArticles ? 'Generate More' : 'Generate Articles'}
+                </Button>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-xs">Queue 5 new articles through the AI pipeline (keyword research → outline → draft → humanize → SEO → meta tags).</TooltipContent>
+        </Tooltip>
     );
 }
 
@@ -126,8 +132,13 @@ export function DeleteDomainButton({ domainId, domainName }: { domainId: string;
     }
 
     return (
-        <Button variant="destructive" onClick={() => setConfirming(true)}>
-            Delete Domain
-        </Button>
+        <Tooltip>
+            <TooltipTrigger asChild>
+                <Button variant="destructive" onClick={() => setConfirming(true)}>
+                    Delete Domain
+                </Button>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-xs">Permanently remove this domain and all its articles, keywords, queue jobs, and deployment data. This cannot be undone.</TooltipContent>
+        </Tooltip>
     );
 }

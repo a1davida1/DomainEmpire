@@ -32,6 +32,11 @@ vi.mock('@/lib/db', () => ({
         rateLimitCount: 'rate_limit_count',
         failureCount: 'failure_count',
     },
+    domains: {
+        cloudflareAccount: 'cloudflare_account',
+        niche: 'niche',
+        deletedAt: 'deleted_at',
+    },
 }));
 
 vi.mock('@/lib/security/encryption', () => ({
@@ -240,5 +245,114 @@ describe('cloudflare host sharding', () => {
 
         expect(plan.primary.region).toBe('us-east');
         expect(plan.primary.shardKey).toBe('a');
+    });
+
+    it('biases toward lower-capacity shards when one shard is overloaded', async () => {
+        const shardRows = [
+            {
+                id: 'connection-a',
+                displayName: 'Shard A',
+                config: {
+                    shardKey: 'a',
+                    accountId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                },
+                encryptedCredential: 'cred-a',
+            },
+            {
+                id: 'connection-b',
+                displayName: 'Shard B',
+                config: {
+                    shardKey: 'b',
+                    accountId: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+                },
+                encryptedCredential: 'cred-b',
+            },
+        ];
+        const assignmentRows = [
+            ...Array.from({ length: 120 }, (_, index) => ({
+                cloudflareAccount: 'a',
+                niche: index % 2 === 0 ? 'legal' : 'insurance',
+            })),
+            ...Array.from({ length: 8 }, (_, index) => ({
+                cloudflareAccount: 'b',
+                niche: index % 2 === 0 ? 'legal' : 'insurance',
+            })),
+        ];
+
+        mockSelectWhere
+            .mockResolvedValueOnce(shardRows)
+            .mockResolvedValueOnce([])
+            .mockResolvedValueOnce(assignmentRows);
+
+        let selectedA = 0;
+        let selectedB = 0;
+        for (let index = 0; index < 24; index += 1) {
+            const plan = await resolveCloudflareHostShardPlan({
+                domain: `capacity-bias-${index}.example`,
+            });
+            if (plan.primary.shardKey === 'a') selectedA += 1;
+            if (plan.primary.shardKey === 'b') selectedB += 1;
+        }
+
+        expect(selectedB).toBeGreaterThan(selectedA);
+    });
+
+    it('balances same-niche placement across shards', async () => {
+        const shardRows = [
+            {
+                id: 'connection-a',
+                displayName: 'Shard A',
+                config: {
+                    shardKey: 'a',
+                    accountId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                },
+                encryptedCredential: 'cred-a',
+            },
+            {
+                id: 'connection-b',
+                displayName: 'Shard B',
+                config: {
+                    shardKey: 'b',
+                    accountId: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+                },
+                encryptedCredential: 'cred-b',
+            },
+        ];
+        const assignmentRows = [
+            ...Array.from({ length: 20 }, () => ({
+                cloudflareAccount: 'a',
+                niche: 'legal',
+            })),
+            ...Array.from({ length: 10 }, () => ({
+                cloudflareAccount: 'a',
+                niche: 'finance',
+            })),
+            ...Array.from({ length: 5 }, () => ({
+                cloudflareAccount: 'b',
+                niche: 'legal',
+            })),
+            ...Array.from({ length: 25 }, () => ({
+                cloudflareAccount: 'b',
+                niche: 'finance',
+            })),
+        ];
+
+        mockSelectWhere
+            .mockResolvedValueOnce(shardRows)
+            .mockResolvedValueOnce([])
+            .mockResolvedValueOnce(assignmentRows);
+
+        let selectedA = 0;
+        let selectedB = 0;
+        for (let index = 0; index < 24; index += 1) {
+            const plan = await resolveCloudflareHostShardPlan({
+                domain: `niche-balance-${index}.example`,
+                domainNiche: 'legal',
+            });
+            if (plan.primary.shardKey === 'a') selectedA += 1;
+            if (plan.primary.shardKey === 'b') selectedB += 1;
+        }
+
+        expect(selectedB).toBeGreaterThan(selectedA);
     });
 });

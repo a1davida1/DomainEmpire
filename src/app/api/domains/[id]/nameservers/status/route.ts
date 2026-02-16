@@ -67,6 +67,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         const [domainRow] = await db.select({
             id: domains.id,
             domain: domains.domain,
+            niche: domains.niche,
             registrar: domains.registrar,
             cloudflareAccount: domains.cloudflareAccount,
             profileMetadata: domainRegistrarProfiles.metadata,
@@ -96,6 +97,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             const shardPlan = await resolveCloudflareHostShardPlan({
                 domain: domainRow.domain,
                 cloudflareAccount: domainRow.cloudflareAccount ?? null,
+                domainNiche: domainRow.niche ?? null,
                 maxFallbacks: 3,
             });
             shardWarnings = [...new Set(shardPlan.primary.warnings)];

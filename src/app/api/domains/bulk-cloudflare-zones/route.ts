@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { and, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { getRequestUser, requireRole } from '@/lib/auth';
 import { db, domains } from '@/lib/db';
@@ -93,6 +93,7 @@ export async function POST(request: NextRequest) {
         .select({
             id: domains.id,
             domain: domains.domain,
+            niche: domains.niche,
             cloudflareAccount: domains.cloudflareAccount,
         })
         .from(domains)
@@ -111,8 +112,10 @@ export async function POST(request: NextRequest) {
             const shardPlan = await resolveCloudflareHostShardPlan({
                 domain: row.domain,
                 cloudflareAccount: row.cloudflareAccount ?? null,
+                domainNiche: row.niche ?? null,
                 maxFallbacks: 3,
             });
+            const shouldPersistShard = !row.cloudflareAccount || row.cloudflareAccount.trim().length === 0;
             const shardErrors: string[] = [];
 
             for (const shard of shardPlan.all) {
@@ -132,6 +135,14 @@ export async function POST(request: NextRequest) {
                     nameservers: existingZone.nameservers,
                     status: 'existing',
                 });
+                if (shouldPersistShard) {
+                    await db.update(domains)
+                        .set({
+                            cloudflareAccount: shard.shardKey,
+                            updatedAt: new Date(),
+                        })
+                        .where(eq(domains.id, row.id));
+                }
                 shardErrors.length = 0;
                 break;
             }
@@ -187,6 +198,14 @@ export async function POST(request: NextRequest) {
                         nameservers: createdZone.nameservers,
                         status: createdZone.status ?? 'created',
                     });
+                }
+                if (shouldPersistShard) {
+                    await db.update(domains)
+                        .set({
+                            cloudflareAccount: shard.shardKey,
+                            updatedAt: new Date(),
+                        })
+                        .where(eq(domains.id, row.id));
                 }
 
                 shardErrors.length = 0;

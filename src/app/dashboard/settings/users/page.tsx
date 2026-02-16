@@ -47,11 +47,16 @@ export default function UsersPage() {
     const [formCredentials, setFormCredentials] = useState('');
 
     async function loadUsers() {
-        const res = await fetch('/api/users');
-        if (res.ok) {
-            setUsers(await res.json());
+        try {
+            const res = await fetch('/api/users');
+            if (res.ok) {
+                setUsers(await res.json());
+            }
+        } catch (err) {
+            console.error('[Users] Failed to load users:', err);
+        } finally {
+            setLoading(false);
         }
-        setLoading(false);
     }
 
     useEffect(() => { loadUsers(); }, []);
@@ -95,16 +100,22 @@ export default function UsersPage() {
     }
 
     async function toggleActive(user: User) {
-        if (user.isActive) {
-            const res = await fetch(`/api/users/${user.id}`, { method: 'DELETE' });
-            if (res.ok) loadUsers();
-        } else {
-            const res = await fetch(`/api/users/${user.id}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ isActive: true }),
-            });
-            if (res.ok) loadUsers();
+        try {
+            if (user.isActive) {
+                const res = await fetch(`/api/users/${user.id}`, { method: 'DELETE' });
+                if (res.ok) loadUsers();
+                else console.error('[Users] Failed to deactivate user:', res.status);
+            } else {
+                const res = await fetch(`/api/users/${user.id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ isActive: true }),
+                });
+                if (res.ok) loadUsers();
+                else console.error('[Users] Failed to reactivate user:', res.status);
+            }
+        } catch (err) {
+            console.error('[Users] Toggle active failed:', err);
         }
     }
 
@@ -144,7 +155,7 @@ export default function UsersPage() {
                         </div>
                         <div className="space-y-1">
                             <Label htmlFor="role">Role</Label>
-                            <select id="role" value={formRole} onChange={e => setFormRole(e.target.value)}
+                            <select id="role" aria-label="Role" value={formRole} onChange={e => setFormRole(e.target.value)}
                                 className="w-full border rounded-lg px-3 py-2 text-sm bg-background">
                                 <option value="editor">Editor</option>
                                 <option value="reviewer">Reviewer</option>

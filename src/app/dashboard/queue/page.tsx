@@ -438,6 +438,7 @@ export default async function QueuePage({
 }: {
     searchParams?: Promise<QueueSearchParams>;
 }) {
+    const inlineWorkerEnabled = process.env.NEXT_PUBLIC_INLINE_WORKER === '1';
     const params = (await searchParams) ?? {};
     const operationsSettings = await getOperationsSettings();
     const staleThresholdMinutes = operationsSettings.queueStaleThresholdMinutes;
@@ -734,6 +735,7 @@ export default async function QueuePage({
                         <input
                             type="number"
                             name="maxJobs"
+                            aria-label="Max jobs to process"
                             min={1}
                             max={200}
                             defaultValue={String(PROCESS_NOW_DEFAULT)}
@@ -792,7 +794,7 @@ export default async function QueuePage({
             <div className="bg-card rounded-lg border p-4">
                 <h2 className="text-lg font-semibold mb-3">Filters</h2>
                 <form method="get" className="grid gap-3 md:grid-cols-6">
-                    <select name="preset" defaultValue={preset === 'none' ? '' : preset} className="rounded border px-3 py-2 text-sm">
+                    <select name="preset" aria-label="Filter preset" defaultValue={preset === 'none' ? '' : preset} className="rounded border px-3 py-2 text-sm">
                         <option value="">No preset</option>
                         <option value="failures">Failures</option>
                         <option value="stalled">Stalled</option>
@@ -805,18 +807,18 @@ export default async function QueuePage({
                         placeholder="Search id, error, payload..."
                         className="rounded border px-3 py-2 text-sm"
                     />
-                    <select name="status" defaultValue={statusFilter} className="rounded border px-3 py-2 text-sm">
+                    <select name="status" aria-label="Status filter" defaultValue={statusFilter} className="rounded border px-3 py-2 text-sm">
                         <option value="all">All statuses</option>
                         {QUEUE_STATUS_VALUES.map((status) => (
                             <option key={status} value={status}>{status}</option>
                         ))}
                     </select>
-                    <select name="sla" defaultValue={slaFilter} className="rounded border px-3 py-2 text-sm">
+                    <select name="sla" aria-label="SLA filter" defaultValue={slaFilter} className="rounded border px-3 py-2 text-sm">
                         <option value="all">All SLA states</option>
                         <option value="breached">SLA Breached</option>
                         <option value="ok">SLA OK</option>
                     </select>
-                    <select name="domainId" defaultValue={domainIdFilter ?? ''} className="rounded border px-3 py-2 text-sm">
+                    <select name="domainId" aria-label="Domain filter" defaultValue={domainIdFilter ?? ''} className="rounded border px-3 py-2 text-sm">
                         <option value="">All domains</option>
                         {domainOptionRows.map((row) => (
                             <option key={row.domainId} value={row.domainId ?? ''}>
@@ -824,7 +826,7 @@ export default async function QueuePage({
                             </option>
                         ))}
                     </select>
-                    <select name="limit" defaultValue={String(listLimit)} className="rounded border px-3 py-2 text-sm">
+                    <select name="limit" aria-label="Results per page" defaultValue={String(listLimit)} className="rounded border px-3 py-2 text-sm">
                         {[40, 80, 120, 200].map((value) => (
                             <option key={value} value={String(value)}>Limit {value}</option>
                         ))}
@@ -934,7 +936,17 @@ export default async function QueuePage({
                 {queueLikelyStalled && (
                     <p className="mt-3 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
                         Queue appears stalled: pending jobs exist, nothing is processing, and throughput is zero.
-                        Run a persistent worker with <code className="mx-1">npm run worker</code> or use the
+                        {inlineWorkerEnabled
+                            ? (
+                                <>
+                                    Confirm the dev process is running with inline worker (<code className="mx-1">npm run dev</code>) or use
+                                </>
+                            )
+                            : (
+                                <>
+                                    Run a persistent worker with <code className="mx-1">npm run worker</code> or use
+                                </>
+                            )}
                         &quot;Process Now&quot; button for manual batches.
                     </p>
                 )}
@@ -958,7 +970,11 @@ export default async function QueuePage({
 
             <div className={`rounded-lg border p-4 ${workerNeedsPersistentProcess ? 'border-amber-300 bg-amber-50/70' : 'bg-card'}`}>
                 <h2 className="text-lg font-semibold mb-2">Worker Run Guide</h2>
-                {workerNeedsPersistentProcess ? (
+                {inlineWorkerEnabled ? (
+                    <p className="text-sm text-emerald-800">
+                        Inline worker mode is enabled for this app process. Queue jobs should auto-process while the dashboard is running.
+                    </p>
+                ) : workerNeedsPersistentProcess ? (
                     <p className="text-sm text-amber-900">
                         Queue has pending work but no active worker heartbeat. Start a persistent worker process.
                     </p>
@@ -970,7 +986,12 @@ export default async function QueuePage({
                 <div className="mt-3 grid gap-3 md:grid-cols-3 text-xs">
                     <div className="rounded border bg-background p-3">
                         <div className="text-muted-foreground">Terminal Command</div>
-                        <code className="mt-1 block">npm run worker</code>
+                        <code className="mt-1 block">{inlineWorkerEnabled ? 'npm run dev (includes worker)' : 'npm run worker'}</code>
+                        {inlineWorkerEnabled && (
+                            <div className="mt-1 text-muted-foreground">
+                                Use <code>npm run dev:web</code> only when you intentionally want web-only mode.
+                            </div>
+                        )}
                     </div>
                     <div className="rounded border bg-background p-3">
                         <div className="text-muted-foreground">Manual Fallback</div>

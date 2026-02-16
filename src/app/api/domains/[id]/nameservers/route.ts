@@ -138,6 +138,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         const [domainRow] = await db.select({
             id: domains.id,
             domain: domains.domain,
+            niche: domains.niche,
             registrar: domains.registrar,
             cloudflareAccount: domains.cloudflareAccount,
             profileId: domainRegistrarProfiles.id,
@@ -168,6 +169,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         const hostShardPlan = await resolveCloudflareHostShardPlan({
             domain: domainRow.domain,
             cloudflareAccount: domainRow.cloudflareAccount ?? null,
+            domainNiche: domainRow.niche ?? null,
             maxFallbacks: 3,
         });
         let activeShardKey = hostShardPlan.primary.shardKey;
