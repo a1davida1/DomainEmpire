@@ -5,8 +5,12 @@ import { getRequestUser, requireRole } from '@/lib/auth';
 import { db, domainOwnershipEvents, domainRegistrarProfiles, domains } from '@/lib/db';
 import { notDeleted } from '@/lib/db/soft-delete';
 import { createRateLimiter, getClientIp } from '@/lib/rate-limit';
-import { updateNameservers } from '@/lib/deploy/godaddy';
 import { getZoneNameservers } from '@/lib/deploy/cloudflare';
+import {
+    AUTOMATED_NAMESERVER_REGISTRARS,
+    isAutomatedNameserverRegistrar,
+    updateRegistrarNameservers,
+} from '@/lib/deploy/registrar';
 import {
     recordCloudflareHostShardOutcome,
     resolveCloudflareHostShardPlan,
@@ -148,9 +152,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             return NextResponse.json({ error: 'Domain not found' }, { status: 404 });
         }
 
-        if (domainRow.registrar !== 'godaddy') {
+        if (!isAutomatedNameserverRegistrar(domainRow.registrar)) {
             return NextResponse.json(
-                { error: `Automated nameserver cutover is currently supported only for GoDaddy domains (found: ${domainRow.registrar}).` },
+                {
+                    error: `Automated nameserver cutover is currently supported only for ${AUTOMATED_NAMESERVER_REGISTRARS.join(' and ')} domains (found: ${domainRow.registrar}).`,
+                },
                 { status: 400 },
             );
         }
@@ -222,11 +228,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         }
 
         try {
-            await updateNameservers(domainRow.domain, nameservers);
+            await updateRegistrarNameservers(domainRow.registrar, domainRow.domain, nameservers);
         } catch (error) {
             return NextResponse.json(
                 {
-                    error: 'Failed to update nameservers at GoDaddy',
+                    error: `Failed to update nameservers at ${domainRow.registrar}`,
                     message: error instanceof Error ? error.message : 'Unknown registrar API error',
                 },
                 { status: 502 },

@@ -100,6 +100,7 @@ export async function GET(request: NextRequest) {
                         conversion_drop: 0,
                         runtime_failures: 0,
                     },
+                    remediationCounts: {},
                 },
                 generatedAt: new Date().toISOString(),
             }, { headers: rate.headers });
@@ -259,6 +260,7 @@ export async function GET(request: NextRequest) {
                     deployFailures: runtimeFailures,
                 },
                 flags: observability.flags,
+                remediations: observability.remediations,
                 priority,
             };
         })
@@ -277,12 +279,20 @@ export async function GET(request: NextRequest) {
             runtime_failures: 0,
         });
 
+        const remediationCounts = domainsSummary.reduce<Record<string, number>>((acc, row) => {
+            for (const remediation of row.remediations) {
+                acc[remediation.playbookId] = (acc[remediation.playbookId] || 0) + 1;
+            }
+            return acc;
+        }, {});
+
         return NextResponse.json({
             windowDays,
             count: domainsSummary.length,
             domains: domainsSummary,
             summary: {
                 flagCounts,
+                remediationCounts,
             },
             generatedAt: new Date().toISOString(),
         }, {

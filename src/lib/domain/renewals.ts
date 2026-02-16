@@ -13,6 +13,7 @@ import {
     computeRegistrarExpirationRisk,
     isRegistrarTransferStatus,
 } from '@/lib/domain/registrar-operations';
+import { getNamecheapExpiry } from '@/lib/deploy/namecheap';
 
 interface DomainExpiry {
     domain: string;
@@ -44,6 +45,15 @@ async function getGoDaddyExpiry(domain: string): Promise<{ expires: string } | n
     }
 }
 
+async function getNamecheapExpiryIso(domain: string): Promise<string | null> {
+    try {
+        const expiry = await getNamecheapExpiry(domain);
+        return expiry ? expiry.toISOString() : null;
+    } catch {
+        return null;
+    }
+}
+
 /**
  * Fetch expiry from RDAP as fallback.
  */
@@ -68,7 +78,7 @@ async function getRdapExpiry(domain: string): Promise<string | null> {
  */
 export async function syncRenewalDates(domainId?: string): Promise<number> {
     const query = db.select({
-        id: domains.id, domain: domains.domain, renewalDate: domains.renewalDate,
+        id: domains.id, domain: domains.domain, renewalDate: domains.renewalDate, registrar: domains.registrar,
     }).from(domains);
 
     if (domainId) {
@@ -84,8 +94,14 @@ export async function syncRenewalDates(domainId?: string): Promise<number> {
         const batch = allDomains.slice(i, i + BATCH_SIZE);
         const results = await Promise.allSettled(
             batch.map(async (d) => {
-                const gdExpiry = await getGoDaddyExpiry(d.domain);
-                const expiryStr = gdExpiry?.expires || await getRdapExpiry(d.domain);
+                const registrar = (d.registrar || '').toLowerCase();
+                const gdExpiry = registrar === 'godaddy'
+                    ? await getGoDaddyExpiry(d.domain)
+                    : null;
+                const ncExpiry = registrar === 'namecheap'
+                    ? await getNamecheapExpiryIso(d.domain)
+                    : null;
+                const expiryStr = gdExpiry?.expires || ncExpiry || await getRdapExpiry(d.domain);
 
                 if (expiryStr) {
                     const renewalDate = new Date(expiryStr);

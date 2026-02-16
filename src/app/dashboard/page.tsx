@@ -378,7 +378,7 @@ export default async function DashboardPage() {
                 />
                 <MetricCard
                     title="Revenue (30d)"
-                    value={`$${metrics.revenue.toLocaleString()}`}
+                    value={`$${metrics.revenue.toLocaleString('en-US')}`}
                     icon={<DollarSign className="h-6 w-6 text-primary" />}
                 />
                 <MetricCard
@@ -472,7 +472,7 @@ export default async function DashboardPage() {
                                             </div>
                                         </div>
                                         <span className="font-bold text-green-600">
-                                            ${Number(domain.revenue ?? 0).toLocaleString()}/mo
+                                            ${Number(domain.revenue ?? 0).toLocaleString('en-US')}/mo
                                         </span>
                                     </Link>
                                 ))}

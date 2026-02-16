@@ -33,9 +33,10 @@ import {
     Moon,
     Search as SearchIcon,
 } from 'lucide-react';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from 'react';
 import { useTheme } from 'next-themes';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 
 type NavItem = { name: string; href: string; icon: React.ComponentType<{ className?: string }> };
 type NavSection = { label: string; items: NavItem[] };
@@ -146,28 +147,30 @@ const navSections: NavSection[] = [
 
 const DEFAULT_OPEN = new Set(['Core', 'Content & SEO', 'Business', 'Operations', 'System']);
 
+function subscribeSidebarCollapsed(callback: () => void) {
+    const mql = window.matchMedia('(max-width: 1279px)');
+    mql.addEventListener('change', callback);
+    window.addEventListener('de-sidebar-change', callback);
+    return () => {
+        mql.removeEventListener('change', callback);
+        window.removeEventListener('de-sidebar-change', callback);
+    };
+}
+
+function getSidebarCollapsed(): boolean {
+    const stored = localStorage.getItem('de-sidebar-collapsed');
+    if (stored !== null) return stored === '1';
+    return window.innerWidth < 1280;
+}
+
+function setSidebarCollapsed(value: boolean) {
+    localStorage.setItem('de-sidebar-collapsed', value ? '1' : '0');
+    window.dispatchEvent(new Event('de-sidebar-change'));
+}
+
 export function Sidebar() {
     const pathname = usePathname();
-    const [collapsed, setCollapsed] = useState(() => {
-        if (typeof window !== 'undefined') {
-            const stored = localStorage.getItem('de-sidebar-collapsed');
-            if (stored !== null) return stored === '1';
-            return window.innerWidth < 1280;
-        }
-        return false;
-    });
-
-    // Persist collapsed state
-    useEffect(() => { localStorage.setItem('de-sidebar-collapsed', collapsed ? '1' : '0'); }, [collapsed]);
-
-    // Auto-collapse on medium screens (only when no stored preference)
-    useEffect(() => {
-        if (localStorage.getItem('de-sidebar-collapsed') !== null) return;
-        const mql = window.matchMedia('(max-width: 1279px)');
-        function onChange(e: MediaQueryListEvent) { setCollapsed(e.matches); }
-        mql.addEventListener('change', onChange);
-        return () => mql.removeEventListener('change', onChange);
-    }, []);
+    const collapsed = useSyncExternalStore(subscribeSidebarCollapsed, getSidebarCollapsed, () => false);
     const { theme, setTheme } = useTheme();
     const [failedCount, setFailedCount] = useState(0);
     const [domainCount, setDomainCount] = useState(0);
@@ -231,7 +234,7 @@ export function Sidebar() {
                         latestWorkerActivityAgeMs: data.latestWorkerActivityAgeMs,
                     }));
                 })
-                .catch(() => {});
+                .catch((err) => console.error('[Sidebar] Queue health fetch failed:', err));
         }
         fetchQueueHealth();
         const id = setInterval(fetchQueueHealth, 30_000);
@@ -243,7 +246,7 @@ export function Sidebar() {
         fetch('/api/domains?countOnly=1')
             .then(r => r.ok ? r.json() : null)
             .then(data => { if (data?.total != null) setDomainCount(data.total); })
-            .catch(() => {});
+            .catch((err) => console.error('[Sidebar] Domain count fetch failed:', err));
     }, []);
 
     return (
@@ -308,43 +311,54 @@ export function Sidebar() {
                                     ? pathname === item.href
                                     : (pathname === item.href || pathname.startsWith(item.href + '/'));
                                 return (
-                                    <Link
-                                        key={item.name}
-                                        href={item.href}
-                                        className={cn(
-                                            'flex items-center gap-3 px-3 py-2 rounded-lg transition-colors',
-                                            isActive
-                                                ? 'bg-primary/10 text-primary'
-                                                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                                        )}
-                                    >
-                                        <item.icon className="h-5 w-5 shrink-0" />
-                                        {!collapsed && <span>{item.name}</span>}
-                                        {item.name === 'Queue' && failedCount > 0 && (
-                                            <span className="ml-auto flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
-                                                {failedCount > 99 ? '99+' : failedCount}
-                                            </span>
-                                        )}
-                                        {item.name === 'Queue' && (
-                                            <span
+                                    <Tooltip key={item.name}>
+                                        <TooltipTrigger asChild>
+                                            <Link
+                                                href={item.href}
                                                 className={cn(
-                                                    'ml-auto h-2.5 w-2.5 rounded-full',
-                                                    queueHeartbeat.label === 'Running'
-                                                        ? 'bg-emerald-500'
-                                                        : queueHeartbeat.label === 'Recently Active'
-                                                            ? 'bg-blue-500'
-                                                            : queueHeartbeat.label === 'Stalled'
-                                                                ? 'bg-amber-500'
-                                                                : 'bg-slate-400',
+                                                    'flex items-center gap-3 px-3 py-2 rounded-lg transition-colors',
+                                                    isActive
+                                                        ? 'bg-primary/10 text-primary'
+                                                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                                                 )}
-                                            />
+                                            >
+                                                <item.icon className="h-5 w-5 shrink-0" />
+                                                {!collapsed && <span>{item.name}</span>}
+                                                {item.name === 'Queue' && failedCount > 0 && (
+                                                    <span className="ml-auto flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+                                                        {failedCount > 99 ? '99+' : failedCount}
+                                                    </span>
+                                                )}
+                                                {item.name === 'Queue' && (
+                                                    <span
+                                                        className={cn(
+                                                            'ml-auto h-2.5 w-2.5 rounded-full',
+                                                            queueHeartbeat.label === 'Running'
+                                                                ? 'bg-emerald-500'
+                                                                : queueHeartbeat.label === 'Recently Active'
+                                                                    ? 'bg-blue-500'
+                                                                    : queueHeartbeat.label === 'Stalled'
+                                                                        ? 'bg-amber-500'
+                                                                        : 'bg-slate-400',
+                                                        )}
+                                                    />
+                                                )}
+                                                {item.name === 'Domains' && domainCount > 0 && !collapsed && (
+                                                    <span className="ml-auto text-[10px] text-muted-foreground tabular-nums">
+                                                        {domainCount}
+                                                    </span>
+                                                )}
+                                            </Link>
+                                        </TooltipTrigger>
+                                        {collapsed && (
+                                            <TooltipContent side="right">
+                                                {item.name}
+                                                {item.name === 'Queue' && failedCount > 0 && ` (${failedCount} failed)`}
+                                                {item.name === 'Queue' && ` • ${queueHeartbeat.label}`}
+                                                {item.name === 'Domains' && domainCount > 0 && ` (${domainCount})`}
+                                            </TooltipContent>
                                         )}
-                                        {item.name === 'Domains' && domainCount > 0 && !collapsed && (
-                                            <span className="ml-auto text-[10px] text-muted-foreground tabular-nums">
-                                                {domainCount}
-                                            </span>
-                                        )}
-                                    </Link>
+                                    </Tooltip>
                                 );
                             })}
                         </div>
@@ -365,42 +379,57 @@ export function Sidebar() {
                         <p className="mt-1 text-[11px] text-muted-foreground">{queueHeartbeat.detail}</p>
                     </div>
                 )}
-                <Button
-                    variant="ghost"
-                    size="sm"
-                    className="w-full justify-start gap-3"
-                    onClick={() => setCollapsed(!collapsed)}
-                >
-                    {collapsed ? (
-                        <ChevronRight className="h-5 w-5" />
-                    ) : (
-                        <>
-                            <ChevronLeft className="h-5 w-5" />
-                            <span>Collapse</span>
-                        </>
-                    )}
-                </Button>
-                <Button
-                    variant="ghost"
-                    size="sm"
-                    className="w-full justify-start gap-3"
-                    onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-                >
-                    <Sun className="h-5 w-5 hidden dark:block" />
-                    <Moon className="h-5 w-5 block dark:hidden" />
-                    {!collapsed && <span className="hidden dark:inline">Light Mode</span>}
-                    {!collapsed && <span className="inline dark:hidden">Dark Mode</span>}
-                </Button>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="w-full justify-start gap-3"
+                            onClick={() => setSidebarCollapsed(!collapsed)}
+                        >
+                            {collapsed ? (
+                                <ChevronRight className="h-5 w-5" />
+                            ) : (
+                                <>
+                                    <ChevronLeft className="h-5 w-5" />
+                                    <span>Collapse</span>
+                                </>
+                            )}
+                        </Button>
+                    </TooltipTrigger>
+                    {collapsed && <TooltipContent side="right">Expand sidebar</TooltipContent>}
+                </Tooltip>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="w-full justify-start gap-3"
+                            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                        >
+                            <Sun className="h-5 w-5 hidden dark:block" />
+                            <Moon className="h-5 w-5 block dark:hidden" />
+                            {!collapsed && <span className="hidden dark:inline">Light Mode</span>}
+                            {!collapsed && <span className="inline dark:hidden">Dark Mode</span>}
+                        </Button>
+                    </TooltipTrigger>
+                    {collapsed && <TooltipContent side="right">Toggle theme (Shift+D)</TooltipContent>}
+                </Tooltip>
                 <form action="/api/auth/logout" method="POST">
-                    <Button
-                        type="submit"
-                        variant="ghost"
-                        size="sm"
-                        className="w-full justify-start gap-3 text-red-500 hover:bg-red-50 hover:text-red-600"
-                    >
-                        <LogOut className="h-5 w-5" />
-                        {!collapsed && <span>Logout</span>}
-                    </Button>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                type="submit"
+                                variant="ghost"
+                                size="sm"
+                                className="w-full justify-start gap-3 text-red-500 hover:bg-red-50 hover:text-red-600"
+                            >
+                                <LogOut className="h-5 w-5" />
+                                {!collapsed && <span>Logout</span>}
+                            </Button>
+                        </TooltipTrigger>
+                        {collapsed && <TooltipContent side="right">Sign out</TooltipContent>}
+                    </Tooltip>
                 </form>
             </div>
         </aside>

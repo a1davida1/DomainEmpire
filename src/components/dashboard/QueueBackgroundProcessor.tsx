@@ -40,12 +40,12 @@ function parseLease(raw: string | null): QueueLease | null {
 }
 
 function ensureTabId(): string {
-    const existing = window.localStorage.getItem(TAB_ID_KEY);
+    const existing = window.sessionStorage.getItem(TAB_ID_KEY);
     if (existing && existing.trim().length > 0) {
         return existing;
     }
     const generated = `tab-${crypto.randomUUID()}`;
-    window.localStorage.setItem(TAB_ID_KEY, generated);
+    window.sessionStorage.setItem(TAB_ID_KEY, generated);
     return generated;
 }
 

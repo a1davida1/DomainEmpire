@@ -327,7 +327,7 @@ export function BulkNameserverCutoverButton({ domainIds }: Readonly<BulkNameserv
             `Ready: ${preflightReady}\n` +
             `Failed: ${preflightFailed}\n` +
             `Skipped: ${preflightSkipped}\n\n` +
-            `Continue and update nameservers at GoDaddy for ready domains?` +
+            `Continue and update nameservers at the registrar for ready domains?` +
             `${readyPreview ? `\n\nReady examples:\n${readyPreview}` : ''}` +
             `${failurePreview ? `\n\nBlocked examples:\n${failurePreview}` : ''}` +
             `${skipPreview ? `\n\nSkipped examples:\n${skipPreview}` : ''}`

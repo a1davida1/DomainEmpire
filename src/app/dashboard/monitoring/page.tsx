@@ -107,7 +107,7 @@ export default async function MonitoringPage() {
                                         <p className="text-xs text-muted-foreground mt-1">{alert.message}</p>
                                     </div>
                                     <span className="text-xs text-muted-foreground whitespace-nowrap">
-                                        {alert.createdAt ? new Date(alert.createdAt).toLocaleString() : ''}
+                                        {alert.createdAt ? new Date(alert.createdAt).toLocaleString('en-US', { timeZone: 'UTC' }) : ''}
                                     </span>
                                 </Link>
                             ))}

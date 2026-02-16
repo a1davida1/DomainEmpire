@@ -54,7 +54,7 @@ export function PageTitle() {
                     const count = (data.stats.pending ?? 0) + (data.stats.failed ?? 0);
                     setPendingCount(count);
                 })
-                .catch(() => {});
+                .catch((err) => console.error('[PageTitle] Queue stats fetch failed:', err));
         }
         poll();
         const id = setInterval(poll, 30_000);

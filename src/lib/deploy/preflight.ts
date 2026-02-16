@@ -1,5 +1,10 @@
 import { getZoneNameservers } from './cloudflare';
 import { resolveCloudflareHostShardPlan } from './host-sharding';
+import {
+    hasRegistrarNameserverCredentials,
+    isAutomatedNameserverRegistrar,
+    registrarCredentialHint,
+} from './registrar';
 
 export type DeployPreflightIssueSeverity = 'blocking' | 'warning';
 
@@ -24,10 +29,6 @@ type DeployPreflightInput = {
 
 function hasCloudflareBuildCredentials(shardToken?: string | null): boolean {
     return Boolean(shardToken?.trim() || process.env.CLOUDFLARE_API_TOKEN);
-}
-
-function hasGoDaddyCredentials(): boolean {
-    return Boolean(process.env.GODADDY_API_KEY && process.env.GODADDY_API_SECRET);
 }
 
 export async function runDeployPreflight(input: DeployPreflightInput): Promise<DeployPreflightResult> {
@@ -64,17 +65,17 @@ export async function runDeployPreflight(input: DeployPreflightInput): Promise<D
     }
 
     const registrar = (input.registrar || '').toLowerCase();
-    if (registrar !== 'godaddy') {
+    if (!isAutomatedNameserverRegistrar(registrar)) {
         issues.push({
             code: 'registrar_manual_dns_required',
             severity: 'warning',
             message: `Registrar "${input.registrar || 'unknown'}" requires manual DNS cutover in current automation.`,
         });
-    } else if (!hasGoDaddyCredentials()) {
+    } else if (!hasRegistrarNameserverCredentials(registrar)) {
         issues.push({
-            code: 'godaddy_credentials_missing',
+            code: `${registrar}_credentials_missing`,
             severity: 'warning',
-            message: 'GODADDY_API_KEY and GODADDY_API_SECRET are not set; DNS nameserver cutover will be skipped.',
+            message: `${registrarCredentialHint(registrar)} are not set; DNS nameserver cutover will be skipped.`,
         });
     }
 

@@ -34,9 +34,14 @@ async function main() {
 
         console.log(`Found ${result.length} domains:`);
         console.log('--------------------------------------------------');
-        result.forEach((d: any) => {
-            console.log(`${d.domain} (${d.status}) - ID: ${d.id}`);
-        });
+        type DomainRow = {
+            id: string;
+            domain: string;
+            status: string;
+        };
+        for (const row of result as unknown as DomainRow[]) {
+            console.log(`${row.domain} (${row.status}) - ID: ${row.id}`);
+        }
         console.log('--------------------------------------------------');
     } catch (e) {
         console.error('Query failed:', e);

@@ -5,7 +5,7 @@ const mockRequireRole = vi.fn();
 const mockGetRequestUser = vi.fn();
 const mockCreateRateLimiter = vi.fn();
 const mockSelectLimit = vi.fn();
-const mockUpdateNameservers = vi.fn();
+const mockUpdateRegistrarNameservers = vi.fn();
 const mockGetZoneNameservers = vi.fn();
 const mockResolveCloudflareHostShardPlan = vi.fn();
 const mockRecordCloudflareHostShardOutcome = vi.fn();
@@ -52,8 +52,10 @@ vi.mock('@/lib/db', () => ({
     },
 }));
 
-vi.mock('@/lib/deploy/godaddy', () => ({
-    updateNameservers: mockUpdateNameservers,
+vi.mock('@/lib/deploy/registrar', () => ({
+    AUTOMATED_NAMESERVER_REGISTRARS: ['godaddy', 'namecheap'],
+    isAutomatedNameserverRegistrar: vi.fn(() => true),
+    updateRegistrarNameservers: mockUpdateRegistrarNameservers,
 }));
 
 vi.mock('@/lib/deploy/cloudflare', () => ({
@@ -126,7 +128,7 @@ describe('domain nameservers route', () => {
             zoneName: 'example.com',
             nameservers: ['art.ns.cloudflare.com', 'zelda.ns.cloudflare.com'],
         });
-        mockUpdateNameservers.mockResolvedValue(undefined);
+        mockUpdateRegistrarNameservers.mockResolvedValue(undefined);
     });
 
     it('returns 400 when JSON body is malformed', async () => {
@@ -155,6 +157,33 @@ describe('domain nameservers route', () => {
         expect(body.success).toBe(true);
         expect(body.dryRun).toBe(true);
         expect(body.nameservers).toEqual(['art.ns.cloudflare.com', 'zelda.ns.cloudflare.com']);
-        expect(mockUpdateNameservers).not.toHaveBeenCalled();
+        expect(mockUpdateRegistrarNameservers).not.toHaveBeenCalled();
+    });
+
+    it('allows namecheap domains for automated cutover flow', async () => {
+        mockSelectLimit.mockResolvedValueOnce([
+            {
+                id: '00000000-0000-4000-8000-000000000001',
+                domain: 'example.com',
+                registrar: 'namecheap',
+                cloudflareAccount: null,
+                profileId: 'profile-1',
+                profileMetadata: {},
+            },
+        ]);
+
+        const response = await POST(
+            makeJsonRequest(
+                'http://localhost/api/domains/00000000-0000-4000-8000-000000000001/nameservers',
+                { dryRun: true },
+            ),
+            { params: Promise.resolve({ id: '00000000-0000-4000-8000-000000000001' }) },
+        );
+
+        expect(response.status).toBe(200);
+        const body = await response.json();
+        expect(body.success).toBe(true);
+        expect(body.dryRun).toBe(true);
+        expect(body.nameservers).toEqual(['art.ns.cloudflare.com', 'zelda.ns.cloudflare.com']);
     });
 });

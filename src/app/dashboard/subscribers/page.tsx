@@ -105,7 +105,7 @@ export default async function SubscribersPage({
                             <Users className="h-4 w-4 text-muted-foreground" />
                             <span className="text-sm text-muted-foreground">Total Subscribers</span>
                         </div>
-                        <p className="mt-2 text-2xl font-bold">{stats.total.toLocaleString()}</p>
+                        <p className="mt-2 text-2xl font-bold">{stats.total.toLocaleString('en-US')}</p>
                     </CardContent>
                 </Card>
                 <Card>
@@ -114,7 +114,7 @@ export default async function SubscribersPage({
                             <TrendingUp className="h-4 w-4 text-muted-foreground" />
                             <span className="text-sm text-muted-foreground">Last 30 Days</span>
                         </div>
-                        <p className="mt-2 text-2xl font-bold">{stats.last30d.toLocaleString()}</p>
+                        <p className="mt-2 text-2xl font-bold">{stats.last30d.toLocaleString('en-US')}</p>
                     </CardContent>
                 </Card>
                 <Card>
@@ -134,7 +134,7 @@ export default async function SubscribersPage({
                             <span className="text-sm text-muted-foreground">Est. Value</span>
                         </div>
                         <p className="mt-2 text-2xl font-bold text-green-600">
-                            ${stats.estimatedTotalValue.toLocaleString()}
+                            ${stats.estimatedTotalValue.toLocaleString('en-US')}
                         </p>
                     </CardContent>
                 </Card>
@@ -168,7 +168,7 @@ export default async function SubscribersPage({
             <Card>
                 <CardHeader>
                     <CardTitle>
-                        {total.toLocaleString()} subscriber{total !== 1 ? 's' : ''}
+                        {total.toLocaleString('en-US')} subscriber{total !== 1 ? 's' : ''}
                     </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -210,7 +210,7 @@ export default async function SubscribersPage({
                                                 </Badge>
                                             </td>
                                             <td className="py-3 px-2 text-xs text-muted-foreground">
-                                                {sub.createdAt ? new Date(sub.createdAt).toLocaleDateString() : '—'}
+                                                {sub.createdAt ? new Date(sub.createdAt).toLocaleDateString('en-US', { timeZone: 'UTC' }) : '—'}
                                             </td>
                                         </tr>
                                     ))}

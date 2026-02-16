@@ -101,6 +101,52 @@ interface FormState {
     reason: string;
 }
 
+type NameserverOnboardingStage =
+    | 'manual_required'
+    | 'zone_missing'
+    | 'ready_to_switch'
+    | 'switch_recorded_waiting_dns'
+    | 'propagating'
+    | 'verified';
+
+interface NameserverStatusPayload {
+    domain: {
+        id: string;
+        domain: string;
+        registrar: string;
+        cloudflareAccount: string | null;
+    };
+    zone: {
+        exists: boolean;
+        zoneId: string | null;
+        zoneName: string | null;
+        nameservers: string[];
+        shardKey: string | null;
+        warnings: string[];
+    };
+    registrar: {
+        automated: boolean;
+        lastConfiguredNameservers: string[];
+        source: string | null;
+        lastUpdatedAt: string | null;
+    };
+    liveDns: {
+        nameservers: string[];
+        checkedAt: string;
+        lookupError: string | null;
+        matchToCloudflare: 'match' | 'partial' | 'mismatch' | 'unknown';
+    };
+    status: {
+        stage: NameserverOnboardingStage;
+        summary: string;
+        nextAction: string;
+    };
+    actions: {
+        canCreateZone: boolean;
+        canSwitchNameservers: boolean;
+    };
+}
+
 const OWNERSHIP_STATUSES: OwnershipStatus[] = [
     'unknown',
     'unverified',
@@ -119,6 +165,7 @@ const TRANSFER_STATUSES: TransferStatus[] = [
 
 const LOCK_STATUSES: LockStatus[] = ['unknown', 'locked', 'unlocked'];
 const DNSSEC_STATUSES: DnssecStatus[] = ['unknown', 'enabled', 'disabled'];
+const AUTOMATED_NS_REGISTRARS = new Set(['godaddy', 'namecheap']);
 
 const RISK_BADGE_STYLES: Record<ExpirationRisk, string> = {
     unknown: 'bg-slate-100 text-slate-800',
@@ -128,6 +175,15 @@ const RISK_BADGE_STYLES: Record<ExpirationRisk, string> = {
     high: 'bg-orange-100 text-orange-900',
     critical: 'bg-red-100 text-red-900',
     expired: 'bg-red-200 text-red-950',
+};
+
+const DNS_STAGE_STYLES: Record<NameserverOnboardingStage, string> = {
+    manual_required: 'bg-amber-100 text-amber-900',
+    zone_missing: 'bg-orange-100 text-orange-900',
+    ready_to_switch: 'bg-blue-100 text-blue-900',
+    switch_recorded_waiting_dns: 'bg-blue-100 text-blue-900',
+    propagating: 'bg-violet-100 text-violet-900',
+    verified: 'bg-emerald-100 text-emerald-900',
 };
 
 function toLocalDateTime(value: string | null): string {
@@ -169,25 +225,45 @@ function formatTimestamp(value: string | null): string {
     return parsed.toLocaleString();
 }
 
+function formatNameserverList(values: string[]): string {
+    if (!Array.isArray(values) || values.length === 0) return '—';
+    return values.join(', ');
+}
+
+function formatStageLabel(stage: NameserverOnboardingStage): string {
+    return stage.replaceAll('_', ' ');
+}
+
 export default function DomainOwnershipOperationsConfig({ domainId }: Props) {
     const [payload, setPayload] = useState<OwnershipPayload | null>(null);
+    const [dnsStatus, setDnsStatus] = useState<NameserverStatusPayload | null>(null);
     const [form, setForm] = useState<FormState>(buildForm(null));
     const [loading, setLoading] = useState(true);
+    const [loadingDnsStatus, setLoadingDnsStatus] = useState(true);
     const [saving, setSaving] = useState(false);
     const [syncing, setSyncing] = useState(false);
     const [syncingRegistrar, setSyncingRegistrar] = useState(false);
+    const [creatingZone, setCreatingZone] = useState(false);
     const [switchingNameservers, setSwitchingNameservers] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [errorAction, setErrorAction] = useState<{ href: string; label: string } | null>(null);
     const [message, setMessage] = useState<string | null>(null);
 
     const canEdit = payload?.permissions?.canEdit ?? false;
+    const registrarForDns = (payload?.domain.registrar || '').toLowerCase();
+    const canAutomateNameserverCutover = AUTOMATED_NS_REGISTRARS.has(registrarForDns);
     const eventCount = payload?.events.length ?? 0;
+    const dnsStage = dnsStatus?.status.stage ?? null;
 
     const riskStyle = useMemo(() => {
         const risk = payload?.renewalRisk.risk ?? 'unknown';
         return RISK_BADGE_STYLES[risk];
     }, [payload]);
+
+    const dnsStageStyle = useMemo(() => {
+        if (!dnsStage) return 'bg-slate-100 text-slate-800';
+        return DNS_STAGE_STYLES[dnsStage];
+    }, [dnsStage]);
 
     async function loadOwnership() {
         setLoading(true);
@@ -209,8 +285,25 @@ export default function DomainOwnershipOperationsConfig({ domainId }: Props) {
         }
     }
 
+    async function loadNameserverStatus() {
+        setLoadingDnsStatus(true);
+        try {
+            const response = await fetch(`/api/domains/${domainId}/nameservers/status`);
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(body.error || 'Failed to load nameserver status');
+            }
+            setDnsStatus(body as NameserverStatusPayload);
+        } catch (statusError) {
+            setDnsStatus(null);
+            setError(statusError instanceof Error ? statusError.message : 'Failed to load nameserver status');
+        } finally {
+            setLoadingDnsStatus(false);
+        }
+    }
+
     useEffect(() => {
-        loadOwnership();
+        void Promise.all([loadOwnership(), loadNameserverStatus()]);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [domainId]);
 
@@ -251,7 +344,7 @@ export default function DomainOwnershipOperationsConfig({ domainId }: Props) {
                 throw new Error(body.error || 'Failed to save ownership profile');
             }
             setMessage('Ownership profile updated.');
-            await loadOwnership();
+            await Promise.all([loadOwnership(), loadNameserverStatus()]);
         } catch (saveError) {
             setError(saveError instanceof Error ? saveError.message : 'Failed to save ownership profile');
         } finally {
@@ -298,8 +391,43 @@ export default function DomainOwnershipOperationsConfig({ domainId }: Props) {
         }
     }
 
+    async function createCloudflareZone() {
+        if (!canEdit) return;
+        setCreatingZone(true);
+        setError(null);
+        setErrorAction(null);
+        setMessage(null);
+
+        try {
+            const response = await fetch(`/api/domains/${domainId}/cloudflare-zone`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ jumpStart: false }),
+            });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(body.error || body.message || 'Failed to create Cloudflare zone');
+            }
+
+            const nameservers = Array.isArray(body.nameservers)
+                ? body.nameservers.join(', ')
+                : 'pending';
+            setMessage(
+                body.created
+                    ? `Cloudflare zone created. Nameservers: ${nameservers}`
+                    : `Cloudflare zone already exists. Nameservers: ${nameservers}`,
+            );
+            await loadNameserverStatus();
+        } catch (zoneError) {
+            setError(zoneError instanceof Error ? zoneError.message : 'Failed to create Cloudflare zone');
+        } finally {
+            setCreatingZone(false);
+        }
+    }
+
     async function switchNameserversToCloudflare() {
-        if (!canEdit || payload?.domain.registrar !== 'godaddy') return;
+        const activePayload = payload;
+        if (!activePayload || !canEdit || !canAutomateNameserverCutover) return;
 
         setSwitchingNameservers(true);
         setError(null);
@@ -327,10 +455,10 @@ export default function DomainOwnershipOperationsConfig({ domainId }: Props) {
                 ? preflightBody.previousNameservers.join(', ')
                 : 'unknown';
             const confirmed = window.confirm(
-                `Switch ${payload.domain.domain} nameservers to Cloudflare now?\n\n` +
+                `Switch ${activePayload.domain.domain} nameservers to Cloudflare now?\n\n` +
                 `Current: ${previousNameservers}\n` +
                 `Planned: ${plannedNameservers}\n\n` +
-                'This updates nameservers at GoDaddy and may affect live DNS after propagation.'
+                `This updates nameservers at ${activePayload.domain.registrar} and may affect live DNS after propagation.`
             );
             if (!confirmed) return;
 
@@ -350,7 +478,7 @@ export default function DomainOwnershipOperationsConfig({ domainId }: Props) {
                 ? body.nameservers.join(', ')
                 : 'Cloudflare nameservers';
             setMessage(`Nameservers switched: ${nameserverList}`);
-            await loadOwnership();
+            await Promise.all([loadOwnership(), loadNameserverStatus()]);
         } catch (switchError) {
             setError(switchError instanceof Error ? switchError.message : 'Failed to switch nameservers');
         } finally {
@@ -415,7 +543,7 @@ export default function DomainOwnershipOperationsConfig({ domainId }: Props) {
                 setMessage('Registrar state synced.');
             }
             setErrorAction(null);
-            await loadOwnership();
+            await Promise.all([loadOwnership(), loadNameserverStatus()]);
         } catch (syncError) {
             setError(syncError instanceof Error ? syncError.message : 'Failed to sync registrar state');
         } finally {
@@ -479,6 +607,92 @@ export default function DomainOwnershipOperationsConfig({ domainId }: Props) {
                 <div className="rounded-md border p-3 text-sm">
                     <p className="font-medium">Recommendation</p>
                     <p className="mt-1 text-muted-foreground">{payload.renewalRisk.recommendation}</p>
+                </div>
+
+                <div className="rounded-md border p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                            <p className="font-medium">DNS Onboarding Status</p>
+                            <p className="text-xs text-muted-foreground">
+                                Zone -&gt; registrar cutover -&gt; live DNS verification
+                            </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <Badge className={`capitalize ${dnsStageStyle}`}>
+                                {dnsStage ? formatStageLabel(dnsStage) : 'checking'}
+                            </Badge>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={loadNameserverStatus}
+                                disabled={loadingDnsStatus}
+                            >
+                                {loadingDnsStatus ? 'Checking...' : 'Refresh Status'}
+                            </Button>
+                        </div>
+                    </div>
+
+                    {loadingDnsStatus ? (
+                        <p className="mt-3 text-sm text-muted-foreground">Checking Cloudflare + live DNS state...</p>
+                    ) : !dnsStatus ? (
+                        <p className="mt-3 text-sm text-muted-foreground">Nameserver status unavailable.</p>
+                    ) : (
+                        <div className="mt-3 space-y-3">
+                            <div className="grid gap-3 md:grid-cols-3">
+                                <div className="rounded border p-2">
+                                    <p className="text-xs text-muted-foreground">Cloudflare Zone</p>
+                                    <p className="mt-1 text-sm">
+                                        {dnsStatus.zone.exists ? 'Ready' : 'Missing'}
+                                    </p>
+                                    <p className="mt-1 text-xs text-muted-foreground">
+                                        {formatNameserverList(dnsStatus.zone.nameservers)}
+                                    </p>
+                                </div>
+                                <div className="rounded border p-2">
+                                    <p className="text-xs text-muted-foreground">Registrar Recorded</p>
+                                    <p className="mt-1 text-sm">
+                                        {dnsStatus.registrar.lastConfiguredNameservers.length > 0 ? 'Switch recorded' : 'Not switched'}
+                                    </p>
+                                    <p className="mt-1 text-xs text-muted-foreground">
+                                        {formatNameserverList(dnsStatus.registrar.lastConfiguredNameservers)}
+                                    </p>
+                                </div>
+                                <div className="rounded border p-2">
+                                    <p className="text-xs text-muted-foreground">Live DNS</p>
+                                    <p className="mt-1 text-sm capitalize">
+                                        {dnsStatus.liveDns.matchToCloudflare.replaceAll('_', ' ')}
+                                    </p>
+                                    <p className="mt-1 text-xs text-muted-foreground">
+                                        {dnsStatus.liveDns.lookupError
+                                            ? `Lookup error: ${dnsStatus.liveDns.lookupError}`
+                                            : formatNameserverList(dnsStatus.liveDns.nameservers)}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="rounded border bg-muted/20 p-2">
+                                <p className="text-sm">{dnsStatus.status.summary}</p>
+                                <p className="text-xs text-muted-foreground mt-1">{dnsStatus.status.nextAction}</p>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2">
+                                <Button
+                                    onClick={createCloudflareZone}
+                                    disabled={!canEdit || creatingZone || !dnsStatus.actions.canCreateZone}
+                                    variant="secondary"
+                                >
+                                    {creatingZone ? 'Creating Zone...' : 'Create Cloudflare Zone'}
+                                </Button>
+                                <Button
+                                    onClick={switchNameserversToCloudflare}
+                                    disabled={!canEdit || switchingNameservers || !dnsStatus.actions.canSwitchNameservers || !canAutomateNameserverCutover}
+                                    variant="secondary"
+                                >
+                                    {switchingNameservers ? 'Switching DNS...' : 'Switch Nameservers to Cloudflare'}
+                                </Button>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-2">
@@ -649,13 +863,6 @@ export default function DomainOwnershipOperationsConfig({ domainId }: Props) {
                     <Button onClick={syncRegistrarState} disabled={!canEdit || syncingRegistrar} variant="secondary">
                         {syncingRegistrar ? 'Syncing Registrar...' : 'Sync Registrar State'}
                     </Button>
-                    <Button
-                        onClick={switchNameserversToCloudflare}
-                        disabled={!canEdit || switchingNameservers || payload.domain.registrar !== 'godaddy'}
-                        variant="secondary"
-                    >
-                        {switchingNameservers ? 'Switching DNS...' : 'Switch Nameservers to Cloudflare'}
-                    </Button>
                     <Button onClick={saveProfile} disabled={!canEdit || saving} variant="outline">
                         {saving ? 'Saving...' : 'Save Ownership Profile'}
                     </Button>
@@ -664,9 +871,9 @@ export default function DomainOwnershipOperationsConfig({ domainId }: Props) {
                             Current role ({payload.permissions?.role || 'unknown'}) cannot edit ownership state.
                         </p>
                     )}
-                    {payload.domain.registrar !== 'godaddy' && (
+                    {!canAutomateNameserverCutover && (
                         <p className="self-center text-xs text-muted-foreground">
-                            Automated nameserver cutover is currently supported for GoDaddy domains only.
+                            Automated nameserver cutover is currently supported for GoDaddy and Namecheap domains.
                         </p>
                     )}
                 </div>

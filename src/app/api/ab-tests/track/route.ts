@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
         let resolvedVariantId = payload.variantId ?? null;
         let assignment: ReturnType<typeof assignVariantBySubject> | null = null;
 
-        const hasSubjectOverride = Boolean(payload.subjectKey?.trim()) || request.headers.has('x-ab-subject');
+        const hasSubjectOverride = Boolean(payload.subjectKey?.trim()) || Boolean(request.headers.get('x-ab-subject')?.trim());
         if (!resolvedVariantId || hasSubjectOverride) {
             const [test] = await db.select().from(abTests).where(eq(abTests.id, payload.testId)).limit(1);
             if (!test) {

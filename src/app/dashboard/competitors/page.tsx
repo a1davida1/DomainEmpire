@@ -104,12 +104,12 @@ export default async function CompetitorsPage() {
                                                         </div>
                                                     )}
                                                 </td>
-                                                <td className="p-3 text-right">{comp.estimatedTraffic?.toLocaleString() || '—'}</td>
+                                                <td className="p-3 text-right">{comp.estimatedTraffic?.toLocaleString('en-US') || '—'}</td>
                                                 <td className="p-3 text-right">{comp.domainAuthority || '—'}</td>
-                                                <td className="p-3 text-right">{comp.totalPages?.toLocaleString() || '—'}</td>
+                                                <td className="p-3 text-right">{comp.totalPages?.toLocaleString('en-US') || '—'}</td>
                                                 <td className="p-3">{comp.publishFrequency || '—'}</td>
                                                 <td className="p-3 text-muted-foreground">
-                                                    {comp.lastCheckedAt ? new Date(comp.lastCheckedAt).toLocaleDateString() : 'Never'}
+                                                    {comp.lastCheckedAt ? new Date(comp.lastCheckedAt).toLocaleDateString('en-US', { timeZone: 'UTC' }) : 'Never'}
                                                 </td>
                                                 <td className="p-3 text-right">
                                                     <Link

@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 
 const mockRequireRole = vi.fn();
 const mockGetRequestUser = vi.fn();
-const mockUpdateNameservers = vi.fn();
+const mockUpdateRegistrarNameservers = vi.fn();
 const mockGetZoneNameserverMap = vi.fn();
 const mockSelectWhere = vi.fn();
 const mockCreateRateLimiter = vi.fn();
@@ -25,8 +25,12 @@ vi.mock('@/lib/rate-limit', () => ({
     getClientIp: vi.fn(() => '127.0.0.1'),
 }));
 
-vi.mock('@/lib/deploy/godaddy', () => ({
-    updateNameservers: mockUpdateNameservers,
+vi.mock('@/lib/deploy/registrar', () => ({
+    AUTOMATED_NAMESERVER_REGISTRARS: ['godaddy', 'namecheap'],
+    isAutomatedNameserverRegistrar: vi.fn((registrar: string) =>
+        ['godaddy', 'namecheap'].includes((registrar || '').toLowerCase()),
+    ),
+    updateRegistrarNameservers: mockUpdateRegistrarNameservers,
 }));
 
 vi.mock('@/lib/deploy/cloudflare', () => ({
@@ -112,7 +116,7 @@ describe('bulk nameserver route', () => {
                 nameservers: ['art.ns.cloudflare.com', 'zelda.ns.cloudflare.com'],
             }],
         ]));
-        mockUpdateNameservers.mockResolvedValue(undefined);
+        mockUpdateRegistrarNameservers.mockResolvedValue(undefined);
     });
 
     it('returns preflight-ready domains without mutating registrar when dryRun=true', async () => {
@@ -127,7 +131,7 @@ describe('bulk nameserver route', () => {
         expect(body.readyCount).toBe(1);
         expect(body.failedCount).toBe(0);
         expect(body.skippedCount).toBe(0);
-        expect(mockUpdateNameservers).not.toHaveBeenCalled();
+        expect(mockUpdateRegistrarNameservers).not.toHaveBeenCalled();
     });
 
     it('uses per-domain nameserver overrides without Cloudflare zone lookup', async () => {
@@ -162,5 +166,29 @@ describe('bulk nameserver route', () => {
         expect(response.status).toBe(503);
         const body = await response.json();
         expect(body.error).toContain('Cloudflare zone lookup failed');
+    });
+
+    it('supports namecheap registrar domains in preflight', async () => {
+        mockSelectWhere.mockResolvedValueOnce([
+            {
+                id: '00000000-0000-4000-8000-000000000001',
+                domain: 'example.com',
+                registrar: 'namecheap',
+                cloudflareAccount: null,
+                profileId: 'profile-1',
+                profileMetadata: {},
+            },
+        ]);
+
+        const response = await POST(makeJsonRequest('http://localhost/api/domains/bulk-nameservers', {
+            domainIds: ['00000000-0000-4000-8000-000000000001'],
+            dryRun: true,
+        }));
+
+        expect(response.status).toBe(200);
+        const body = await response.json();
+        expect(body.readyCount).toBe(1);
+        expect(body.failedCount).toBe(0);
+        expect(body.skippedCount).toBe(0);
     });
 });

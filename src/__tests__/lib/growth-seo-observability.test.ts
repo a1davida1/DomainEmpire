@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
     computeStdDev,
     evaluateSeoDomainObservability,
+    resolveSeoObservabilityRemediations,
 } from '@/lib/growth/seo-observability';
 
 describe('growth seo observability', () => {
@@ -40,5 +41,21 @@ describe('growth seo observability', () => {
 
         expect(result.flags).toContain('runtime_failures');
         expect(result.flags).toContain('indexation_low');
+        expect(result.remediations.map((item) => item.playbookId)).toEqual(
+            expect.arrayContaining(['SEO-002', 'SEO-004']),
+        );
+    });
+
+    it('returns deterministic remediation mapping for unique flags', () => {
+        const remediations = resolveSeoObservabilityRemediations([
+            'runtime_failures',
+            'runtime_failures',
+            'conversion_drop',
+        ]);
+
+        expect(remediations).toHaveLength(2);
+        expect(remediations[0].playbookId).toBe('SEO-004');
+        expect(remediations[1].playbookId).toBe('SEO-003');
+        expect(remediations[0].runbookUrl).toContain('/docs/ops/seo-observability-playbooks.md#');
     });
 });

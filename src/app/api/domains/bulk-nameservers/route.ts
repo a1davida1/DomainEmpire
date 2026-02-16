@@ -5,8 +5,11 @@ import { getRequestUser, requireRole } from '@/lib/auth';
 import { db, domainOwnershipEvents, domainRegistrarProfiles, domains } from '@/lib/db';
 import { notDeleted } from '@/lib/db/soft-delete';
 import { createRateLimiter, getClientIp } from '@/lib/rate-limit';
-import { updateNameservers } from '@/lib/deploy/godaddy';
 import { getZoneNameserverMap } from '@/lib/deploy/cloudflare';
+import {
+    isAutomatedNameserverRegistrar,
+    updateRegistrarNameservers,
+} from '@/lib/deploy/registrar';
 import {
     recordCloudflareHostShardOutcome,
     resolveCloudflareHostShardPlan,
@@ -303,7 +306,7 @@ export async function POST(request: NextRequest) {
     for (const row of rows) {
         const hostShardPlan = shardPlanByDomainId.get(row.id) || [];
 
-        if (row.registrar !== 'godaddy') {
+        if (!isAutomatedNameserverRegistrar(row.registrar)) {
             skipped.push({
                 domainId: row.id,
                 domain: row.domain,
@@ -443,7 +446,7 @@ export async function POST(request: NextRequest) {
                     });
             });
 
-            await updateNameservers(row.domain, nameservers);
+            await updateRegistrarNameservers(row.registrar, row.domain, nameservers);
 
             const now = new Date();
             const nextMetadata: Record<string, unknown> = {

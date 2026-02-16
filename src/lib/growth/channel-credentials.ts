@@ -490,7 +490,7 @@ export async function refreshGrowthChannelCredential(
         };
 
         const shouldRevoke = statusCode === 400 || statusCode === 401;
-        const [updated] = await db.update(growthChannelCredentials).set({
+        await db.update(growthChannelCredentials).set({
             metadata: mergedMetadata,
             revokedAt: shouldRevoke ? now : row.revokedAt,
             updatedAt: now,

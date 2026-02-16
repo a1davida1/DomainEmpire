@@ -72,7 +72,7 @@ export default function RevenuePage() {
             <div className="flex justify-between items-center">
                 <div>
                     <h1 className="text-2xl font-bold">Revenue Dashboard</h1>
-                    <p className="text-zinc-400">Track earnings across all domains</p>
+                    <p className="text-muted-foreground">Track earnings across all domains</p>
                 </div>
                 <div className="flex gap-2">
                     {[7, 30, 90].map(d => (
@@ -92,39 +92,39 @@ export default function RevenuePage() {
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                 <Card className="bg-gradient-to-br from-green-900/30 to-green-950/50">
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-zinc-400">Total Revenue</CardTitle>
+                        <CardTitle className="text-sm font-medium text-muted-foreground">Total Revenue</CardTitle>
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold text-green-400">${data.summary.totalRevenue}</div>
                     </CardContent>
                 </Card>
-                <Card className="bg-zinc-900/50">
+                <Card>
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-zinc-400">Impressions</CardTitle>
+                        <CardTitle className="text-sm font-medium text-muted-foreground">Impressions</CardTitle>
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold">{(data.summary.totalImpressions / 1000).toFixed(1)}K</div>
                     </CardContent>
                 </Card>
-                <Card className="bg-zinc-900/50">
+                <Card>
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-zinc-400">Clicks</CardTitle>
+                        <CardTitle className="text-sm font-medium text-muted-foreground">Clicks</CardTitle>
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold">{data.summary.totalClicks.toLocaleString()}</div>
                     </CardContent>
                 </Card>
-                <Card className="bg-zinc-900/50">
+                <Card>
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-zinc-400">RPM</CardTitle>
+                        <CardTitle className="text-sm font-medium text-muted-foreground">RPM</CardTitle>
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold">${data.summary.avgRpm}</div>
                     </CardContent>
                 </Card>
-                <Card className="bg-zinc-900/50">
+                <Card>
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-zinc-400">CTR</CardTitle>
+                        <CardTitle className="text-sm font-medium text-muted-foreground">CTR</CardTitle>
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold">{data.summary.ctr}%</div>
@@ -133,13 +133,13 @@ export default function RevenuePage() {
             </div>
 
             {/* Daily Trend Chart */}
-            <Card className="bg-zinc-900/50">
+            <Card>
                 <CardHeader>
                     <CardTitle>Daily Revenue</CardTitle>
                 </CardHeader>
                 <CardContent>
                     {data.dailyTrend.length === 0 ? (
-                        <p className="text-zinc-500 text-center py-8">No data</p>
+                        <p className="text-muted-foreground text-center py-8">No data</p>
                     ) : (
                         <div className="flex items-end gap-1 h-32">
                             {data.dailyTrend.map((day, _i) => (
@@ -163,14 +163,14 @@ export default function RevenuePage() {
 
             {/* By Source & Top Domains */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Card className="bg-zinc-900/50">
+                <Card>
                     <CardHeader>
                         <CardTitle>By Source</CardTitle>
                     </CardHeader>
                     <CardContent>
                         <div className="space-y-3">
                             {data.bySource.length === 0 ? (
-                                <p className="text-zinc-500">No data</p>
+                                <p className="text-muted-foreground">No data</p>
                             ) : (
                                 data.bySource.map(source => (
                                     <div key={source.source} className="flex justify-between items-center">
@@ -183,14 +183,14 @@ export default function RevenuePage() {
                     </CardContent>
                 </Card>
 
-                <Card className="bg-zinc-900/50">
+                <Card>
                     <CardHeader>
                         <CardTitle>Top Domains</CardTitle>
                     </CardHeader>
                     <CardContent>
                         <div className="space-y-3">
                             {data.topDomains.length === 0 ? (
-                                <p className="text-zinc-500">No data</p>
+                                <p className="text-muted-foreground">No data</p>
                             ) : (
                                 data.topDomains.slice(0, 5).map(d => (
                                     <div key={d.domain} className="flex justify-between items-center">

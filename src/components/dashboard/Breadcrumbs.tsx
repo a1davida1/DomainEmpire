@@ -58,7 +58,7 @@ export function Breadcrumbs() {
                     setDomainNames(prev => ({ ...prev, [domainUuid]: data.domain }));
                 }
             })
-            .catch(() => {});
+            .catch((err) => console.error('[Breadcrumbs] Domain name fetch failed:', err));
         return () => { active = false; };
     }, [domainUuid, domainNames]);
 

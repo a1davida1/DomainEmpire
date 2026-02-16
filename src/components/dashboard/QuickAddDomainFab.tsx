@@ -62,7 +62,7 @@ export function QuickAddDomainFab() {
                 type="text"
                 value={domain}
                 onChange={e => setDomain(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleAdd()}
+                onKeyDown={e => e.key === 'Enter' && !e.nativeEvent.isComposing && handleAdd()}
                 placeholder="example.com"
                 className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-ring mb-3"
                 autoFocus

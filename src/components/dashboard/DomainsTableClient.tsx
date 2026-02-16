@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 import { DomainActions } from '@/components/dashboard/DomainActions';
 import { DomainHoverCard } from '@/components/dashboard/DomainHoverCard';
 import { toast } from 'sonner';
+import { BulkNameserverCutoverButton } from '@/components/dashboard/BulkNameserverCutoverButton';
 
 interface SerializedDomain {
     id: string;
@@ -25,6 +26,7 @@ interface SerializedDomain {
     registrar: string | null;
     renewalDate: string | null;
     cloudflareAccount: string | null;
+    cloudflareProject: string | null;
 }
 
 type DomainQueueHint = {
@@ -115,15 +117,15 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints
     const [refreshing, setRefreshing] = useState(false);
     const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
     const [confirmAction, setConfirmAction] = useState<{ endpoint: string; label: string } | null>(null);
-    const [compact, setCompact] = useState(() => {
-        if (typeof window !== 'undefined') return localStorage.getItem('de-compact') === '1';
-        return false;
-    });
+    const [compact, setCompact] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
-    const [viewMode, setViewMode] = useState<'table' | 'grid'>(() => {
-        if (typeof window !== 'undefined') return (localStorage.getItem('de-viewMode') as 'table' | 'grid') || 'table';
-        return 'table';
-    });
+    const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
+
+    // Hydrate preferences from localStorage after mount
+    useEffect(() => {
+        setCompact(localStorage.getItem('de-compact') === '1');
+        setViewMode((localStorage.getItem('de-viewMode') as 'table' | 'grid') || 'table');
+    }, []);
 
     // Persist preferences
     useEffect(() => { localStorage.setItem('de-viewMode', viewMode); }, [viewMode]);
@@ -157,6 +159,16 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints
             (d.niche && d.niche.toLowerCase().includes(q))
         );
     }, [domains, searchQuery]);
+
+    const selectedAutomatedDnsIds = useMemo(
+        () => domains
+            .filter((domain) =>
+                selected.has(domain.id)
+                && ['godaddy', 'namecheap'].includes((domain.registrar || '').toLowerCase()),
+            )
+            .map((domain) => domain.id),
+        [domains, selected],
+    );
 
     const allSelected = selected.size === filtered.length && filtered.length > 0;
     const someSelected = selected.size > 0;
@@ -203,8 +215,14 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints
 
     function copySelectedNames() {
         const names = filtered.filter(d => selected.has(d.id)).map(d => d.domain).join('\n');
-        navigator.clipboard.writeText(names);
-        toast.success(`Copied ${selected.size} domain names`);
+        if (!navigator.clipboard?.writeText) {
+            toast.error('Clipboard not available');
+            return;
+        }
+        navigator.clipboard.writeText(names).then(
+            () => toast.success(`Copied ${selected.size} domain names`),
+            () => toast.error('Clipboard write failed'),
+        );
     }
 
     function handleRefresh() {
@@ -280,6 +298,7 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints
                             <Button size="sm" variant="outline" onClick={() => setConfirmAction({ endpoint: '/api/domains/bulk-deploy', label: 'Deploy' })} disabled={acting}>Deploy</Button>
                             <Button size="sm" variant="outline" onClick={() => bulkAction('/api/domains/classify', 'Classify queued')} disabled={acting}>Classify</Button>
                             <Button size="sm" variant="outline" onClick={() => setConfirmAction({ endpoint: '/api/domains/bulk-seed', label: 'Seed' })} disabled={acting}>Seed Content</Button>
+                            <BulkNameserverCutoverButton domainIds={selectedAutomatedDnsIds} />
                         </>
                     )}
                     <Button size="sm" variant="ghost" onClick={copySelectedNames} disabled={acting} title="Copy selected domain names">
@@ -536,6 +555,7 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints
                                                 </DomainHoverCard>
                                                 <CopyButton text={domain.domain} />
                                                 <Link href={`/dashboard/queue?domainId=${domain.id}`} className="ml-2 text-xs text-blue-600 hover:underline">Queue</Link>
+                                                <Link href={`/dashboard/domains/${domain.id}/preview`} className="ml-1 text-xs text-violet-600 hover:underline">Preview</Link>
                                                 {queueHint && queueHint.total > 0 && (
                                                     <>
                                                         {queueHint.failed > 0 && (
@@ -562,7 +582,18 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints
                                                 )}
                                             </div>
                                             {domain.cloudflareAccount && (
-                                                <span className="text-[10px] text-muted-foreground">{domain.cloudflareAccount}</span>
+                                                <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                                                    <span className={`inline-block h-1.5 w-1.5 rounded-full ${
+                                                        domain.isDeployed ? 'bg-emerald-500' :
+                                                        domain.cloudflareProject ? 'bg-yellow-500' :
+                                                        'bg-gray-300'
+                                                    }`} title={
+                                                        domain.isDeployed ? 'NS active — deployed' :
+                                                        domain.cloudflareProject ? 'CF project created — NS not pointed' :
+                                                        'Assigned — not set up'
+                                                    } />
+                                                    {domain.cloudflareAccount}
+                                                </span>
                                             )}
                                         </div>
                                     </TableCell>
@@ -583,12 +614,20 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints
                                                             action: {
                                                                 label: 'Undo',
                                                                 onClick: async () => {
-                                                                    await fetch(`/api/domains/${domain.id}`, {
-                                                                        method: 'PATCH',
-                                                                        headers: { 'Content-Type': 'application/json' },
-                                                                        body: JSON.stringify({ status: oldStatus }),
-                                                                    });
-                                                                    toast.success(`Reverted ${domain.domain} → ${oldStatus}`);
+                                                                    try {
+                                                                        const undoRes = await fetch(`/api/domains/${domain.id}`, {
+                                                                            method: 'PATCH',
+                                                                            headers: { 'Content-Type': 'application/json' },
+                                                                            body: JSON.stringify({ status: oldStatus }),
+                                                                        });
+                                                                        if (undoRes.ok) {
+                                                                            toast.success(`Reverted ${domain.domain} → ${oldStatus}`);
+                                                                        } else {
+                                                                            toast.error('Undo failed');
+                                                                        }
+                                                                    } catch {
+                                                                        toast.error('Undo failed');
+                                                                    }
                                                                     router.refresh();
                                                                 },
                                                             },

@@ -32,28 +32,56 @@ import {
     Target,
 } from 'lucide-react';
 
-const navigation = [
-    { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-    { name: 'Workflow', href: '/dashboard/workflow', icon: PlayCircle },
-    { name: 'Domains', href: '/dashboard/domains', icon: Globe },
-    { name: 'Content', href: '/dashboard/content', icon: FileText },
-    { name: 'Keywords', href: '/dashboard/keywords', icon: Search },
-    { name: 'Analytics', href: '/dashboard/analytics', icon: BarChart3 },
-    { name: 'Revenue', href: '/dashboard/revenue', icon: DollarSign },
-    { name: 'Finances', href: '/dashboard/finances', icon: Wallet },
-    { name: 'Competitors', href: '/dashboard/competitors', icon: Swords },
-    { name: 'Growth', href: '/dashboard/growth', icon: Megaphone },
-    { name: 'Integrations', href: '/dashboard/integrations', icon: PlugZap },
-    { name: 'Review', href: '/dashboard/review', icon: ClipboardCheck },
-    { name: 'Compliance', href: '/dashboard/compliance', icon: ShieldCheck },
-    { name: 'KPIs', href: '/dashboard/kpis', icon: Gauge },
-    { name: 'Deploy', href: '/dashboard/deploy', icon: Rocket },
-    { name: 'Monitoring', href: '/dashboard/monitoring', icon: Activity },
-    { name: 'Subscribers', href: '/dashboard/subscribers', icon: Mail },
-    { name: 'Queue', href: '/dashboard/queue', icon: ListTodo },
-    { name: 'Research', href: '/dashboard/research', icon: Beaker },
-    { name: 'Acquisition', href: '/dashboard/acquisition', icon: Target },
-    { name: 'Settings', href: '/dashboard/settings', icon: Settings },
+type NavItem = { name: string; href: string; icon: React.ComponentType<{ className?: string }> };
+type NavSection = { label: string; items: NavItem[] };
+
+const navSections: NavSection[] = [
+    {
+        label: 'Core',
+        items: [
+            { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+            { name: 'Workflow', href: '/dashboard/workflow', icon: PlayCircle },
+            { name: 'Domains', href: '/dashboard/domains', icon: Globe },
+        ],
+    },
+    {
+        label: 'Content & SEO',
+        items: [
+            { name: 'Content', href: '/dashboard/content', icon: FileText },
+            { name: 'Keywords', href: '/dashboard/keywords', icon: Search },
+            { name: 'Research', href: '/dashboard/research', icon: Beaker },
+        ],
+    },
+    {
+        label: 'Business',
+        items: [
+            { name: 'Analytics', href: '/dashboard/analytics', icon: BarChart3 },
+            { name: 'Revenue', href: '/dashboard/revenue', icon: DollarSign },
+            { name: 'Finances', href: '/dashboard/finances', icon: Wallet },
+            { name: 'Growth', href: '/dashboard/growth', icon: Megaphone },
+            { name: 'Competitors', href: '/dashboard/competitors', icon: Swords },
+            { name: 'Subscribers', href: '/dashboard/subscribers', icon: Mail },
+            { name: 'Acquisition', href: '/dashboard/acquisition', icon: Target },
+        ],
+    },
+    {
+        label: 'Operations',
+        items: [
+            { name: 'Deploy', href: '/dashboard/deploy', icon: Rocket },
+            { name: 'Queue', href: '/dashboard/queue', icon: ListTodo },
+            { name: 'Monitoring', href: '/dashboard/monitoring', icon: Activity },
+            { name: 'Review', href: '/dashboard/review', icon: ClipboardCheck },
+            { name: 'Compliance', href: '/dashboard/compliance', icon: ShieldCheck },
+            { name: 'KPIs', href: '/dashboard/kpis', icon: Gauge },
+        ],
+    },
+    {
+        label: 'System',
+        items: [
+            { name: 'Integrations', href: '/dashboard/integrations', icon: PlugZap },
+            { name: 'Settings', href: '/dashboard/settings', icon: Settings },
+        ],
+    },
 ];
 
 export function MobileNav() {
@@ -75,29 +103,36 @@ export function MobileNav() {
             {isOpen && (
                 <div className="fixed inset-0 top-16 z-50 bg-background border-t animate-in slide-in-from-top-5">
                     <div className="flex flex-col p-4 space-y-4 h-[calc(100vh-4rem)] overflow-y-auto">
-                        <nav className="flex flex-col gap-2">
-                            {navigation.map((item) => {
-                                const Icon = item.icon;
-                                const isActive = item.href === '/dashboard'
-                                    ? pathname === item.href
-                                    : (pathname === item.href || pathname.startsWith(item.href + '/'));
-                                return (
-                                    <Link
-                                        key={item.name}
-                                        href={item.href}
-                                        onClick={() => setIsOpen(false)}
-                                        className={cn(
-                                            'flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium transition-colors',
-                                            isActive
-                                                ? 'bg-primary text-primary-foreground'
-                                                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                                        )}
-                                    >
-                                        <Icon className="h-5 w-5" />
-                                        {item.name}
-                                    </Link>
-                                );
-                            })}
+                        <nav className="flex flex-col gap-1">
+                            {navSections.map((section) => (
+                                <div key={section.label}>
+                                    <p className="px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+                                        {section.label}
+                                    </p>
+                                    {section.items.map((item) => {
+                                        const Icon = item.icon;
+                                        const isActive = item.href === '/dashboard'
+                                            ? pathname === item.href
+                                            : (pathname === item.href || pathname.startsWith(item.href + '/'));
+                                        return (
+                                            <Link
+                                                key={item.name}
+                                                href={item.href}
+                                                onClick={() => setIsOpen(false)}
+                                                className={cn(
+                                                    'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
+                                                    isActive
+                                                        ? 'bg-primary text-primary-foreground'
+                                                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                                                )}
+                                            >
+                                                <Icon className="h-5 w-5" />
+                                                {item.name}
+                                            </Link>
+                                        );
+                                    })}
+                                </div>
+                            ))}
                         </nav>
 
                         <div className="mt-auto border-t pt-4">

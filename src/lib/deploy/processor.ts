@@ -14,7 +14,12 @@
 import { db, domains, contentQueue, articles } from '@/lib/db';
 import { eq, count } from 'drizzle-orm';
 import { createDirectUploadProject, directUploadDeploy, addCustomDomain, getZoneNameservers } from './cloudflare';
-import { updateNameservers } from './godaddy';
+import {
+    hasRegistrarNameserverCredentials,
+    isAutomatedNameserverRegistrar,
+    registrarCredentialHint,
+    updateRegistrarNameservers,
+} from './registrar';
 import { generateSiteFiles } from './generator';
 import {
     recordCloudflareHostShardOutcome,
@@ -264,16 +269,11 @@ async function stepAddCustomDomain(ctx: DeployContext): Promise<boolean> {
 }
 
 /**
- * Step 4: Update DNS via GoDaddy API
+ * Step 4: Update DNS via registrar API (GoDaddy/Namecheap)
  */
 async function stepUpdateDns(ctx: DeployContext, customDomainLinked: boolean): Promise<void> {
     if (!ctx.payload.addCustomDomain || !customDomainLinked) {
         await doneStep(ctx, 3, 'Skipped (Custom domain not linked)');
-        return;
-    }
-
-    if (!process.env.GODADDY_API_KEY) {
-        await doneStep(ctx, 3, 'Skipped (Missing config)');
         return;
     }
 
@@ -285,8 +285,13 @@ async function stepUpdateDns(ctx: DeployContext, customDomainLinked: boolean): P
             .where(eq(domains.id, ctx.domainId))
             .limit(1);
 
-        if (!domainRow || domainRow.registrar !== 'godaddy') {
-            await doneStep(ctx, 3, 'Skipped (Registrar is not GoDaddy)');
+        if (!domainRow || !isAutomatedNameserverRegistrar(domainRow.registrar)) {
+            await doneStep(ctx, 3, 'Skipped (Registrar unsupported for automated DNS)');
+            return;
+        }
+
+        if (!hasRegistrarNameserverCredentials(domainRow.registrar)) {
+            await doneStep(ctx, 3, `Skipped (Missing registrar credentials: ${registrarCredentialHint(domainRow.registrar)})`);
             return;
         }
 
@@ -309,7 +314,7 @@ async function stepUpdateDns(ctx: DeployContext, customDomainLinked: boolean): P
             return;
         }
 
-        await updateNameservers(ctx.payload.domain, zone.nameservers);
+        await updateRegistrarNameservers(domainRow.registrar, ctx.payload.domain, zone.nameservers);
         await doneStep(ctx, 3, `Nameservers updated (${zone.nameservers.join(', ')}) via shard ${zoneShardKey}`);
     } catch (err) {
         await failStep(ctx, 3, err instanceof Error ? err.message : 'DNS update failed');

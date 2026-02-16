@@ -19,6 +19,7 @@ import { getCampaignLaunchReviewSlaSummary } from '@/lib/review/campaign-launch-
 import { ClassifyDomainsButton } from '@/components/dashboard/ClassifyDomainsButton';
 import { QuickAddDomainFab } from '@/components/dashboard/QuickAddDomainFab';
 import { StatusFilterChips } from '@/components/dashboard/StatusFilterChips';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 
 export const dynamic = 'force-dynamic';
 
@@ -148,54 +149,63 @@ function SortIndicator({ col, activeCol, activeDir }: { col: SortColumn; activeC
 
 async function getDomains(filters: { q?: string; status?: string; tier?: string; account?: string; sort?: string; dir?: string; page?: string }) {
     try {
-        let allDomains = await db.select().from(domains).where(isNull(domains.deletedAt));
-
+        // Build SQL WHERE conditions
+        const conditions = [isNull(domains.deletedAt)];
         if (filters.q) {
-            const query = filters.q.toLowerCase();
-            allDomains = allDomains.filter(d => d.domain.toLowerCase().includes(query) || d.niche?.toLowerCase().includes(query));
+            const query = `%${filters.q.toLowerCase()}%`;
+            conditions.push(sql`(lower(${domains.domain}) like ${query} OR lower(${domains.niche}) like ${query})`);
         }
         if (filters.status) {
-            allDomains = allDomains.filter(d => d.status === filters.status);
+            conditions.push(sql`${domains.status} = ${filters.status}`);
         }
         if (filters.tier) {
             const tier = Number.parseInt(filters.tier, 10);
             if (!Number.isNaN(tier)) {
-                allDomains = allDomains.filter(d => d.tier === tier);
+                conditions.push(eq(domains.tier, tier));
             }
         }
         if (filters.account) {
             if (filters.account === '_none') {
-                allDomains = allDomains.filter(d => !d.cloudflareAccount);
+                conditions.push(isNull(domains.cloudflareAccount));
             } else {
-                allDomains = allDomains.filter(d => d.cloudflareAccount === filters.account);
+                conditions.push(eq(domains.cloudflareAccount, filters.account));
             }
         }
 
+        const whereClause = and(...conditions);
+
+        // Count total matching rows
+        const [{ count: totalCount }] = await db.select({ count: sql<number>`count(*)::int` }).from(domains).where(whereClause);
+
+        // Build ORDER BY
         const sortCol: SortColumn = isSortColumn(filters.sort) ? filters.sort : 'tier';
         const sortDir: SortDir = filters.dir === 'desc' ? 'desc' : 'asc';
-        allDomains.sort((a, b) => {
-            let av: string | number | boolean | Date | null = a[sortCol as keyof typeof a] as string | number | boolean | Date | null;
-            let bv: string | number | boolean | Date | null = b[sortCol as keyof typeof b] as string | number | boolean | Date | null;
-            if (av instanceof Date) av = av.getTime();
-            if (bv instanceof Date) bv = bv.getTime();
-            if (av == null && bv == null) return 0;
-            if (av == null) return 1;
-            if (bv == null) return -1;
-            if (typeof av === 'boolean') av = av ? 1 : 0;
-            if (typeof bv === 'boolean') bv = bv ? 1 : 0;
-            const cmp = typeof av === 'number' && typeof bv === 'number'
-                ? av - bv
-                : String(av).localeCompare(String(bv));
-            return sortDir === 'desc' ? -cmp : cmp;
-        });
+        const columnMap: Record<SortColumn, ReturnType<typeof sql>> = {
+            domain: sql`${domains.domain}`,
+            status: sql`${domains.status}`,
+            tier: sql`${domains.tier}`,
+            niche: sql`${domains.niche}`,
+            isDeployed: sql`${domains.isDeployed}`,
+            renewalDate: sql`${domains.renewalDate}`,
+        };
+        const orderCol = columnMap[sortCol] ?? sql`${domains.tier}`;
+        const orderExpr = sortDir === 'desc'
+            ? sql`${orderCol} desc nulls last`
+            : sql`${orderCol} asc nulls last`;
 
-        const totalCount = allDomains.length;
+        // Paginate
         const page = Math.max(1, Number.parseInt(filters.page || '1', 10) || 1);
         const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
         const safePage = Math.min(page, totalPages);
-        const paginated = allDomains.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+        const offset = (safePage - 1) * PAGE_SIZE;
 
-        return { data: paginated, totalCount, page: safePage, totalPages, error: null };
+        const allDomains = await db.select().from(domains)
+            .where(whereClause)
+            .orderBy(orderExpr)
+            .limit(PAGE_SIZE)
+            .offset(offset);
+
+        return { data: allDomains, totalCount, page: safePage, totalPages, error: null };
     } catch (error) {
         console.error('Failed to fetch domains:', error);
         return { data: [], totalCount: 0, page: 1, totalPages: 1, error: 'Failed to load domains. Please try again later.' };
@@ -304,15 +314,21 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
         return acc;
     }, {} as Record<string, number>);
 
-    // Distinct Cloudflare accounts for filter
-    const accountCounts = unfilteredDomains.reduce((acc, d) => {
+    // Distinct Cloudflare accounts for filter with NS status breakdown
+    const accountStats = unfilteredDomains.reduce((acc, d) => {
         const key = d.cloudflareAccount || '_none';
-        acc[key] = (acc[key] || 0) + 1;
+        if (!acc[key]) acc[key] = { total: 0, deployed: 0, cfProject: 0, unpointed: 0 };
+        acc[key].total += 1;
+        if (d.isDeployed) acc[key].deployed += 1;
+        else if (d.cloudflareProject) acc[key].cfProject += 1;
+        else acc[key].unpointed += 1;
         return acc;
-    }, {} as Record<string, number>);
-    const cfAccounts = Object.entries(accountCounts)
-        .sort(([, a], [, b]) => b - a)
-        .map(([account, count]) => ({ account, count }));
+    }, {} as Record<string, { total: number; deployed: number; cfProject: number; unpointed: number }>);
+    const cfAccounts = Object.entries(accountStats)
+        .sort(([, a], [, b]) => b.total - a.total)
+        .map(([account, stats]) => ({ account, count: stats.total, ...stats }));
+    const totalDeployed = unfilteredDomains.filter(d => d.isDeployed).length;
+    const totalUnpointed = unfilteredDomains.filter(d => d.cloudflareAccount && !d.isDeployed && !d.cloudflareProject).length;
 
     return (
         <div className="space-y-6">
@@ -327,7 +343,11 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                 <div className="flex gap-2">
                     <ClassifyDomainsButton mode="all" />
                     <DeployAllButton domainIds={allDomains.filter(d => !d.isDeployed).map(d => d.id)} />
-                    <BulkNameserverCutoverButton domainIds={allDomains.filter(d => d.registrar === 'godaddy').map(d => d.id)} />
+                    <BulkNameserverCutoverButton
+                        domainIds={allDomains
+                            .filter((d) => ['godaddy', 'namecheap'].includes((d.registrar || '').toLowerCase()))
+                            .map((d) => d.id)}
+                    />
                     <Link href="/dashboard/domains/import">
                         <Button variant="outline">
                             Import CSV
@@ -388,44 +408,72 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
 
             {/* Cloudflare Account Filter */}
             {cfAccounts.length > 1 && (
-                <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-medium text-muted-foreground">Account:</span>
-                    <Link
-                        href={(() => {
+                <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-medium text-muted-foreground">Account:</span>
+                        <Link
+                            href={(() => {
+                                const p = new URLSearchParams();
+                                if (params.q) p.set('q', params.q);
+                                if (params.status) p.set('status', params.status);
+                                if (params.tier) p.set('tier', params.tier);
+                                return `/dashboard/domains?${p.toString()}`;
+                            })()}
+                            className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                                !params.account ? 'bg-foreground text-background' : 'hover:bg-muted'
+                            }`}
+                            {...(!params.account ? { 'aria-current': 'page' as const } : {})}
+                        >
+                            All ({unfilteredDomains.length})
+                        </Link>
+                        {cfAccounts.map(({ account, count, deployed, unpointed }) => {
+                            const label = account === '_none' ? 'Unassigned' : account;
+                            const isActive = params.account === account;
                             const p = new URLSearchParams();
                             if (params.q) p.set('q', params.q);
                             if (params.status) p.set('status', params.status);
                             if (params.tier) p.set('tier', params.tier);
-                            return `/dashboard/domains?${p.toString()}`;
-                        })()}
-                        className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
-                            !params.account ? 'bg-foreground text-background' : 'hover:bg-muted'
-                        }`}
-                        {...(!params.account ? { 'aria-current': 'page' as const } : {})}
-                    >
-                        All ({unfilteredDomains.length})
-                    </Link>
-                    {cfAccounts.map(({ account, count }) => {
-                        const label = account === '_none' ? 'Unassigned' : account;
-                        const isActive = params.account === account;
-                        const p = new URLSearchParams();
-                        if (params.q) p.set('q', params.q);
-                        if (params.status) p.set('status', params.status);
-                        if (params.tier) p.set('tier', params.tier);
-                        p.set('account', account);
-                        return (
-                            <Link
-                                key={account}
-                                href={`/dashboard/domains?${p.toString()}`}
-                                className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
-                                    isActive ? 'bg-foreground text-background' : 'hover:bg-muted'
-                                }`}
-                                {...(isActive ? { 'aria-current': 'page' as const } : {})}
-                            >
-                                {label} ({count})
-                            </Link>
-                        );
-                    })}
+                            p.set('account', account);
+                            return (
+                                <Link
+                                    key={account}
+                                    href={`/dashboard/domains?${p.toString()}`}
+                                    className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                                        isActive ? 'bg-foreground text-background' : 'hover:bg-muted'
+                                    }`}
+                                    {...(isActive ? { 'aria-current': 'page' as const } : {})}
+                                >
+                                    {label} ({count})
+                                    {account !== '_none' && deployed > 0 && (
+                                        <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" title={`${deployed} deployed`} />
+                                    )}
+                                    {account !== '_none' && unpointed > 0 && (
+                                        <span className="ml-0.5 inline-block h-1.5 w-1.5 rounded-full bg-gray-300" title={`${unpointed} not pointed`} />
+                                    )}
+                                </Link>
+                            );
+                        })}
+                    </div>
+                    <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <span className="flex items-center gap-1 cursor-help"><span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" /> NS active ({totalDeployed})</span>
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-xs">Site is deployed to Cloudflare Pages AND nameservers are pointed to Cloudflare. The site is fully live and serving traffic.</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <span className="flex items-center gap-1 cursor-help"><span className="inline-block h-1.5 w-1.5 rounded-full bg-yellow-500" /> CF project only</span>
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-xs">A Cloudflare Pages project exists but the domain hasn&apos;t been deployed yet. The project is ready to receive a build.</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <span className="flex items-center gap-1 cursor-help"><span className="inline-block h-1.5 w-1.5 rounded-full bg-gray-300" /> Not pointed ({totalUnpointed})</span>
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-xs">Domain is assigned to a Cloudflare account but nameservers haven&apos;t been updated at the registrar. The site won&apos;t resolve until NS records are changed.</TooltipContent>
+                        </Tooltip>
+                    </div>
                 </div>
             )}
 
@@ -611,17 +659,46 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                             registrar: d.registrar,
                             renewalDate: formatDate(d.renewalDate),
                             cloudflareAccount: d.cloudflareAccount,
+                            cloudflareProject: d.cloudflareProject,
                         }))}
                         queueHints={queueSpotlight.hintsByDomain}
                         hasFilters={!!(params.q || params.status || params.tier || params.account)}
                         headerSlot={
                             <>
                                 <TableHead><Link href={sortHref('domain')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Domain<SortIndicator col="domain" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
-                                <TableHead><Link href={sortHref('status')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Status<SortIndicator col="status" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
-                                <TableHead><Link href={sortHref('tier')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Tier<SortIndicator col="tier" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
+                                <TableHead>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Link href={sortHref('status')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Status<SortIndicator col="status" activeCol={sortCol} activeDir={sortDir} /></Link>
+                                        </TooltipTrigger>
+                                        <TooltipContent>Operational status: parked (inactive), active (building content), redirect, for-sale, or defensive (brand protection).</TooltipContent>
+                                    </Tooltip>
+                                </TableHead>
+                                <TableHead>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Link href={sortHref('tier')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Tier<SortIndicator col="tier" activeCol={sortCol} activeDir={sortDir} /></Link>
+                                        </TooltipTrigger>
+                                        <TooltipContent>Investment priority: Tier 1 = highest value (most content, best keywords), Tier 3 = lowest.</TooltipContent>
+                                    </Tooltip>
+                                </TableHead>
                                 <TableHead><Link href={sortHref('niche')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Niche<SortIndicator col="niche" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
-                                <TableHead>Template</TableHead>
-                                <TableHead><Link href={sortHref('isDeployed')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Deployed<SortIndicator col="isDeployed" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
+                                <TableHead>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <span className="cursor-help">Template</span>
+                                        </TooltipTrigger>
+                                        <TooltipContent>Site layout template (authority, affiliate, magazine, etc.) used when generating and deploying the static site.</TooltipContent>
+                                    </Tooltip>
+                                </TableHead>
+                                <TableHead>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Link href={sortHref('isDeployed')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Deployed<SortIndicator col="isDeployed" activeCol={sortCol} activeDir={sortDir} /></Link>
+                                        </TooltipTrigger>
+                                        <TooltipContent>Whether a static site has been built and uploaded to Cloudflare Pages. &quot;Deployed&quot; means the site is live if nameservers are pointed.</TooltipContent>
+                                    </Tooltip>
+                                </TableHead>
                                 <TableHead><Link href={sortHref('renewalDate')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Renewal<SortIndicator col="renewalDate" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
                                 <TableHead className="w-12"></TableHead>
                             </>

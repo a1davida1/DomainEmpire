@@ -163,10 +163,10 @@ export default function AnalyticsPage() {
         return (
             <div className="p-6">
                 <div className="animate-pulse space-y-4">
-                    <div className="h-8 bg-zinc-800 rounded w-1/4" />
+                    <div className="h-8 bg-muted rounded w-1/4" />
                     <div className="grid grid-cols-4 gap-4">
                         {[1, 2, 3, 4].map(i => (
-                            <div key={i} className="h-24 bg-zinc-800 rounded" />
+                            <div key={i} className="h-24 bg-muted rounded" />
                         ))}
                     </div>
                 </div>
@@ -197,7 +197,7 @@ export default function AnalyticsPage() {
             <div className="flex justify-between items-center">
                 <div>
                     <h1 className="text-2xl font-bold">AI Cost Tracking</h1>
-                    <p className="text-zinc-400">Monitor API usage, spending, and queue health</p>
+                    <p className="text-muted-foreground">Monitor API usage, spending, and queue health</p>
                 </div>
                 <div className="flex gap-2">
                     <Button variant="outline" size="sm" onClick={handleExport} disabled={!data}>
@@ -221,49 +221,49 @@ export default function AnalyticsPage() {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <Card className="bg-gradient-to-br from-emerald-900/30 to-emerald-950/50">
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-zinc-400">Total Cost</CardTitle>
+                        <CardTitle className="text-sm font-medium text-muted-foreground">Total Cost</CardTitle>
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold text-emerald-400">
                             ${data.summary.totalCost.toFixed(2)}
                         </div>
-                        <p className="text-xs text-zinc-500">Last {days} days</p>
+                        <p className="text-xs text-muted-foreground">Last {days} days</p>
                     </CardContent>
                 </Card>
 
-                <Card className="bg-zinc-900/50">
+                <Card>
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-zinc-400">Total Tokens</CardTitle>
+                        <CardTitle className="text-sm font-medium text-muted-foreground">Total Tokens</CardTitle>
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold">
                             {(data.summary.totalTokens / 1000).toFixed(1)}K
                         </div>
-                        <p className="text-xs text-zinc-500">Input + Output</p>
+                        <p className="text-xs text-muted-foreground">Input + Output</p>
                     </CardContent>
                 </Card>
 
-                <Card className="bg-zinc-900/50">
+                <Card>
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-zinc-400">API Calls</CardTitle>
+                        <CardTitle className="text-sm font-medium text-muted-foreground">API Calls</CardTitle>
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold">{data.summary.totalCalls}</div>
-                        <p className="text-xs text-zinc-500">
+                        <p className="text-xs text-muted-foreground">
                             ${data.summary.avgCostPerCall.toFixed(4)} avg
                         </p>
                     </CardContent>
                 </Card>
 
-                <Card className="bg-zinc-900/50">
+                <Card>
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-zinc-400">Cost per Article</CardTitle>
+                        <CardTitle className="text-sm font-medium text-muted-foreground">Cost per Article</CardTitle>
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold">
                             ${data.articleCosts.avgCostPerArticle?.toFixed(2) || '0.00'}
                         </div>
-                        <p className="text-xs text-zinc-500">
+                        <p className="text-xs text-muted-foreground">
                             {data.articleCosts.articleCount || 0} articles
                         </p>
                     </CardContent>
@@ -272,7 +272,7 @@ export default function AnalyticsPage() {
 
             {/* Queue Health Panel */}
             {health && (
-                <Card className="bg-zinc-900/50">
+                <Card>
                     <CardHeader>
                         <div className="flex justify-between items-center">
                             <div>
@@ -305,46 +305,46 @@ export default function AnalyticsPage() {
                         <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
                             <div className="text-center p-3 rounded-lg bg-yellow-500/10">
                                 <p className="text-2xl font-bold text-yellow-400">{health.pending}</p>
-                                <p className="text-xs text-zinc-500">Pending</p>
+                                <p className="text-xs text-muted-foreground">Pending</p>
                             </div>
                             <div className="text-center p-3 rounded-lg bg-blue-500/10">
                                 <p className="text-2xl font-bold text-blue-400">{health.processing}</p>
-                                <p className="text-xs text-zinc-500">Processing</p>
+                                <p className="text-xs text-muted-foreground">Processing</p>
                             </div>
                             <div className="text-center p-3 rounded-lg bg-emerald-500/10">
                                 <p className="text-2xl font-bold text-emerald-400">{health.completed}</p>
-                                <p className="text-xs text-zinc-500">Completed</p>
+                                <p className="text-xs text-muted-foreground">Completed</p>
                             </div>
                             <div className="text-center p-3 rounded-lg bg-red-500/10">
                                 <p className="text-2xl font-bold text-red-400">{health.failed}</p>
-                                <p className="text-xs text-zinc-500">Failed</p>
+                                <p className="text-xs text-muted-foreground">Failed</p>
                             </div>
-                            <div className="text-center p-3 rounded-lg bg-zinc-800">
+                            <div className="text-center p-3 rounded-lg bg-muted">
                                 <p className="text-2xl font-bold">{health.throughputPerHour}</p>
-                                <p className="text-xs text-zinc-500">Jobs/Hour</p>
+                                <p className="text-xs text-muted-foreground">Jobs/Hour</p>
                             </div>
-                            <div className="text-center p-3 rounded-lg bg-zinc-800">
+                            <div className="text-center p-3 rounded-lg bg-muted">
                                 <p className="text-2xl font-bold">{health.errorRate24h}%</p>
-                                <p className="text-xs text-zinc-500">Error Rate (24h)</p>
+                                <p className="text-xs text-muted-foreground">Error Rate (24h)</p>
                             </div>
                         </div>
-                        <div className="mt-4 flex gap-6 text-sm text-zinc-400">
-                            <span>Avg Processing: <strong className="text-zinc-200">{formatDuration(health.avgProcessingTimeMs)}</strong></span>
-                            <span>Oldest Pending: <strong className="text-zinc-200">{formatAge(health.oldestPendingAge)}</strong></span>
-                            <span>Total Jobs: <strong className="text-zinc-200">{health.total.toLocaleString()}</strong></span>
+                        <div className="mt-4 flex gap-6 text-sm text-muted-foreground">
+                            <span>Avg Processing: <strong className="text-foreground">{formatDuration(health.avgProcessingTimeMs)}</strong></span>
+                            <span>Oldest Pending: <strong className="text-foreground">{formatAge(health.oldestPendingAge)}</strong></span>
+                            <span>Total Jobs: <strong className="text-foreground">{health.total.toLocaleString()}</strong></span>
                         </div>
                     </CardContent>
                 </Card>
             )}
 
             {/* Daily Cost Chart */}
-            <Card className="bg-zinc-900/50">
+            <Card>
                 <CardHeader>
                     <CardTitle>Daily Costs</CardTitle>
                 </CardHeader>
                 <CardContent>
                     {data.dailyCosts.length === 0 ? (
-                        <p className="text-zinc-500 text-center py-8">No data for this period</p>
+                        <p className="text-muted-foreground text-center py-8">No data for this period</p>
                     ) : (
                         <div className="flex items-end gap-1 h-32">
                             {data.dailyCosts.map((day, i) => (
@@ -362,20 +362,20 @@ export default function AnalyticsPage() {
 
             {/* Costs by Stage & Model */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Card className="bg-zinc-900/50">
+                <Card>
                     <CardHeader>
                         <CardTitle>By Pipeline Stage</CardTitle>
                     </CardHeader>
                     <CardContent>
                         <div className="space-y-3">
                             {data.costsByStage.length === 0 ? (
-                                <p className="text-zinc-500">No data</p>
+                                <p className="text-muted-foreground">No data</p>
                             ) : (
                                 data.costsByStage.map(stage => (
                                     <div key={stage.stage} className="flex justify-between items-center">
                                         <div>
                                             <span className="font-medium">{stageLabels[stage.stage] || stage.stage}</span>
-                                            <span className="text-xs text-zinc-500 ml-2">({stage.callCount} calls)</span>
+                                            <span className="text-xs text-muted-foreground ml-2">({stage.callCount} calls)</span>
                                         </div>
                                         <span className="text-emerald-400 font-mono">
                                             ${stage.totalCost.toFixed(2)}
@@ -387,20 +387,20 @@ export default function AnalyticsPage() {
                     </CardContent>
                 </Card>
 
-                <Card className="bg-zinc-900/50">
+                <Card>
                     <CardHeader>
                         <CardTitle>By Model</CardTitle>
                     </CardHeader>
                     <CardContent>
                         <div className="space-y-3">
                             {data.costsByModel.length === 0 ? (
-                                <p className="text-zinc-500">No data</p>
+                                <p className="text-muted-foreground">No data</p>
                             ) : (
                                 data.costsByModel.map(model => (
                                     <div key={model.model} className="flex justify-between items-center">
                                         <div>
                                             <span className="font-medium text-sm">{model.model}</span>
-                                            <span className="text-xs text-zinc-500 ml-2">({model.callCount})</span>
+                                            <span className="text-xs text-muted-foreground ml-2">({model.callCount})</span>
                                         </div>
                                         <span className="text-emerald-400 font-mono">
                                             ${model.totalCost.toFixed(2)}

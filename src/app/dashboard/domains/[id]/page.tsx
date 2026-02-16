@@ -20,8 +20,11 @@ import ContentTypeConfig from '@/components/dashboard/ContentTypeConfig';
 import { DomainDetailTabs } from '@/components/dashboard/DomainDetailTabs';
 import DomainChannelCompatibilityConfig from '@/components/dashboard/DomainChannelCompatibilityConfig';
 import DomainLifecycleControls from '@/components/dashboard/DomainLifecycleControls';
+import { DomainPipelineCard } from '@/components/dashboard/DomainPipelineCard';
 import DomainWorkflowConfig from '@/components/dashboard/DomainWorkflowConfig';
+import { GenerateArticleButton, GenerateFirstArticleButton, DeleteDomainButton } from '@/components/dashboard/DomainDetailActions';
 import DomainOwnershipOperationsConfig from '@/components/dashboard/DomainOwnershipOperationsConfig';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { db } from '@/lib/db';
 import { articles, contentQueue } from '@/lib/db/schema';
 import { getDomain, getDomainStats, getRecentArticles } from '@/lib/domains';
@@ -98,7 +101,7 @@ const JOB_TYPE_REGEX = /^[a-z0-9_]+$/i;
 
 function formatDateTime(value: Date | null): string {
     if (!value) return '—';
-    return new Date(value).toLocaleString();
+    return new Date(value).toLocaleString('en-US', { timeZone: 'UTC' });
 }
 
 function toValidDate(value: unknown): Date | null {
@@ -262,12 +265,19 @@ async function retryDomainFailedJobsAction(formData: FormData) {
                 retriedJobs: updatedIds.length,
                 error: error instanceof Error ? error.message : String(error),
             });
-            await db.update(contentQueue)
-                .set({ status: 'failed' })
-                .where(and(
-                    inArray(contentQueue.id, updatedIds),
-                    eq(contentQueue.status, 'pending'),
-                ));
+            try {
+                await db.update(contentQueue)
+                    .set({ status: 'failed' })
+                    .where(and(
+                        inArray(contentQueue.id, updatedIds),
+                        eq(contentQueue.status, 'pending'),
+                    ));
+            } catch (rollbackErr) {
+                console.error('Rollback to failed status also failed', {
+                    domainId,
+                    rollbackError: rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr),
+                });
+            }
         }
     }
 
@@ -427,33 +437,74 @@ export default async function DomainDetailPage({ params }: PageProps) {
                             )}
                         </div>
                         <p className="text-muted-foreground">
-                            Added {domain.createdAt ? new Date(domain.createdAt).toLocaleDateString() : 'Unknown'}
+                            Added {domain.createdAt ? new Date(domain.createdAt).toLocaleDateString('en-US', { timeZone: 'UTC' }) : 'Unknown'}
                         </p>
                     </div>
                 </div>
 
                 <div className="flex gap-2">
-                    <Link href={`/dashboard/queue?domainId=${id}`}>
-                        <Button variant="outline">Queue</Button>
-                    </Link>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Link href={`/dashboard/domains/${id}/preview`}>
+                                <Button variant="outline">
+                                    <Globe className="mr-2 h-4 w-4" />
+                                    Preview Site
+                                </Button>
+                            </Link>
+                        </TooltipTrigger>
+                        <TooltipContent>See how the site and its articles will look when deployed — includes draft and unpublished content.</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Link href={`/dashboard/queue?domainId=${id}`}>
+                                <Button variant="outline">Queue</Button>
+                            </Link>
+                        </TooltipTrigger>
+                        <TooltipContent>View all pending, processing, and completed background jobs for this domain (keyword research, article generation, deploys).</TooltipContent>
+                    </Tooltip>
                     {domain.isDeployed && (
-                        <a href={`https://${domain.domain}`} target="_blank" rel="noopener noreferrer">
-                            <Button variant="outline">
-                                <ExternalLink className="mr-2 h-4 w-4" />
-                                Visit Site
-                            </Button>
-                        </a>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <a href={`https://${domain.domain}`} target="_blank" rel="noopener noreferrer">
+                                    <Button variant="outline">
+                                        <ExternalLink className="mr-2 h-4 w-4" />
+                                        Visit Site
+                                    </Button>
+                                </a>
+                            </TooltipTrigger>
+                            <TooltipContent>Open the live deployed site at https://{domain.domain} in a new tab.</TooltipContent>
+                        </Tooltip>
                     )}
-                    <Link href={`/dashboard/domains/${id}/edit`}>
-                        <Button variant="outline">
-                            <Edit className="mr-2 h-4 w-4" />
-                            Edit
-                        </Button>
-                    </Link>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Link href={`/dashboard/domains/${id}/edit`}>
+                                <Button variant="outline">
+                                    <Edit className="mr-2 h-4 w-4" />
+                                    Edit
+                                </Button>
+                            </Link>
+                        </TooltipTrigger>
+                        <TooltipContent>Edit this domain&apos;s metadata: registrar, niche, template, Cloudflare account, financial details, etc.</TooltipContent>
+                    </Tooltip>
                 </div>
             </div>
 
             <DomainDetailTabs domainId={id} />
+
+            {/* Content Pipeline */}
+            <DomainPipelineCard
+                state={{
+                    domainId: id,
+                    domainName: domain.domain,
+                    isClassified: !!domain.niche,
+                    niche: domain.niche,
+                    keywordCount: stats.keywords,
+                    articleCount: stats.articles,
+                    isDeployed: !!domain.isDeployed,
+                    pendingJobs: queueSnapshot.byStatus.pending,
+                    processingJobs: queueSnapshot.byStatus.processing,
+                }}
+            />
 
             {/* Quick Stats */}
             <div className="grid gap-4 md:grid-cols-4">
@@ -701,27 +752,57 @@ export default async function DomainDetailPage({ params }: PageProps) {
                                 <p className="font-medium capitalize">{domain.registrar}</p>
                             </div>
                             <div>
-                                <p className="text-sm font-medium text-muted-foreground">Bucket</p>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <p className="text-sm font-medium text-muted-foreground cursor-help">Bucket</p>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="max-w-xs">The domain&apos;s strategic category (e.g. &quot;build&quot;, &quot;flip&quot;, &quot;park&quot;). Determines the investment level, content volume, and monetization approach.</TooltipContent>
+                                </Tooltip>
                                 <Badge variant="outline" className="capitalize">{domain.bucket}</Badge>
                             </div>
                             <div>
-                                <p className="text-sm font-medium text-muted-foreground">Lifecycle</p>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <p className="text-sm font-medium text-muted-foreground cursor-help">Lifecycle</p>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="max-w-xs">Where this domain is in the acquisition pipeline: sourced → evaluated → purchased → building → monetizing → flipping/holding.</TooltipContent>
+                                </Tooltip>
                                 <Badge variant="outline" className="capitalize">{domain.lifecycleState || 'sourced'}</Badge>
                             </div>
                             <div>
-                                <p className="text-sm font-medium text-muted-foreground">Template</p>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <p className="text-sm font-medium text-muted-foreground cursor-help">Template</p>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="max-w-xs">The site layout template used when deploying (e.g. &quot;authority&quot;, &quot;affiliate&quot;, &quot;magazine&quot;). Controls header, footer, sidebar, and page structure.</TooltipContent>
+                                </Tooltip>
                                 <p className="font-medium capitalize">{domain.siteTemplate || 'Not set'}</p>
                             </div>
                             <div>
-                                <p className="text-sm font-medium text-muted-foreground">Theme Style</p>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <p className="text-sm font-medium text-muted-foreground cursor-help">Theme Style</p>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="max-w-xs">Visual theme applied to the deployed site (fonts, colors, spacing). Set during classification or manually overridden.</TooltipContent>
+                                </Tooltip>
                                 <p className="font-medium">{domain.themeStyle || 'Not set'}</p>
                             </div>
                             <div>
-                                <p className="text-sm font-medium text-muted-foreground">Host Shard</p>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <p className="text-sm font-medium text-muted-foreground cursor-help">Host Shard</p>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="max-w-xs">Which Cloudflare account hosts this domain&apos;s Pages project. Domains are distributed across multiple CF accounts to stay under per-account limits.</TooltipContent>
+                                </Tooltip>
                                 <p className="font-medium">{domain.cloudflareAccount || 'Auto (deterministic)'}</p>
                             </div>
                             <div>
-                                <p className="text-sm font-medium text-muted-foreground">Niche</p>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <p className="text-sm font-medium text-muted-foreground cursor-help">Niche</p>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="max-w-xs">The content vertical assigned by AI classification (e.g. &quot;health&quot;, &quot;finance&quot;, &quot;tech&quot;). Drives keyword research, article tone, disclosure requirements, and monetization strategy.</TooltipContent>
+                                </Tooltip>
                                 <p className="font-medium capitalize">{domain.niche || 'Not set'}</p>
                             </div>
                             <div>
@@ -764,7 +845,7 @@ export default async function DomainDetailPage({ params }: PageProps) {
                                 <p className="text-sm font-medium text-muted-foreground">Purchase Date</p>
                                 <p className="font-medium">
                                     {domain.purchaseDate
-                                        ? new Date(domain.purchaseDate).toLocaleDateString()
+                                        ? new Date(domain.purchaseDate).toLocaleDateString('en-US', { timeZone: 'UTC' })
                                         : 'Not set'}
                                 </p>
                             </div>
@@ -778,7 +859,7 @@ export default async function DomainDetailPage({ params }: PageProps) {
                                 <p className="text-sm font-medium text-muted-foreground">Renewal Date</p>
                                 <p className="font-medium">
                                     {domain.renewalDate
-                                        ? new Date(domain.renewalDate).toLocaleDateString()
+                                        ? new Date(domain.renewalDate).toLocaleDateString('en-US', { timeZone: 'UTC' })
                                         : 'Not set'}
                                 </p>
                             </div>
@@ -798,7 +879,7 @@ export default async function DomainDetailPage({ params }: PageProps) {
                                         <div>
                                             <p className="text-sm text-muted-foreground">Flip Value</p>
                                             <p className="font-medium">
-                                                ${domain.estimatedFlipValueLow.toLocaleString()} - ${domain.estimatedFlipValueHigh?.toLocaleString() || '?'}
+                                                ${domain.estimatedFlipValueLow.toLocaleString('en-US')} - ${domain.estimatedFlipValueHigh?.toLocaleString('en-US') || '?'}
                                             </p>
                                         </div>
                                     )}
@@ -806,7 +887,7 @@ export default async function DomainDetailPage({ params }: PageProps) {
                                         <div>
                                             <p className="text-sm text-muted-foreground">Monthly Revenue</p>
                                             <p className="font-medium">
-                                                ${domain.estimatedMonthlyRevenueLow.toLocaleString()} - ${domain.estimatedMonthlyRevenueHigh?.toLocaleString() || '?'}/mo
+                                                ${domain.estimatedMonthlyRevenueLow.toLocaleString('en-US')} - ${domain.estimatedMonthlyRevenueHigh?.toLocaleString('en-US') || '?'}/mo
                                             </p>
                                         </div>
                                     )}
@@ -842,15 +923,13 @@ export default async function DomainDetailPage({ params }: PageProps) {
                         <CardTitle>Recent Articles</CardTitle>
                         <CardDescription>Content generated for this domain</CardDescription>
                     </div>
-                    <Button size="sm">
-                        Generate Article
-                    </Button>
+                    <GenerateArticleButton domainId={id} hasArticles={recentArticles.length > 0} />
                 </CardHeader>
                 <CardContent>
                     {recentArticles.length === 0 ? (
                         <div className="py-8 text-center">
                             <p className="text-muted-foreground">No articles yet.</p>
-                            <Button variant="link">Generate your first article</Button>
+                            <GenerateFirstArticleButton domainId={id} />
                         </div>
                     ) : (
                         <div className="space-y-3">
@@ -862,10 +941,15 @@ export default async function DomainDetailPage({ params }: PageProps) {
                                     <div>
                                         <p className="font-medium">{article.title}</p>
                                         <p className="text-sm text-muted-foreground">
-                                            {article.wordCount || 0} words • {article.createdAt && new Date(article.createdAt).toLocaleDateString()}
+                                            {article.wordCount || 0} words • {article.createdAt && new Date(article.createdAt).toLocaleDateString('en-US', { timeZone: 'UTC' })}
                                         </p>
                                     </div>
-                                    <Badge variant="outline" className="capitalize">{article.status}</Badge>
+                                    <div className="flex items-center gap-2">
+                                        <Link href={`/dashboard/domains/${id}/preview?articleId=${article.id}`} className="text-xs text-blue-600 hover:underline">
+                                            Preview
+                                        </Link>
+                                        <Badge variant="outline" className="capitalize">{article.status}</Badge>
+                                    </div>
                                 </div>
                             ))}
                         </div>
@@ -886,9 +970,7 @@ export default async function DomainDetailPage({ params }: PageProps) {
                         Deleting this domain will also delete all associated articles, keywords, and analytics data.
                         This action cannot be undone.
                     </p>
-                    <Button variant="destructive">
-                        Delete Domain
-                    </Button>
+                    <DeleteDomainButton domainId={id} domainName={domain.domain} />
                 </CardContent>
             </Card>
         </div>

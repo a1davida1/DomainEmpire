@@ -764,7 +764,7 @@ export const growthCredentialDrillRuns = pgTable('growth_credential_drill_runs',
     results: jsonb('results').$type<Record<string, unknown>>().default({}).notNull(),
     notes: text('notes'),
     startedAt: timestamp('started_at').defaultNow().notNull(),
-    completedAt: timestamp('completed_at').defaultNow().notNull(),
+    completedAt: timestamp('completed_at'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (t) => ({

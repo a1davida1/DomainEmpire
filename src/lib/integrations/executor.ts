@@ -20,6 +20,7 @@ import {
 import { getCloudflareApiRateLimitCooldown, getDomainAnalyticsTyped } from '@/lib/analytics/cloudflare';
 import { getDomainGSCSummary } from '@/lib/analytics/search-console';
 import { getGoDaddyRegistrarSignals } from '@/lib/deploy/godaddy';
+import { getNamecheapRegistrarSignals } from '@/lib/deploy/namecheap';
 
 type ActorContext = {
     userId: string;
@@ -448,9 +449,11 @@ async function executeRegistrarRenewalSync(
 
         if (domainRow) {
             let registrarSignals: Awaited<ReturnType<typeof getGoDaddyRegistrarSignals>> | null = null;
-            if (connection.provider === 'godaddy' && connection.domainName) {
+            if ((connection.provider === 'godaddy' || connection.provider === 'namecheap') && connection.domainName) {
                 try {
-                    registrarSignals = await getGoDaddyRegistrarSignals(connection.domainName);
+                    registrarSignals = connection.provider === 'godaddy'
+                        ? await getGoDaddyRegistrarSignals(connection.domainName)
+                        : await getNamecheapRegistrarSignals(connection.domainName);
                 } catch (error) {
                     providerSignalError = error instanceof Error ? error.message : String(error);
                 }

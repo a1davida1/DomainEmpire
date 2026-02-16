@@ -9,7 +9,7 @@ export function DomainsTableSkeleton({ rows = 8 }: { rows?: number }) {
             <div className="h-10 rounded-lg bg-muted animate-pulse" />
 
             {/* Table skeleton */}
-            <Table>
+            <Table className="hidden md:table">
                 <TableHeader>
                     <TableRow>
                         <TableHead className="w-10"><div className="h-4 w-4 rounded bg-muted animate-pulse" /></TableHead>
@@ -40,7 +40,7 @@ export function DomainsTableSkeleton({ rows = 8 }: { rows?: number }) {
                 </TableBody>
             </Table>
             {/* Grid skeleton */}
-            <div className="hidden md:grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:hidden gap-3">
                 {Array.from({ length: rows }).map((_, i) => (
                     <div key={`grid-${i}`} className="rounded-lg border p-3 space-y-2">
                         <div className="flex items-center justify-between">

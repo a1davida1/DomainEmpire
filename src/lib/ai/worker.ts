@@ -71,6 +71,7 @@ import { purgeDeletedGrowthMediaStorage } from '@/lib/growth/media-retention';
 import { runRevenueReconciliationSweep } from '@/lib/finance/reconciliation-monitor';
 import { runRevenueDataContractSweep } from '@/lib/data/contracts-monitor';
 import { runCapitalAllocationSweep } from '@/lib/growth/capital-allocation-monitor';
+import { runDomainLifecycleMonitorSweep } from '@/lib/domain/lifecycle-monitor';
 import { runCompetitorRefreshSweep } from '@/lib/competitors/refresh-sweep';
 import { runStrategyPropagationSweep } from '@/lib/domain/strategy-propagation-monitor';
 import { runIntegrationHealthSweep } from '@/lib/integrations/health-monitor';
@@ -3365,6 +3366,18 @@ export async function runWorkerContinuously(options: WorkerOptions = {}): Promis
                         }
                     })
                     .catch((err: unknown) => console.error('[CapitalAllocationSweep] Error:', err));
+                await runDomainLifecycleMonitorSweep()
+                    .then((summary) => {
+                        if (summary.enabled && (summary.manualReversions > 0 || summary.oscillations > 0 || summary.sloBreaches > 0)) {
+                            console.log(
+                                `[DomainLifecycleMonitorSweep] events=${summary.scannedEvents} ` +
+                                `manualReversions=${summary.manualReversions} oscillations=${summary.oscillations} ` +
+                                `sloBreaches=${summary.sloBreaches} alerts=${summary.alertsCreated} ` +
+                                `opsSent=${summary.opsAlertsSent} opsFailed=${summary.opsAlertsFailed}`,
+                            );
+                        }
+                    })
+                    .catch((err: unknown) => console.error('[DomainLifecycleMonitorSweep] Error:', err));
                 await runCompetitorRefreshSweep()
                     .then((summary) => {
                         if (summary.enabled && summary.scanned > 0) {
