@@ -20,8 +20,10 @@ function parseEnvBool(value: string | undefined): boolean {
 function shouldBootServerWorker(): boolean {
     if (process.env.NODE_ENV === 'test') return false;
     if (parseEnvBool(process.env.DISABLE_SERVER_QUEUE_WORKER)) return false;
-    // `npm run dev` already starts a dedicated worker process.
-    if (process.env.NEXT_PUBLIC_INLINE_WORKER === '1') return false;
+    // The dedicated worker (npm run dev) uses DB row-level locking
+    // (FOR UPDATE SKIP LOCKED), so running the server bootstrap alongside
+    // it is safe and acts as a resilient fallback if the external worker
+    // crashes silently.
     return true;
 }
 
@@ -39,6 +41,9 @@ export async function ensureServerWorkerStarted(): Promise<void> {
     if (state.started) {
         return;
     }
+
+    state.started = true;
+    state.shuttingDown = false;
 
     const {
         requestWorkerStop,
@@ -67,7 +72,6 @@ export async function ensureServerWorkerStarted(): Promise<void> {
         });
     }
 
-    state.started = true;
     console.log('[WorkerBootstrap] Starting built-in queue worker process.');
     void runWorkerContinuously().catch((error) => {
         state.started = false;

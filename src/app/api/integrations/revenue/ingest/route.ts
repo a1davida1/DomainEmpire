@@ -271,6 +271,7 @@ export async function POST(request: NextRequest) {
         const totalAmount = normalizedRecords
             .reduce((sum, record) => sum + record.amount, 0);
 
+        let reconciliationWarning: string | null = null;
         try {
             const domainWindowValues = [...domainWindows.values()];
             const domainNameRows = await db.select({
@@ -338,6 +339,9 @@ export async function POST(request: NextRequest) {
                 });
             }
         } catch (reconciliationError) {
+            reconciliationWarning = reconciliationError instanceof Error
+                ? reconciliationError.message
+                : 'Reconciliation check failed — verify revenue data integrity manually';
             console.error('Failed to emit post-ingest reconciliation alerts:', reconciliationError);
         }
 
@@ -350,6 +354,7 @@ export async function POST(request: NextRequest) {
             affectedSnapshotRows: snapshotAggregates.size,
             totalAmount: Number(totalAmount.toFixed(2)),
             currency: normalizedRecords[0]?.currency ?? 'USD',
+            ...(reconciliationWarning ? { reconciliationWarning } : {}),
         }, {
             status: 201,
             headers: rate.headers,

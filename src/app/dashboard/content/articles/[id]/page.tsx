@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
-import { ArrowLeft, ExternalLink, History, ScrollText, ClipboardCheck, Quote, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, ExternalLink, History, ScrollText, ClipboardCheck, Quote, AlertTriangle, Eye } from 'lucide-react';
 import Link from 'next/link';
 import { formatNumber } from '@/lib/format-utils';
 
@@ -65,6 +65,23 @@ export default async function ArticlePage({ params }: PageProps) {
                     </div>
                 </div>
                 <div className="flex gap-2">
+                    <Link href={`/dashboard/domains/${article.domain.id}/preview?articleId=${id}`}>
+                        <Button variant="outline">
+                            <Eye className="mr-2 h-4 w-4" />
+                            Visual Site
+                        </Button>
+                    </Link>
+                    <Link href={`/dashboard/content/articles/${id}/visual-review`}>
+                        <Button variant="outline">
+                            Visual Review
+                        </Button>
+                    </Link>
+                    <Link href={`/dashboard/content/articles/${id}/review`}>
+                        <Button variant="outline">
+                            <ClipboardCheck className="mr-2 h-4 w-4" />
+                            QA Review
+                        </Button>
+                    </Link>
                     {article.domain.isDeployed && article.status === 'published' && (
                         <a
                             href={`https://${article.domain.domain}/${article.slug}`}
@@ -99,6 +116,10 @@ export default async function ArticlePage({ params }: PageProps) {
                             <CardTitle>Article Actions</CardTitle>
                         </CardHeader>
                         <CardContent className="space-y-2">
+                            <Link href={`/dashboard/content/articles/${id}/visual-review`} className="flex items-center gap-2 p-2 rounded-md hover:bg-muted text-sm">
+                                <Eye className="h-4 w-4 text-violet-600" />
+                                Visual Review Workspace
+                            </Link>
                             <Link href={`/dashboard/content/articles/${id}/review`} className="flex items-center gap-2 p-2 rounded-md hover:bg-muted text-sm">
                                 <ClipboardCheck className="h-4 w-4 text-emerald-600" />
                                 Review & QA Checklist

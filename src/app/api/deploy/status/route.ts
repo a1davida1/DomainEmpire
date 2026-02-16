@@ -46,6 +46,8 @@ export async function GET(request: NextRequest) {
                     steps: result?.steps ?? null,
                     filesDeployed: result?.filesDeployed ?? null,
                     cfProject: result?.cfProject ?? null,
+                    dnsVerified: result?.dnsVerified ?? null,
+                    dnsUpdateResult: result?.dnsUpdateResult ?? null,
                 };
             }),
         });

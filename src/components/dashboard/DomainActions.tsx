@@ -198,6 +198,7 @@ export function DomainActions({
         }
 
         setFixingDns(true);
+        let errorToastShown = false;
         try {
             let preflight = await runNameserverPreflight();
             const missingZone = (preflight.failures || []).some((failure) => isMissingCloudflareZoneFailure(failure));
@@ -220,23 +221,28 @@ export function DomainActions({
             const successCount = result.successCount ?? 0;
             const failedCount = result.failedCount ?? 0;
             const skippedCount = result.skippedCount ?? 0;
+            const firstFailure = result.failures?.[0]?.error;
+            const firstSkip = result.skipped?.[0]?.reason;
 
-            if (successCount > 0) {
-                toast.success(`DNS cutover applied for ${domainName}.`);
-            }
-            if (failedCount > 0 || skippedCount > 0) {
-                const firstFailure = result.failures?.[0]?.error;
-                const firstSkip = result.skipped?.[0]?.reason;
-                toast.warning(firstFailure || firstSkip || `DNS cutover completed with issues for ${domainName}.`);
-            }
             if (successCount === 0) {
-                throw new Error(result.failures?.[0]?.error || 'No DNS updates were applied.');
+                const errorMessage = firstFailure || 'No DNS updates were applied.';
+                toast.error(errorMessage);
+                errorToastShown = true;
+                throw new Error(errorMessage);
+            }
+
+            if (failedCount > 0 || skippedCount > 0) {
+                toast.warning(firstFailure || firstSkip || `DNS cutover completed with issues for ${domainName}.`);
+            } else {
+                toast.success(`DNS cutover applied for ${domainName}.`);
             }
 
             router.refresh();
         } catch (error) {
             console.error('DNS fix failed:', error);
-            toast.error(error instanceof Error ? error.message : 'DNS fix failed');
+            if (!errorToastShown) {
+                toast.error(error instanceof Error ? error.message : 'DNS fix failed');
+            }
         } finally {
             setFixingDns(false);
         }

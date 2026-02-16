@@ -450,6 +450,8 @@ export async function POST(request: NextRequest) {
 
             await updateRegistrarNameservers(row.registrar, row.domain, nameservers);
 
+            // NS are now changed at the registrar. Record the completion.
+            // If THIS fails, we have a critical inconsistency: NS changed but DB still says pending.
             const now = new Date();
             const nextMetadata: Record<string, unknown> = {
                 ...pendingMetadata,
@@ -467,50 +469,57 @@ export async function POST(request: NextRequest) {
                 },
             };
 
-            await db.transaction(async (tx) => {
-                const [profile] = await tx.insert(domainRegistrarProfiles)
-                    .values({
-                        domainId: row.id,
-                        metadata: nextMetadata,
-                        lastSyncedAt: now,
-                        updatedAt: now,
-                    })
-                    .onConflictDoUpdate({
-                        target: domainRegistrarProfiles.domainId,
-                        set: {
+            try {
+                await db.transaction(async (tx) => {
+                    const [profile] = await tx.insert(domainRegistrarProfiles)
+                        .values({
+                            domainId: row.id,
                             metadata: nextMetadata,
                             lastSyncedAt: now,
                             updatedAt: now,
-                        },
-                    })
-                    .returning({
-                        id: domainRegistrarProfiles.id,
-                    });
+                        })
+                        .onConflictDoUpdate({
+                            target: domainRegistrarProfiles.domainId,
+                            set: {
+                                metadata: nextMetadata,
+                                lastSyncedAt: now,
+                                updatedAt: now,
+                            },
+                        })
+                        .returning({
+                            id: domainRegistrarProfiles.id,
+                        });
 
-                await tx.insert(domainOwnershipEvents)
-                    .values({
-                        domainId: row.id,
-                        profileId: profile?.id ?? profileIdForEvents,
-                        actorId: user.id,
-                        eventType: 'ownership_changed',
-                        source: 'manual',
-                        summary: `Nameservers switched to Cloudflare (${nameservers.join(', ')})`,
-                        previousState: { nameservers: previousNameservers },
-                        nextState: {
-                            provider: 'cloudflare',
-                            nameservers,
-                        },
-                        reason,
-                        metadata: {
-                            action: 'bulk_nameserver_cutover',
-                            registrar: row.registrar,
-                            source: nameserverSource,
-                            ...(zoneId ? { zoneId } : {}),
-                            ...(zoneName ? { zoneName } : {}),
-                        },
-                        createdAt: now,
-                    });
-            });
+                    await tx.insert(domainOwnershipEvents)
+                        .values({
+                            domainId: row.id,
+                            profileId: profile?.id ?? profileIdForEvents,
+                            actorId: user.id,
+                            eventType: 'ownership_changed',
+                            source: 'manual',
+                            summary: `Nameservers switched to Cloudflare (${nameservers.join(', ')})`,
+                            previousState: { nameservers: previousNameservers },
+                            nextState: {
+                                provider: 'cloudflare',
+                                nameservers,
+                            },
+                            reason,
+                            metadata: {
+                                action: 'bulk_nameserver_cutover',
+                                registrar: row.registrar,
+                                source: nameserverSource,
+                                ...(zoneId ? { zoneId } : {}),
+                                ...(zoneName ? { zoneName } : {}),
+                            },
+                            createdAt: now,
+                        });
+                });
+            } catch (recordError) {
+                // NS changed at registrar but DB record failed — critical inconsistency
+                const msg = recordError instanceof Error ? recordError.message : 'Unknown DB error';
+                console.error(`CRITICAL: Nameservers updated at registrar for ${row.domain} but failed to record completion in DB:`, recordError);
+                warnings.push(`${row.domain}: Nameservers were updated at registrar but the completion record failed to save (${msg}). The domain profile still shows pending — re-run or manually update.`);
+            }
 
             successes.push({
                 domainId: row.id,

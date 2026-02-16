@@ -60,6 +60,22 @@ const YMYL_COLORS: Record<string, string> = {
     none: 'bg-gray-100 text-gray-600 border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700',
 };
 
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
+
+function formatQaTimestamp(value: string): string {
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) {
+        return value;
+    }
+
+    const year = date.getUTCFullYear();
+    const month = MONTH_NAMES[date.getUTCMonth()] ?? 'Jan';
+    const day = date.getUTCDate();
+    const hour = String(date.getUTCHours()).padStart(2, '0');
+    const minute = String(date.getUTCMinutes()).padStart(2, '0');
+    return `${month} ${day}, ${year} ${hour}:${minute} UTC`;
+}
+
 export default function ArticleReviewPage() {
     const params = useParams();
     const router = useRouter();
@@ -444,7 +460,7 @@ export default function ArticleReviewPage() {
                         }`}>
                         {qaData.latestResult.allPassed ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
                         Last QA: {qaData.latestResult.allPassed ? 'All passed' : 'Some items failed'}
-                        <span className="text-xs ml-auto opacity-70">{new Date(qaData.latestResult.completedAt).toLocaleString()}</span>
+                        <span className="text-xs ml-auto opacity-70">{formatQaTimestamp(qaData.latestResult.completedAt)}</span>
                     </div>
                 )}
 

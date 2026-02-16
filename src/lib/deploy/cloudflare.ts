@@ -794,3 +794,173 @@ export async function createZone(
         };
     }
 }
+
+/**
+ * Ensure the Cloudflare zone has a CNAME record routing the root domain
+ * to the Cloudflare Pages project. Without this record, NS pointing to
+ * Cloudflare will still show a parked/default page.
+ *
+ * Creates the record if missing, updates it if it points elsewhere.
+ * Returns the action taken and any error.
+ */
+export async function ensurePagesDnsRecord(
+    domain: string,
+    pagesSubdomain: string,
+    clientOptions?: CloudflareClientOptions,
+): Promise<{ success: boolean; action: 'created' | 'updated' | 'already_correct' | 'none'; error?: string }> {
+    const normalizedDomain = normalizeDomain(domain);
+    // Pages target: project.pages.dev
+    const target = pagesSubdomain.endsWith('.pages.dev')
+        ? pagesSubdomain
+        : `${pagesSubdomain}.pages.dev`;
+
+    try {
+        // Resolve the zone
+        const zone = await getZoneNameservers(normalizedDomain, clientOptions);
+        if (!zone) {
+            return { success: false, action: 'none', error: `No Cloudflare zone found for ${normalizedDomain}` };
+        }
+
+        // List existing DNS records for the root domain
+        const listParams = new URLSearchParams({
+            name: normalizedDomain,
+            type: 'CNAME',
+        });
+        const listResponse = await cfFetch(
+            `/zones/${zone.zoneId}/dns_records?${listParams.toString()}`,
+            {},
+            clientOptions,
+        );
+        const listData = await listResponse.json() as {
+            success?: boolean;
+            result?: Array<{ id: string; type: string; name: string; content: string }>;
+        };
+
+        const existingCname = listData.success && Array.isArray(listData.result)
+            ? listData.result.find((r) => r.name === normalizedDomain && r.type === 'CNAME')
+            : null;
+
+        if (existingCname) {
+            // Already points to the right target
+            if (normalizeDomain(existingCname.content) === normalizeDomain(target)) {
+                return { success: true, action: 'already_correct' };
+            }
+
+            // Update to point to Pages project
+            const updateResponse = await cfFetch(
+                `/zones/${zone.zoneId}/dns_records/${existingCname.id}`,
+                {
+                    method: 'PATCH',
+                    body: JSON.stringify({
+                        type: 'CNAME',
+                        name: normalizedDomain,
+                        content: target,
+                        proxied: true,
+                    }),
+                },
+                clientOptions,
+            );
+            const updateData = await updateResponse.json() as { success?: boolean; errors?: Array<{ message?: string }> };
+            if (!updateData.success) {
+                return { success: false, action: 'none', error: updateData.errors?.[0]?.message || 'Failed to update CNAME record' };
+            }
+            return { success: true, action: 'updated' };
+        }
+
+        // Check for conflicting A/AAAA records on the root
+        const aListParams = new URLSearchParams({ name: normalizedDomain });
+        const aListResponse = await cfFetch(
+            `/zones/${zone.zoneId}/dns_records?${aListParams.toString()}`,
+            {},
+            clientOptions,
+        );
+        const aListData = await aListResponse.json() as {
+            success?: boolean;
+            result?: Array<{ id: string; type: string; name: string; content: string }>;
+        };
+
+        if (aListData.success && Array.isArray(aListData.result)) {
+            // Delete conflicting A/AAAA records on the root that would prevent CNAME
+            for (const record of aListData.result) {
+                if (record.name === normalizedDomain && (record.type === 'A' || record.type === 'AAAA')) {
+                    await cfFetch(
+                        `/zones/${zone.zoneId}/dns_records/${record.id}`,
+                        { method: 'DELETE' },
+                        clientOptions,
+                    );
+                }
+            }
+        }
+
+        // Create new CNAME record (Cloudflare supports CNAME flattening at apex)
+        const createResponse = await cfFetch(
+            `/zones/${zone.zoneId}/dns_records`,
+            {
+                method: 'POST',
+                body: JSON.stringify({
+                    type: 'CNAME',
+                    name: '@',
+                    content: target,
+                    proxied: true,
+                    comment: 'Auto-created by deploy pipeline for Cloudflare Pages',
+                }),
+            },
+            clientOptions,
+        );
+        const createData = await createResponse.json() as { success?: boolean; errors?: Array<{ message?: string }> };
+        if (!createData.success) {
+            return { success: false, action: 'none', error: createData.errors?.[0]?.message || 'Failed to create CNAME record' };
+        }
+        return { success: true, action: 'created' };
+    } catch (error) {
+        return {
+            success: false,
+            action: 'none',
+            error: error instanceof Error ? error.message : 'Unknown error ensuring Pages DNS record',
+        };
+    }
+}
+
+/**
+ * Verify that a domain's live NS records point to Cloudflare.
+ * Uses a real DNS lookup so it reflects what browsers/resolvers see.
+ */
+export async function verifyDomainPointsToCloudflare(domain: string): Promise<{
+    verified: boolean;
+    nameservers: string[];
+    detail: string;
+}> {
+    const { Resolver } = await import('node:dns/promises');
+    const resolver = new Resolver();
+    // Use public resolvers to avoid stale local cache
+    resolver.setServers(['1.1.1.1', '8.8.8.8']);
+
+    const normalizedDomain = normalizeDomain(domain);
+
+    try {
+        const nsRecords = await resolver.resolveNs(normalizedDomain);
+        const lowered = nsRecords.map((ns) => ns.toLowerCase());
+        const cloudflareNs = lowered.filter((ns) => ns.endsWith('.cloudflare.com') || ns.endsWith('.cloudflare.com.'));
+
+        if (cloudflareNs.length >= 2) {
+            return {
+                verified: true,
+                nameservers: cloudflareNs,
+                detail: `NS records point to Cloudflare: ${cloudflareNs.join(', ')}`,
+            };
+        }
+
+        return {
+            verified: false,
+            nameservers: lowered,
+            detail: `NS records (${lowered.join(', ')}) do not point to Cloudflare`,
+        };
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+            verified: false,
+            nameservers: [],
+            detail: `DNS NS lookup failed for ${normalizedDomain}: ${message}`,
+        };
+    }
+}

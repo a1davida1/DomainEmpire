@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
     Globe, Rocket, RefreshCw, CheckCircle2, AlertCircle, Clock,
-    ChevronDown, ChevronRight, Cloud
+    ChevronDown, ChevronRight, Cloud, AlertTriangle
 } from 'lucide-react';
 import { useToast } from "@/components/ui/use-toast";
 
@@ -47,6 +47,8 @@ interface DeployJob {
     steps?: DeployStep[] | null;
     filesDeployed?: number | null;
     cfProject?: string | null;
+    dnsVerified?: boolean | null;
+    dnsUpdateResult?: 'updated' | 'skipped' | 'failed' | null;
 }
 
 interface DomainStatus {
@@ -55,6 +57,7 @@ interface DomainStatus {
     status: string;
     lastDeployed?: string;
     isDeployed: boolean;
+    cloudflareProject?: string | null;
 }
 
 export default function DeployPage() {
@@ -259,6 +262,7 @@ export default function DeployPage() {
     };
 
     const deployedCount = domains.filter(d => d.isDeployed).length;
+    const dnsPendingCount = domains.filter(d => !d.isDeployed && d.cloudflareProject).length;
     const processingCount = jobs.filter(j => j.status === 'processing').length;
     const failedCount = jobs.filter(j => j.status === 'failed').length;
 
@@ -281,7 +285,7 @@ export default function DeployPage() {
             </div>
 
             {/* Summary Stats */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                 <Card>
                     <CardContent className="pt-5 pb-4">
                         <div className="flex items-center gap-3">
@@ -304,6 +308,19 @@ export default function DeployPage() {
                             <div>
                                 <p className={`text-2xl font-bold tabular-nums ${deployedCount > 0 ? 'text-emerald-600 dark:text-emerald-400' : ''}`}>{deployedCount}</p>
                                 <p className="text-xs text-muted-foreground">Deployed</p>
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+                <Card className={dnsPendingCount > 0 ? 'border-amber-200 dark:border-amber-900' : ''}>
+                    <CardContent className="pt-5 pb-4">
+                        <div className="flex items-center gap-3">
+                            <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${dnsPendingCount > 0 ? 'bg-amber-100 dark:bg-amber-950' : 'bg-muted'}`}>
+                                <AlertTriangle className={`h-4 w-4 ${dnsPendingCount > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`} />
+                            </div>
+                            <div>
+                                <p className={`text-2xl font-bold tabular-nums ${dnsPendingCount > 0 ? 'text-amber-600 dark:text-amber-400' : ''}`}>{dnsPendingCount}</p>
+                                <p className="text-xs text-muted-foreground">DNS Pending</p>
                             </div>
                         </div>
                     </CardContent>
@@ -417,14 +434,40 @@ export default function DeployPage() {
                                                     </div>
                                                 )}
 
+                                                {/* DNS verification warning */}
+                                                {job.status === 'completed' && job.dnsVerified === false && (
+                                                    <div className={`text-xs rounded p-2 mb-2 flex items-center gap-1.5 ${
+                                                        job.dnsUpdateResult === 'updated'
+                                                            ? 'text-blue-600 dark:text-blue-400 bg-blue-500/10'
+                                                            : 'text-amber-600 dark:text-amber-400 bg-amber-500/10'
+                                                    }`}>
+                                                        <AlertTriangle className="h-3 w-3 shrink-0" />
+                                                        {job.dnsUpdateResult === 'updated'
+                                                            ? 'Nameservers updated at registrar — DNS propagation in progress. Domain will go live once propagation completes (typically 5–30 minutes).'
+                                                            : 'DNS not pointing to Cloudflare — update your nameservers at your registrar to the Cloudflare nameservers shown in the steps above.'}
+                                                    </div>
+                                                )}
+
                                                 {/* Result details */}
-                                                <div className="flex gap-3 text-xs text-muted-foreground">
+                                                <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
                                                     {job.filesDeployed && (
                                                         <span>{job.filesDeployed} files</span>
                                                     )}
                                                     {job.cfProject && (
                                                         <span className="flex items-center gap-1">
                                                             <Cloud className="h-3 w-3" /> {job.cfProject}
+                                                        </span>
+                                                    )}
+                                                    {job.status === 'completed' && job.dnsVerified != null && (
+                                                        <span className={`flex items-center gap-1 ${
+                                                            job.dnsVerified ? 'text-green-500'
+                                                                : job.dnsUpdateResult === 'updated' ? 'text-blue-500'
+                                                                : 'text-amber-500'
+                                                        }`}>
+                                                            {job.dnsVerified ? <CheckCircle2 className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
+                                                            {job.dnsVerified ? 'DNS verified'
+                                                                : job.dnsUpdateResult === 'updated' ? 'DNS propagating'
+                                                                : 'DNS pending'}
                                                         </span>
                                                     )}
                                                 </div>
@@ -456,6 +499,8 @@ export default function DeployPage() {
                                     <div className="flex items-center gap-2">
                                         {domain.isDeployed ? (
                                             <Badge variant="secondary" className="bg-green-500/10 text-green-500 hover:bg-green-500/20">Live</Badge>
+                                        ) : domain.cloudflareProject ? (
+                                            <Badge variant="secondary" className="bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20">DNS Pending</Badge>
                                         ) : (
                                             <Badge variant="outline" className="text-muted-foreground">Not Deployed</Badge>
                                         )}

@@ -178,8 +178,11 @@ export async function POST(request: NextRequest) {
             });
         }
 
+        const hasBlocked = blockedDomains.length > 0;
         return NextResponse.json({
-            success: true,
+            success: !hasBlocked,
+            partial: hasBlocked,
+            requested: uniqueDomainIds.length,
             queued: jobs.length,
             queueable: eligibleDomains.length,
             blocked: blockedDomains.length,

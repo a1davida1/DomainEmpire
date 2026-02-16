@@ -151,21 +151,21 @@ export default function QueuePage() {
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="flex flex-wrap gap-2">
-                    <Link href="/dashboard/content/articles">
-                        <Button variant="outline">Open Content Library</Button>
-                    </Link>
-                    <Link href="/dashboard/content/articles?contentType=calculator">
-                        <Button variant="outline">View Calculators</Button>
-                    </Link>
-                    <Link href="/dashboard/content/articles?contentType=interactive">
-                        <Button variant="outline">View Interactive Content</Button>
-                    </Link>
-                    <Link href="/dashboard/content/articles?status=review">
-                        <Button variant="outline">Review Queue</Button>
-                    </Link>
-                    <Link href="/dashboard/domains">
-                        <Button variant="ghost">Go to Domains</Button>
-                    </Link>
+                    <Button variant="outline" asChild>
+                        <Link href="/dashboard/content/articles">Open Content Library</Link>
+                    </Button>
+                    <Button variant="outline" asChild>
+                        <Link href="/dashboard/content/articles?contentType=calculator">View Calculators</Link>
+                    </Button>
+                    <Button variant="outline" asChild>
+                        <Link href="/dashboard/content/articles?contentType=interactive">View Interactive Content</Link>
+                    </Button>
+                    <Button variant="outline" asChild>
+                        <Link href="/dashboard/content/articles?status=review">Review Queue</Link>
+                    </Button>
+                    <Button variant="ghost" asChild>
+                        <Link href="/dashboard/domains">Go to Domains</Link>
+                    </Button>
                 </CardContent>
             </Card>
 

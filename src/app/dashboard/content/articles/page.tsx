@@ -96,6 +96,13 @@ function formatContentTypeLabel(contentType: string | null): string {
     return contentType.replaceAll('_', ' ');
 }
 
+function escapeLikeWildcard(value: string): string {
+    return value
+        .replaceAll('\\', '\\\\')
+        .replaceAll('%', '\\%')
+        .replaceAll('_', '\\_');
+}
+
 export default async function ArticlesPage(props: Readonly<PageProps>) {
     const { searchParams } = props;
     const params = await searchParams;
@@ -134,10 +141,11 @@ export default async function ArticlesPage(props: Readonly<PageProps>) {
 
     const baseFilters: SQL[] = [isNull(articles.deletedAt)];
     if (query) {
+        const escapedQuery = escapeLikeWildcard(query);
         const searchFilter = or(
-            like(articles.title, `%${query}%`),
-            like(articles.targetKeyword, `%${query}%`),
-            like(articles.slug, `%${query}%`),
+            like(articles.title, `%${escapedQuery}%`),
+            like(articles.targetKeyword, `%${escapedQuery}%`),
+            like(articles.slug, `%${escapedQuery}%`),
         );
         if (searchFilter) baseFilters.push(searchFilter);
     }
@@ -353,11 +361,17 @@ export default async function ArticlesPage(props: Readonly<PageProps>) {
                                                         <Edit className="h-4 w-4" />
                                                     </Button>
                                                 </Link>
-                                                <Link href={`/dashboard/domains/${article.domainId}/preview?articleId=${article.id}`}>
-                                                    <Button variant="ghost" size="sm">
+                                                {article.domainId ? (
+                                                    <Link href={`/dashboard/domains/${article.domainId}/preview?articleId=${article.id}`}>
+                                                        <Button variant="ghost" size="sm">
+                                                            Preview
+                                                        </Button>
+                                                    </Link>
+                                                ) : (
+                                                    <Button variant="ghost" size="sm" disabled>
                                                         Preview
                                                     </Button>
-                                                </Link>
+                                                )}
                                                 <Link href={`/dashboard/content/articles/${article.id}/review`}>
                                                     <Button variant="ghost" size="sm">
                                                         Review

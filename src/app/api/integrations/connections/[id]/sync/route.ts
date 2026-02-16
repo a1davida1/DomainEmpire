@@ -53,6 +53,11 @@ export async function POST(
                     { status: 409 },
                 );
             }
+            // Catch-all for any other error types — never fall through to success
+            return NextResponse.json(
+                { error: `Sync failed: ${String(result.error)}` },
+                { status: 500 },
+            );
         }
 
         return NextResponse.json({

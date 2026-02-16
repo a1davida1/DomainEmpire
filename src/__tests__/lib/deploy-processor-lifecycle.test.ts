@@ -4,6 +4,8 @@ const mockCreateDirectUploadProject = vi.fn();
 const mockDirectUploadDeploy = vi.fn();
 const mockAddCustomDomain = vi.fn();
 const mockGetZoneNameservers = vi.fn();
+const mockVerifyDomainPointsToCloudflare = vi.fn();
+const mockEnsurePagesDnsRecord = vi.fn();
 const mockUpdateNameservers = vi.fn();
 const mockGenerateSiteFiles = vi.fn();
 const mockResolveCloudflareHostShardPlan = vi.fn();
@@ -36,6 +38,8 @@ vi.mock('@/lib/deploy/cloudflare', () => ({
     directUploadDeploy: mockDirectUploadDeploy,
     addCustomDomain: mockAddCustomDomain,
     getZoneNameservers: mockGetZoneNameservers,
+    verifyDomainPointsToCloudflare: mockVerifyDomainPointsToCloudflare,
+    ensurePagesDnsRecord: mockEnsurePagesDnsRecord,
 }));
 
 vi.mock('@/lib/deploy/godaddy', () => ({
@@ -164,6 +168,15 @@ describe('deploy processor lifecycle automation', () => {
         mockAddCustomDomain.mockResolvedValue({ success: true });
         mockGetZoneNameservers.mockResolvedValue(null);
         mockUpdateNameservers.mockResolvedValue(undefined);
+        mockEnsurePagesDnsRecord.mockResolvedValue({
+            success: true,
+            action: 'created',
+        });
+        mockVerifyDomainPointsToCloudflare.mockResolvedValue({
+            verified: false,
+            nameservers: [],
+            detail: 'DNS NS lookup failed for example.com: test',
+        });
         mockAdvanceDomainLifecycleForAcquisition.mockResolvedValue({
             changed: true,
             fromState: 'acquired',

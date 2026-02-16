@@ -565,6 +565,28 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints
                             const tCfg = tierConfig[t] || tierConfig[3];
                             const deployState = resolveDeploymentState(domain);
                             const queueHint = queueHints[domain.id];
+                            const statusColor = domain.isDeployed || (domain.nameserverConfigured && !domain.nameserverPending)
+                                ? 'bg-emerald-500'
+                                : (domain.cloudflareProject || domain.nameserverPending)
+                                    ? 'bg-yellow-500'
+                                    : 'bg-gray-300';
+                            const statusTitle = domain.isDeployed
+                                ? 'NS active — deployed'
+                                : domain.nameserverConfigured && !domain.nameserverPending
+                                    ? 'Cloudflare nameserver switch recorded'
+                                    : domain.nameserverPending
+                                        ? 'Nameserver switch pending verification'
+                                        : domain.cloudflareProject
+                                            ? 'CF project created — NS not pointed'
+                                            : 'Assigned — not set up';
+                            const statusLabel = domain.cloudflareAccount
+                                || (domain.nameserverConfigured && !domain.nameserverPending
+                                    ? 'nameserver-configured'
+                                    : domain.nameserverPending
+                                        ? 'nameserver-pending'
+                                        : domain.cloudflareProject
+                                            ? 'project-created'
+                                            : '');
                             return (
                                 <TableRow
                                     key={domain.id}
@@ -619,20 +641,10 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints
                                                     </a>
                                                 )}
                                             </div>
-                                            {(domain.cloudflareAccount || domain.nameserverConfigured || domain.nameserverPending || domain.cloudflareProject) && (
+                                            {statusLabel && (
                                                 <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                                                    <span className={`inline-block h-1.5 w-1.5 rounded-full ${
-                                                        domain.isDeployed || (domain.nameserverConfigured && !domain.nameserverPending) ? 'bg-emerald-500'
-                                                            : domain.cloudflareProject || domain.nameserverPending ? 'bg-yellow-500'
-                                                                : 'bg-gray-300'
-                                                    }`} title={
-                                                        domain.isDeployed ? 'NS active — deployed'
-                                                            : domain.nameserverConfigured && !domain.nameserverPending ? 'Cloudflare nameserver switch recorded'
-                                                                : domain.nameserverPending ? 'Nameserver switch pending verification'
-                                                                    : domain.cloudflareProject ? 'CF project created — NS not pointed'
-                                                                        : 'Assigned — not set up'
-                                                    } />
-                                                    {domain.cloudflareAccount || 'cloudflare-detected'}
+                                                    <span className={`inline-block h-1.5 w-1.5 rounded-full ${statusColor}`} title={statusTitle} />
+                                                    {statusLabel}
                                                 </span>
                                             )}
                                         </div>

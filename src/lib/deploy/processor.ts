@@ -13,7 +13,7 @@
 
 import { db, domains, contentQueue, articles } from '@/lib/db';
 import { eq, count } from 'drizzle-orm';
-import { createDirectUploadProject, directUploadDeploy, addCustomDomain, getZoneNameservers } from './cloudflare';
+import { createDirectUploadProject, directUploadDeploy, addCustomDomain, getZoneNameservers, verifyDomainPointsToCloudflare, ensurePagesDnsRecord } from './cloudflare';
 import {
     hasRegistrarNameserverCredentials,
     isAutomatedNameserverRegistrar,
@@ -269,15 +269,55 @@ async function stepAddCustomDomain(ctx: DeployContext): Promise<boolean> {
 }
 
 /**
- * Step 4: Update DNS via registrar API (GoDaddy/Namecheap)
+ * Step 4: Configure CNAME DNS record in Cloudflare zone → Pages project
  */
-async function stepUpdateDns(ctx: DeployContext, customDomainLinked: boolean): Promise<void> {
-    if (!ctx.payload.addCustomDomain || !customDomainLinked) {
+async function stepConfigureDnsRecord(ctx: DeployContext, customDomainLinked: boolean): Promise<void> {
+    if (!ctx.payload.addCustomDomain || !customDomainLinked || !ctx.cfProject) {
         await doneStep(ctx, 3, 'Skipped (Custom domain not linked)');
         return;
     }
 
     await startStep(ctx, 3);
+
+    try {
+        // Resolve the Pages subdomain from the project name
+        const pagesTarget = `${ctx.cfProject}.pages.dev`;
+        const result = await ensurePagesDnsRecord(
+            ctx.payload.domain,
+            pagesTarget,
+            ctx.hostShard.cloudflare,
+        );
+
+        if (!result.success) {
+            await failStep(ctx, 3, result.error || 'Failed to configure DNS record');
+            throw new Error(result.error || 'Failed to configure DNS record for Pages project');
+        }
+
+        const actionLabel = result.action === 'created' ? 'Created'
+            : result.action === 'updated' ? 'Updated'
+            : 'Already configured';
+        await doneStep(ctx, 3, `${actionLabel} CNAME → ${pagesTarget}`);
+    } catch (err: unknown) {
+        if ((err as Error).message?.includes('Failed to configure DNS record')) {
+            throw err;
+        }
+        await failStep(ctx, 3, `DNS record configuration failed: ${err instanceof Error ? err.message : String(err)}`);
+        throw err;
+    }
+}
+
+/**
+ * Step 5: Update DNS via registrar API (GoDaddy/Namecheap)
+ */
+type DnsUpdateResult = 'updated' | 'skipped' | 'failed';
+
+async function stepUpdateDns(ctx: DeployContext, customDomainLinked: boolean): Promise<DnsUpdateResult> {
+    if (!ctx.payload.addCustomDomain || !customDomainLinked) {
+        await doneStep(ctx, 4, 'Skipped (Custom domain not linked)');
+        return 'skipped';
+    }
+
+    await startStep(ctx, 4);
 
     try {
         const [domainRow] = await db.select({ registrar: domains.registrar })
@@ -286,13 +326,13 @@ async function stepUpdateDns(ctx: DeployContext, customDomainLinked: boolean): P
             .limit(1);
 
         if (!domainRow || !isAutomatedNameserverRegistrar(domainRow.registrar)) {
-            await doneStep(ctx, 3, 'Skipped (Registrar unsupported for automated DNS)');
-            return;
+            await doneStep(ctx, 4, 'Skipped (Registrar unsupported for automated DNS)');
+            return 'skipped';
         }
 
         if (!hasRegistrarNameserverCredentials(domainRow.registrar)) {
-            await doneStep(ctx, 3, `Skipped (Missing registrar credentials: ${registrarCredentialHint(domainRow.registrar)})`);
-            return;
+            await doneStep(ctx, 4, `Skipped (Missing registrar credentials: ${registrarCredentialHint(domainRow.registrar)})`);
+            return 'skipped';
         }
 
         let zone = await getZoneNameservers(ctx.payload.domain, ctx.hostShard.cloudflare);
@@ -310,15 +350,42 @@ async function stepUpdateDns(ctx: DeployContext, customDomainLinked: boolean): P
         }
 
         if (!zone) {
-            await failStep(ctx, 3, `Unable to resolve Cloudflare nameservers for ${ctx.payload.domain}`);
-            return;
+            await failStep(ctx, 4, `Unable to resolve Cloudflare nameservers for ${ctx.payload.domain}`);
+            return 'failed';
         }
 
         await updateRegistrarNameservers(domainRow.registrar, ctx.payload.domain, zone.nameservers);
-        await doneStep(ctx, 3, `Nameservers updated (${zone.nameservers.join(', ')}) via shard ${zoneShardKey}`);
+        await doneStep(ctx, 4, `Nameservers updated (${zone.nameservers.join(', ')}) via shard ${zoneShardKey}`);
+        return 'updated';
     } catch (err) {
-        await failStep(ctx, 3, err instanceof Error ? err.message : 'DNS update failed');
+        await failStep(ctx, 4, err instanceof Error ? err.message : 'DNS update failed');
         console.error(`DNS update failed for ${ctx.payload.domain}:`, err);
+        return 'failed';
+    }
+}
+
+/**
+ * Step 6: Verify that live DNS NS records point to Cloudflare.
+ * This is the ground-truth check — if NS records don't resolve to CF,
+ * browsers will not reach the Cloudflare Pages deployment.
+ */
+async function stepVerifyDns(ctx: DeployContext): Promise<boolean> {
+    await startStep(ctx, 5);
+
+    try {
+        const result = await verifyDomainPointsToCloudflare(ctx.payload.domain);
+
+        if (result.verified) {
+            await doneStep(ctx, 5, result.detail);
+            return true;
+        }
+
+        // Not a hard failure — files are deployed, but domain isn't reachable yet
+        await doneStep(ctx, 5, `DNS not pointing to Cloudflare: ${result.detail}. Domain will not serve content until NS records are updated.`);
+        return false;
+    } catch (err) {
+        await doneStep(ctx, 5, `DNS verification inconclusive: ${err instanceof Error ? err.message : String(err)}`);
+        return false;
     }
 }
 
@@ -392,7 +459,9 @@ export async function processDeployJob(jobId: string): Promise<void> {
             { step: 'Generate Files', status: 'pending' },
             { step: 'Upload to Cloudflare', status: 'pending' },
             { step: 'Add Custom Domain', status: 'pending' },
-            { step: 'Update DNS', status: 'pending' },
+            { step: 'Configure DNS Record', status: 'pending' },
+            { step: 'Update Nameservers', status: 'pending' },
+            { step: 'Verify DNS', status: 'pending' },
         ],
     };
 
@@ -400,7 +469,15 @@ export async function processDeployJob(jobId: string): Promise<void> {
         const files = await stepGenerateFiles(ctx);
         await stepDirectUpload(ctx, files);
         const customDomainLinked = await stepAddCustomDomain(ctx);
-        await stepUpdateDns(ctx, customDomainLinked);
+        await stepConfigureDnsRecord(ctx, customDomainLinked);
+        const dnsUpdateResult = await stepUpdateDns(ctx, customDomainLinked);
+        const dnsVerified = await stepVerifyDns(ctx);
+
+        // Determine deployed status:
+        // - Step 4 (Configure DNS Record) creates the CNAME in the CF zone → Pages project.
+        // - Step 5 (Update Nameservers) pushed NS to registrar → trust it, propagation will complete.
+        // - Step 6 (Verify DNS) is the live check — used when step 5 was skipped/failed.
+        const shouldMarkDeployed = dnsUpdateResult === 'updated' || dnsVerified;
 
         // Mark complete
         await db.update(contentQueue).set({
@@ -410,12 +487,14 @@ export async function processDeployJob(jobId: string): Promise<void> {
                 steps: ctx.steps,
                 cfProject: ctx.cfProject,
                 filesDeployed: files.length,
+                dnsVerified,
+                dnsUpdateResult,
                 completedAt: new Date().toISOString(),
             },
         }).where(eq(contentQueue.id, jobId));
 
         await db.update(domains).set({
-            isDeployed: true,
+            isDeployed: shouldMarkDeployed,
             lastDeployedAt: new Date(),
             updatedAt: new Date(),
         }).where(eq(domains.id, ctx.domainId));

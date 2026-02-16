@@ -1012,6 +1012,9 @@ export default async function DomainDetailPage({ params }: PageProps) {
                                         <Link href={`/dashboard/domains/${id}/preview?articleId=${article.id}`} className="text-xs text-blue-600 hover:underline">
                                             Preview
                                         </Link>
+                                        <Link href={`/dashboard/content/articles/${article.id}/visual-review`} className="text-xs text-blue-600 hover:underline">
+                                            Visual Review
+                                        </Link>
                                         <Link href={`/dashboard/content/articles/${article.id}/review`} className="text-xs text-blue-600 hover:underline">
                                             Review
                                         </Link>
