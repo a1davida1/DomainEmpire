@@ -174,7 +174,10 @@ registerBlockRenderer('QuoteCalculator', (block, _ctx) => {
         ? `<details class="calc-methodology"><summary>Methodology</summary><p>${escapeHtml(methodology)}</p></details>`
         : '';
 
-    const calcScript = formula ? `<script>
+    // Sanitize formula: only allow safe math expression characters to prevent code injection
+    const safeFormula = formula.replace(/[^a-zA-Z0-9_\s+\-*/%().,:{}[\]]/g, '');
+
+    const calcScript = safeFormula ? `<script>
 (function(){
   var inputs=document.querySelectorAll('.calc-input');
   function calculate(){
@@ -183,7 +186,7 @@ registerBlockRenderer('QuoteCalculator', (block, _ctx) => {
       vals[inp.name]=parseFloat(inp.value)||0;
     });
     try{
-      var fn=new Function(Object.keys(vals).join(','),'return ('+${JSON.stringify(formula)}+')');
+      var fn=new Function(Object.keys(vals).join(','),'return ('+${JSON.stringify(safeFormula)}+')');
       var result=fn.apply(null,Object.values(vals));
       ${outputs.map(out => {
         const format = out.format === 'currency'

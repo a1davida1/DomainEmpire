@@ -11,7 +11,7 @@ export {
     validateBlock,
     type BlockType,
     type BlockEnvelope,
-    type PageDefinition,
+    type PageDefinitionBlock,
     type AnyBlock,
     type TypedBlock,
     // Content types

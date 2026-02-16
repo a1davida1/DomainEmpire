@@ -7,6 +7,7 @@ import { KeyboardShortcutsHelp } from '@/components/dashboard/KeyboardShortcutsH
 import { PageTitle } from '@/components/dashboard/PageTitle';
 import { PageTransition } from '@/components/dashboard/PageTransition';
 import { QueueBackgroundProcessor } from '@/components/dashboard/QueueBackgroundProcessor';
+import { CsrfFetchInit } from '@/components/dashboard/CsrfFetchInit';
 import { verifyAuth } from '@/lib/auth';
 import { ensureServerWorkerStarted } from '@/lib/ai/worker-bootstrap';
 import { redirect } from 'next/navigation';
@@ -42,6 +43,7 @@ export default async function DashboardLayout({
             <KeyboardShortcutsHelp />
             <PageTitle />
             <QueueBackgroundProcessor />
+            <CsrfFetchInit />
         </div>
     );
 }

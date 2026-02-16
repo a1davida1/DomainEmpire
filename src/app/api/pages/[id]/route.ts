@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { db, pageDefinitions } from '@/lib/db';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -61,7 +61,23 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
             }
             updates.skin = body.skin;
         }
-        if (body.route !== undefined) updates.route = body.route;
+        if (body.route !== undefined) {
+            if (body.route !== existing[0].route) {
+                const conflict = await db.select({ id: pageDefinitions.id }).from(pageDefinitions)
+                    .where(and(
+                        eq(pageDefinitions.domainId, existing[0].domainId),
+                        eq(pageDefinitions.route, body.route),
+                    ))
+                    .limit(1);
+                if (conflict.length > 0) {
+                    return NextResponse.json(
+                        { error: `Route "${body.route}" already exists for this domain`, existingId: conflict[0].id },
+                        { status: 409 },
+                    );
+                }
+            }
+            updates.route = body.route;
+        }
         if (body.isPublished !== undefined) updates.isPublished = body.isPublished;
         if (body.blocks !== undefined) {
             if (!Array.isArray(body.blocks)) {

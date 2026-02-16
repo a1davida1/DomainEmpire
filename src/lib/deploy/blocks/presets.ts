@@ -9,6 +9,7 @@
  * Each preset is an array of partial BlockEnvelope objects (id is generated at insert time).
  */
 
+import { randomUUID } from 'crypto';
 import type { BlockType } from './schemas';
 
 interface PresetBlock {
@@ -325,17 +326,14 @@ export const ARTICLE_PAGE_PRESETS: Record<string, PresetBlock[]> = {
     ],
 };
 
-let _idCounter = 0;
-
 /** Generate a unique block ID for use in page definitions */
 function generateBlockId(): string {
-    _idCounter += 1;
-    return `blk_${Date.now().toString(36)}_${_idCounter.toString(36)}`;
+    return `blk_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
 }
 
-/** Reset the ID counter (useful for tests) */
+/** @deprecated No-op. Kept for test compatibility. */
 export function resetBlockIdCounter(): void {
-    _idCounter = 0;
+    // No-op — IDs are now generated via crypto.randomUUID()
 }
 
 /**

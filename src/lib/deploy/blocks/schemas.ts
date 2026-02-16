@@ -831,7 +831,7 @@ export const PageDefinitionSchema = z.object({
   blocks: z.array(BlockEnvelopeSchema),
 });
 
-export type PageDefinition = z.infer<typeof PageDefinitionSchema>;
+export type PageDefinitionBlock = z.infer<typeof PageDefinitionSchema>;
 
 // ============================================================
 // Content schema registry — maps block type to content + config schemas

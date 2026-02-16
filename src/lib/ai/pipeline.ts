@@ -1295,12 +1295,11 @@ export async function processAiDetectionCheckJob(jobId: string): Promise<void> {
             });
         } else {
             // Marginal (0.30-0.50) or exhausted rehumanize attempts: proceed but flag for review
-            if (detectionResult.verdict !== 'pass') {
-                await db.update(articles).set({
-                    status: 'review',
-                }).where(eq(articles.id, article.id));
-                console.log(`[Pipeline] AI detection ${detectionResult.verdict} (score: ${detectionResult.averageGeneratedProb.toFixed(3)}), flagging article ${article.id} for human review`);
-            }
+            // verdict is guaranteed non-pass here (narrowed by the if/else-if above)
+            await db.update(articles).set({
+                status: 'review',
+            }).where(eq(articles.id, article.id));
+            console.log(`[Pipeline] AI detection ${detectionResult.verdict} (score: ${detectionResult.averageGeneratedProb.toFixed(3)}), flagging article ${article.id} for human review`);
             await enqueueContentJob({
                 jobType: 'generate_meta',
                 domainId: job.domainId,

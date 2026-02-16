@@ -156,8 +156,10 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
 }
 
 /**
- * POST /api/pages/[id]/preview — Create a persistent preview build record.
- * Stores the rendered HTML and returns a preview build ID that can be shared.
+ * POST /api/pages/[id]/preview — Create a persistent preview build snapshot.
+ * Renders the page at its current version, stores the HTML in buildLog,
+ * and returns a preview build ID. The snapshot is immutable — if the page
+ * changes, a new POST creates a new snapshot.
  */
 export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
     const params = await props.params;
@@ -216,6 +218,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
             domainId: pageDef.domainId,
             previewUrl,
             buildStatus: 'ready',
+            buildLog: previewHtml,
             expiresAt,
             metadata: {
                 pageDefinitionId: id,
@@ -223,7 +226,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
                 theme: themeName,
                 skin: skinName,
                 blockCount: blocks.length,
-                version: pageDef.version,
+                snapshotVersion: pageDef.version,
                 htmlLength: previewHtml.length,
                 generatedAt: new Date().toISOString(),
             },
