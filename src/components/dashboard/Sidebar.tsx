@@ -126,6 +126,18 @@ export function Sidebar() {
         links[next].focus();
     }, []);
 
+    // Shift+D keyboard shortcut to toggle dark mode
+    useEffect(() => {
+        function onKey(e: KeyboardEvent) {
+            if (e.key === 'D' && e.shiftKey && !['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) {
+                e.preventDefault();
+                setTheme(theme === 'dark' ? 'light' : 'dark');
+            }
+        }
+        document.addEventListener('keydown', onKey);
+        return () => document.removeEventListener('keydown', onKey);
+    }, [theme, setTheme]);
+
     useEffect(() => {
         let active = true;
         function fetchFailed() {
