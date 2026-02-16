@@ -7,7 +7,7 @@
  */
 
 import { registerBlockRenderer } from './assembler';
-import { escapeHtml, escapeAttr } from '../templates/shared';
+import { escapeHtml, escapeAttr, sanitizeArticleHtml } from '../templates/shared';
 
 // ============================================================
 // ComparisonTable
@@ -477,7 +477,7 @@ registerBlockRenderer('InteractiveMap', (block, _ctx) => {
         const display = key === defaultKey ? '' : ' style="display:none"';
         return `<div class="imap-panel" data-region-key="${escapeAttr(key)}"${display}>
   <h3>${escapeHtml(val.label)}</h3>
-  <div class="imap-panel-content">${val.content}</div>
+  <div class="imap-panel-content">${sanitizeArticleHtml(val.content)}</div>
 </div>`;
     }).join('\n');
 
@@ -523,11 +523,11 @@ registerBlockRenderer('GeoContent', (block, _ctx) => {
         const label = data.label ? `<span class="geo-label">${escapeHtml(data.label)}</span>` : '';
         return `<div class="geo-block" data-region="${escapeHtml(region)}" style="display:none">
   ${label}
-  <div class="geo-content">${data.content}</div>
+  <div class="geo-content">${sanitizeArticleHtml(data.content)}</div>
 </div>`;
     }).join('\n');
 
-    const fallbackHtml = `<div class="geo-block geo-fallback"><div class="geo-content">${fallback}</div></div>`;
+    const fallbackHtml = `<div class="geo-block geo-fallback"><div class="geo-content">${sanitizeArticleHtml(fallback)}</div></div>`;
 
     return `<div class="geo-adaptive">
   ${regionBlocks}

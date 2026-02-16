@@ -19,6 +19,7 @@ import {
     buildFreshnessBadge,
     buildPrintButton,
     buildWebSiteSchema,
+    extractSiteTitle,
     type DisclosureInfo,
     type ArticleDatasetInfo,
     type PageShell,
@@ -47,25 +48,7 @@ import './blocks/renderers-interactive';
 import { marked } from 'marked';
 import sanitizeHtml from 'sanitize-html';
 
-/** Extract a human-readable site title from a domain name. Handles ccTLDs like example.co.uk. */
-function extractSiteTitle(domain: string): string {
-    // Remove known ccTLD suffixes first, then take the SLD
-    const ccTlds = ['.co.uk', '.com.au', '.co.nz', '.co.za', '.com.br', '.co.in', '.org.uk', '.net.au'];
-    let sld = domain;
-    for (const ccTld of ccTlds) {
-        if (domain.endsWith(ccTld)) {
-            sld = domain.slice(0, -ccTld.length);
-            break;
-        }
-    }
-    // If no ccTLD matched, strip the last TLD segment
-    if (sld === domain) {
-        const lastDot = domain.lastIndexOf('.');
-        sld = lastDot > 0 ? domain.slice(0, lastDot) : domain;
-    }
-    // Convert hyphens to spaces and title-case
-    return sld.replaceAll('-', ' ').replaceAll(/\b\w/g, c => c.toUpperCase());
-}
+// extractSiteTitle imported from './templates/shared'
 
 interface SiteConfig {
     domainId: string;
@@ -291,11 +274,7 @@ async function generateV2SiteFiles(
         { path: '_headers', content: generateHeaders() },
         {
             path: 'sitemap.xml',
-            content: generateSitemap(
-                { domainId: domain.id, domain: domain.domain, title: siteTitle, description: `Expert guides about ${niche}`, niche, template: domain.siteTemplate || 'authority', scripts },
-                publishedArticles,
-                [],
-            ),
+            content: generateV2Sitemap(domain.domain, pageDefs),
         },
     );
 
@@ -606,6 +585,22 @@ function generateHeaders(): string {
 /sitemap.xml
   Cache-Control: public, max-age=86400
 `;
+}
+
+/** Generate sitemap for v2 block-based sites using actual page definition routes */
+function generateV2Sitemap(domain: string, pageDefs: PageDefinitionRow[]): string {
+    const now = new Date().toISOString().split('T')[0];
+    const urls = pageDefs.map(pd => {
+        const route = pd.route === '/' ? '' : pd.route.replace(/^\//, '');
+        const loc = route ? `https://${domain}/${route}` : `https://${domain}/`;
+        const lastmod = pd.updatedAt ? new Date(pd.updatedAt).toISOString().split('T')[0] : now;
+        const priority = pd.route === '/' ? '1.0' : '0.8';
+        return `<url><loc>${loc}</loc><lastmod>${lastmod}</lastmod><changefreq>weekly</changefreq><priority>${priority}</priority></url>`;
+    });
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls.join('\n')}
+</urlset>`;
 }
 
 function generateSitemap(config: SiteConfig, articleList: typeof articles.$inferSelect[], trustPages?: string[]): string {

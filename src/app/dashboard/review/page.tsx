@@ -73,12 +73,21 @@ async function approvePageAction(formData: FormData) {
     const pageId = formData.get('pageId') as string;
     if (!pageId) return;
 
-    await db.update(pageDefinitions).set({
-        status: 'approved',
-        lastReviewedAt: new Date(),
-        lastReviewedBy: user.id,
-        updatedAt: new Date(),
-    }).where(eq(pageDefinitions.id, pageId));
+    await db.transaction(async (tx) => {
+        await tx.update(pageDefinitions).set({
+            status: 'approved',
+            lastReviewedAt: new Date(),
+            lastReviewedBy: user.id,
+            updatedAt: new Date(),
+        }).where(eq(pageDefinitions.id, pageId));
+
+        await tx.insert(reviewEvents).values({
+            pageDefinitionId: pageId,
+            actorId: user.id,
+            actorRole: user.role,
+            eventType: 'approved',
+        });
+    });
     revalidatePath('/dashboard/review');
 }
 
@@ -91,13 +100,22 @@ async function rejectPageAction(formData: FormData) {
     const pageId = formData.get('pageId') as string;
     if (!pageId) return;
 
-    await db.update(pageDefinitions).set({
-        status: 'draft',
-        isPublished: false,
-        lastReviewedAt: new Date(),
-        lastReviewedBy: user.id,
-        updatedAt: new Date(),
-    }).where(eq(pageDefinitions.id, pageId));
+    await db.transaction(async (tx) => {
+        await tx.update(pageDefinitions).set({
+            status: 'draft',
+            isPublished: false,
+            lastReviewedAt: new Date(),
+            lastReviewedBy: user.id,
+            updatedAt: new Date(),
+        }).where(eq(pageDefinitions.id, pageId));
+
+        await tx.insert(reviewEvents).values({
+            pageDefinitionId: pageId,
+            actorId: user.id,
+            actorRole: user.role,
+            eventType: 'rejected',
+        });
+    });
     revalidatePath('/dashboard/review');
 }
 

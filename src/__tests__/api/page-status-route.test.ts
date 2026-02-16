@@ -220,5 +220,7 @@ describe('POST /api/pages/[id]/status', () => {
         expect(eventValues.actorId).toBe('u1');
         expect(eventValues.eventType).toBe('approved');
         expect(eventValues.rationale).toBe('Looks good');
+        expect(eventValues.pageDefinitionId).toBe(VALID_UUID);
+        expect(eventValues.articleId).toBeUndefined();
     });
 });

@@ -35,6 +35,7 @@ export interface BlockGenerationResult {
     blockId: string;
     blockType: BlockType;
     success: boolean;
+    skipped?: boolean;
     content?: Record<string, unknown>;
     error?: string;
     tokensUsed?: number;
@@ -75,6 +76,7 @@ export async function generateBlockContent(
             blockId: block.id,
             blockType,
             success: true,
+            skipped: true,
             content: block.content as Record<string, unknown> | undefined,
         };
     }
@@ -85,6 +87,7 @@ export async function generateBlockContent(
             blockId: block.id,
             blockType,
             success: true,
+            skipped: true,
             content: block.content as Record<string, unknown>,
         };
     }
@@ -95,8 +98,8 @@ export async function generateBlockContent(
             blockId: block.id,
             blockType,
             success: true,
-            skippedCount: 1,
-        } as BlockGenerationResult;
+            skipped: true,
+        };
     }
 
     // Get the prompt
@@ -242,7 +245,10 @@ export async function generatePageBlockContent(
         const result = await generateBlockContent(block, ctx);
         results.push(result);
 
-        if (result.success) {
+        if (result.skipped) {
+            skippedCount++;
+            updatedBlocks.push(block);
+        } else if (result.success) {
             successCount++;
             updatedBlocks.push({
                 ...block,
@@ -260,9 +266,6 @@ export async function generatePageBlockContent(
         if (result.cost) totalCost += result.cost;
         if (result.durationMs) totalDurationMs += result.durationMs;
     }
-
-    // Count blocks that were skipped (structural or already had content)
-    skippedCount = blocks.length - successCount - failureCount;
 
     // Update the page definition with generated content
     await db.update(pageDefinitions).set({

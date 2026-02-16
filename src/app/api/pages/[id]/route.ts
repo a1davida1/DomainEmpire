@@ -5,6 +5,9 @@ import { eq } from 'drizzle-orm';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const VALID_THEMES = new Set(['clean', 'editorial', 'bold', 'minimal']);
+const VALID_SKINS = new Set(['slate', 'ocean', 'forest', 'ember', 'midnight', 'coral']);
+
 // GET /api/pages/[id] — Fetch a single page definition with its blocks
 export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
     const params = await props.params;
@@ -46,8 +49,18 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
 
         if (body.title !== undefined) updates.title = body.title;
         if (body.metaDescription !== undefined) updates.metaDescription = body.metaDescription;
-        if (body.theme !== undefined) updates.theme = body.theme;
-        if (body.skin !== undefined) updates.skin = body.skin;
+        if (body.theme !== undefined) {
+            if (typeof body.theme !== 'string' || !VALID_THEMES.has(body.theme)) {
+                return NextResponse.json({ error: `Invalid theme. Must be one of: ${[...VALID_THEMES].join(', ')}` }, { status: 400 });
+            }
+            updates.theme = body.theme;
+        }
+        if (body.skin !== undefined) {
+            if (typeof body.skin !== 'string' || !VALID_SKINS.has(body.skin)) {
+                return NextResponse.json({ error: `Invalid skin. Must be one of: ${[...VALID_SKINS].join(', ')}` }, { status: 400 });
+            }
+            updates.skin = body.skin;
+        }
         if (body.route !== undefined) updates.route = body.route;
         if (body.isPublished !== undefined) updates.isPublished = body.isPublished;
         if (body.blocks !== undefined) {

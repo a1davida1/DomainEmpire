@@ -537,6 +537,11 @@ export const articles = pgTable('articles', {
         style: 'bar' | 'card' | 'banner';
     }>(),
 
+    // AI Detection
+    aiDetectionScore: numeric('ai_detection_score', { precision: 5, scale: 4, mode: 'number' }),
+    aiDetectionResult: jsonb('ai_detection_result'),
+    aiDetectionCheckedAt: timestamp('ai_detection_checked_at'),
+
     // Timestamps
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow(),
@@ -625,6 +630,8 @@ export const contentQueue = pgTable('content_queue', {
             'campaign_launch_recovery',
             // Template System v2 block content generation
             'generate_block_content',
+            // AI detection pipeline stage
+            'ai_detection_check',
         ]
     }).notNull(),
 
@@ -763,6 +770,32 @@ export const researchCache = pgTable('research_cache', {
     fetchedIdx: index('research_cache_fetched_idx').on(t.fetchedAt),
     expiresIdx: index('research_cache_expires_idx').on(t.expiresAt),
     domainPriorityIdx: index('research_cache_domain_priority_idx').on(t.domainPriority),
+}));
+
+// ===========================================
+// DOMAIN KNOWLEDGE: Persistent per-domain fact accumulation
+// ===========================================
+export const domainKnowledge = pgTable('domain_knowledge', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    domainId: uuid('domain_id').notNull().references(() => domains.id, { onDelete: 'cascade' }),
+    category: text('category', {
+        enum: ['statistic', 'fact', 'quote', 'development', 'source'],
+    }).notNull(),
+    content: text('content').notNull(),
+    contentHash: text('content_hash').notNull(),
+    sourceUrl: text('source_url'),
+    sourceTitle: text('source_title'),
+    confidence: numeric('confidence', { precision: 3, scale: 2, mode: 'number' }).default(0.7).notNull(),
+    firstSeenArticleId: uuid('first_seen_article_id').references(() => articles.id, { onDelete: 'set null' }),
+    lastUsedAt: timestamp('last_used_at').defaultNow(),
+    useCount: integer('use_count').default(1).notNull(),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+}, (t) => ({
+    domainIdx: index('domain_knowledge_domain_idx').on(t.domainId),
+    categoryIdx: index('domain_knowledge_category_idx').on(t.domainId, t.category),
+    contentHashUidx: uniqueIndex('domain_knowledge_content_hash_uidx').on(t.domainId, t.contentHash),
+    lastUsedIdx: index('domain_knowledge_last_used_idx').on(t.lastUsedAt),
 }));
 
 // ===========================================
@@ -1249,7 +1282,7 @@ export const apiCallLogs = pgTable('api_call_logs', {
     domainId: uuid('domain_id').references(() => domains.id, { onDelete: 'set null' }),
 
     stage: text('stage', {
-        enum: ['keyword_research', 'outline', 'draft', 'humanize', 'seo', 'resolve_links', 'meta', 'classify', 'research', 'evaluate', 'ai_review']
+        enum: ['keyword_research', 'outline', 'draft', 'humanize', 'seo', 'resolve_links', 'meta', 'classify', 'research', 'evaluate', 'ai_review', 'ai_detection', 'vision']
     }).notNull(),
     modelKey: text('model_key').notNull().default('legacy'),
     model: text('model').notNull(),
@@ -1525,7 +1558,8 @@ export const contentRevisions = pgTable('content_revisions', {
 // ===========================================
 export const reviewEvents = pgTable('review_events', {
     id: uuid('id').primaryKey().defaultRandom(),
-    articleId: uuid('article_id').notNull().references(() => articles.id, { onDelete: 'cascade' }),
+    articleId: uuid('article_id').references(() => articles.id, { onDelete: 'cascade' }),
+    pageDefinitionId: uuid('page_definition_id').references(() => pageDefinitions.id, { onDelete: 'cascade' }),
     revisionId: uuid('revision_id').references(() => contentRevisions.id),
     actorId: uuid('actor_id').notNull().references(() => users.id),
     actorRole: text('actor_role').notNull(),
@@ -1541,6 +1575,7 @@ export const reviewEvents = pgTable('review_events', {
     createdAt: timestamp('created_at').defaultNow(),
 }, (t) => ({
     articleIdx: index('review_event_article_idx').on(t.articleId),
+    pageDefIdx: index('review_event_page_def_idx').on(t.pageDefinitionId),
     actorIdx: index('review_event_actor_idx').on(t.actorId),
     typeIdx: index('review_event_type_idx').on(t.eventType),
     createdIdx: index('review_event_created_idx').on(t.createdAt),
@@ -2153,6 +2188,10 @@ export const reviewEventsRelations = relations(reviewEvents, ({ one }) => ({
         fields: [reviewEvents.articleId],
         references: [articles.id],
     }),
+    pageDefinition: one(pageDefinitions, {
+        fields: [reviewEvents.pageDefinitionId],
+        references: [pageDefinitions.id],
+    }),
     revision: one(contentRevisions, {
         fields: [reviewEvents.revisionId],
         references: [contentRevisions.id],
@@ -2530,6 +2569,8 @@ export type ContentQueueJob = typeof contentQueue.$inferSelect;
 export type DomainResearch = typeof domainResearch.$inferSelect;
 export type AcquisitionEvent = typeof acquisitionEvents.$inferSelect;
 export type ResearchCache = typeof researchCache.$inferSelect;
+export type DomainKnowledge = typeof domainKnowledge.$inferSelect;
+export type NewDomainKnowledge = typeof domainKnowledge.$inferInsert;
 export type PromotionCampaign = typeof promotionCampaigns.$inferSelect;
 export type DomainChannelProfile = typeof domainChannelProfiles.$inferSelect;
 export type PromotionJob = typeof promotionJobs.$inferSelect;

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth';
+import { requireRole } from '@/lib/auth';
 import { processStagingDeploy } from '@/lib/deploy/processor';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -13,7 +13,7 @@ export async function POST(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
-    const authError = await requireAuth(request);
+    const authError = await requireRole(request, 'reviewer');
     if (authError) return authError;
 
     const { id } = await params;

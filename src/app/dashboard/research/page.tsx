@@ -215,7 +215,8 @@ export default function ResearchPage() {
     const [candidateRequeueingId, setCandidateRequeueingId] = useState<string | null>(null);
     const [pipelineMessage, setPipelineMessage] = useState<string | null>(null);
     const [suggesting, setSuggesting] = useState(false);
-    const [suggestions, setSuggestions] = useState<string[]>([]);
+    const [suggestions, setSuggestions] = useState<Array<{ domain: string; available: string }>>([]);
+    const [suggestionStats, setSuggestionStats] = useState<{ totalChecked: number; totalAvailable: number; rerollCount: number } | null>(null);
 
     useEffect(() => {
         loadKeywordOpportunities();
@@ -440,6 +441,7 @@ export default function ResearchPage() {
     async function suggestDomains() {
         setSuggesting(true);
         setSuggestions([]);
+        setSuggestionStats(null);
         try {
             const res = await fetch('/api/research/suggest', {
                 method: 'POST',
@@ -449,6 +451,13 @@ export default function ResearchPage() {
             const data = await res.json();
             if (res.ok && Array.isArray(data?.suggestions)) {
                 setSuggestions(data.suggestions);
+                if (data.availabilityChecked) {
+                    setSuggestionStats({
+                        totalChecked: data.totalChecked ?? 0,
+                        totalAvailable: data.totalAvailable ?? 0,
+                        rerollCount: data.rerollCount ?? 0,
+                    });
+                }
             } else {
                 setError(data.error || 'Failed to get suggestions');
             }
@@ -913,13 +922,22 @@ export default function ResearchPage() {
                 <CardHeader className="flex flex-row items-center justify-between">
                     <div>
                         <CardTitle>AI Domain Suggestions</CardTitle>
-                        <CardDescription>AI-powered domain recommendations based on portfolio gaps and niche expansion opportunities</CardDescription>
+                        <CardDescription>AI-powered domain recommendations with availability checking</CardDescription>
                     </div>
                     <Button variant="outline" onClick={suggestDomains} disabled={suggesting}>
-                        {suggesting ? 'Thinking...' : 'Suggest Domains'}
+                        {suggesting ? 'Checking availability...' : 'Suggest Domains'}
                     </Button>
                 </CardHeader>
                 <CardContent>
+                    {suggestionStats && (
+                        <div className="flex items-center gap-4 text-xs text-muted-foreground mb-3 pb-3 border-b">
+                            <span>Checked: {suggestionStats.totalChecked}</span>
+                            <span className="text-green-600">Available: {suggestionStats.totalAvailable}</span>
+                            {suggestionStats.rerollCount > 0 && (
+                                <span>Rerolls: {suggestionStats.rerollCount}</span>
+                            )}
+                        </div>
+                    )}
                     {suggestions.length === 0 ? (
                         <p className="text-muted-foreground text-center py-6">
                             Click &quot;Suggest Domains&quot; to get AI-powered acquisition targets based on your portfolio.
@@ -928,13 +946,22 @@ export default function ResearchPage() {
                         <div className="space-y-2">
                             {suggestions.map((s, i) => (
                                 <div key={i} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                                    <span className="font-medium font-mono">{s}</span>
+                                    <div className="flex items-center gap-2">
+                                        <span className="font-medium font-mono">{s.domain}</span>
+                                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                            s.available === 'available'
+                                                ? 'bg-green-100 text-green-800'
+                                                : 'bg-yellow-100 text-yellow-800'
+                                        }`}>
+                                            {s.available === 'available' ? 'Available' : 'Unconfirmed'}
+                                        </span>
+                                    </div>
                                     <div className="flex gap-2">
                                         <Button
                                             variant="outline"
                                             size="sm"
                                             onClick={() => {
-                                                const parts = s.split('.');
+                                                const parts = s.domain.split('.');
                                                 const t = parts.pop() || 'com';
                                                 setDomainInput(parts.join('.'));
                                                 setTld(t);
@@ -945,11 +972,11 @@ export default function ResearchPage() {
                                         <Button
                                             size="sm"
                                             onClick={() => {
-                                                const parts = s.split('.');
+                                                const parts = s.domain.split('.');
                                                 const t = parts.pop() || 'com';
                                                 setDomainInput(parts.join('.'));
                                                 setTld(t);
-                                                runFullEvaluation(true, s);
+                                                runFullEvaluation(true, s.domain);
                                             }}
                                         >
                                             Quick Eval

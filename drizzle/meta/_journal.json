@@ -260,6 +260,13 @@
       "when": 1771254472891,
       "tag": "0036_condemned_kinsey_walden",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1771340880000,
+      "tag": "0037_review_events_page_def",
+      "breakpoints": true
     }
   ]
 }

@@ -104,7 +104,7 @@ export async function POST(
         await tx.update(pageDefinitions).set(updates).where(eq(pageDefinitions.id, id));
 
         await tx.insert(reviewEvents).values({
-            articleId: id,
+            pageDefinitionId: id,
             actorId: user.id,
             actorRole: user.role,
             eventType: (eventTypeMap[newStatus] || 'edited') as NonNullable<ReviewEventType>,

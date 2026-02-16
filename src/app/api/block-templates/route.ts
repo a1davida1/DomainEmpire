@@ -35,10 +35,11 @@ export async function GET(request: NextRequest) {
         conditions.push(sql`${tag} = ANY(${blockTemplates.tags})`);
     }
     if (search) {
+        const escaped = search.replace(/%/g, '\\%').replace(/_/g, '\\_');
         conditions.push(
             or(
-                ilike(blockTemplates.name, `%${search}%`),
-                ilike(blockTemplates.description, `%${search}%`),
+                ilike(blockTemplates.name, `%${escaped}%`),
+                ilike(blockTemplates.description, `%${escaped}%`),
             )!,
         );
     }
@@ -74,6 +75,10 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'blockType is required' }, { status: 400 });
     }
 
+    if (body.isGlobal === true && user.role !== 'admin') {
+        return NextResponse.json({ error: 'Only admins can create global templates' }, { status: 403 });
+    }
+
     const [created] = await db.insert(blockTemplates).values({
         name,
         description: body.description || null,
@@ -107,13 +112,17 @@ export async function DELETE(request: NextRequest) {
         return NextResponse.json({ error: 'templateId is required' }, { status: 400 });
     }
 
-    const deleted = await db.delete(blockTemplates)
-        .where(eq(blockTemplates.id, templateId))
-        .returning({ id: blockTemplates.id });
-
-    if (deleted.length === 0) {
+    const existing = await db.select({ id: blockTemplates.id, createdBy: blockTemplates.createdBy })
+        .from(blockTemplates).where(eq(blockTemplates.id, templateId)).limit(1);
+    if (existing.length === 0) {
         return NextResponse.json({ error: 'Template not found' }, { status: 404 });
     }
+    if (existing[0].createdBy !== user.id && user.role !== 'admin') {
+        return NextResponse.json({ error: 'Only the creator or an admin can delete this template' }, { status: 403 });
+    }
+
+    await db.delete(blockTemplates)
+        .where(eq(blockTemplates.id, templateId));
 
     return NextResponse.json({ success: true, deleted: templateId });
 }

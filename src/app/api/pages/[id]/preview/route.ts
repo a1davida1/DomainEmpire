@@ -7,24 +7,11 @@ import type { BlockEnvelope } from '@/lib/deploy/blocks/schemas';
 // Side-effect: register interactive block renderers
 import '@/lib/deploy/blocks/renderers-interactive';
 import { generateV2GlobalStyles } from '@/lib/deploy/themes';
+import { extractSiteTitle } from '@/lib/deploy/templates/shared';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function extractSiteTitle(domain: string): string {
-    const ccTlds = ['.co.uk', '.com.au', '.co.nz', '.co.za', '.com.br', '.co.in', '.org.uk', '.net.au'];
-    let sld = domain;
-    for (const ccTld of ccTlds) {
-        if (domain.endsWith(ccTld)) {
-            sld = domain.slice(0, -ccTld.length);
-            break;
-        }
-    }
-    if (sld === domain) {
-        const lastDot = domain.lastIndexOf('.');
-        sld = lastDot > 0 ? domain.slice(0, lastDot) : domain;
-    }
-    return sld.replaceAll('-', ' ').replaceAll(/\b\w/g, c => c.toUpperCase());
-}
+// extractSiteTitle imported from '@/lib/deploy/templates/shared'
 
 /**
  * GET /api/pages/[id]/preview — Render a v2 page definition to HTML and return it inline.
@@ -78,10 +65,67 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
     const css = generateV2GlobalStyles(themeName, skinName, domain.siteTemplate || 'authority', domain.domain);
 
     // Inject CSS inline for self-contained preview
-    const previewHtml = html.replace(
+    let previewHtml = html.replace(
         '<link rel="stylesheet" href="/styles.css">',
         `<style>${css}</style>`,
     );
+
+    // When loaded inside the Visual Configurator, inject a bridge script
+    // that enables click-to-select and hover-highlight on blocks.
+    const isConfigurator = request.nextUrl.searchParams.get('configurator') === 'true';
+    if (isConfigurator) {
+        const bridgeScript = `<script>
+(function(){
+  var selected=null;
+  var highlighted=null;
+  var OUTLINE='2px solid #3b82f6';
+  var HOVER_OUTLINE='2px dashed #93c5fd';
+
+  function clearHighlight(){
+    if(highlighted){highlighted.style.outline='';highlighted=null;}
+  }
+  function clearSelection(){
+    if(selected){selected.style.outline='';selected=null;}
+  }
+
+  document.addEventListener('click',function(e){
+    var el=e.target.closest('[data-block-id]');
+    if(!el)return;
+    e.preventDefault();
+    e.stopPropagation();
+    clearSelection();
+    selected=el;
+    el.style.outline=OUTLINE;
+    parent.postMessage({type:'block-select',blockId:el.getAttribute('data-block-id'),blockType:el.getAttribute('data-block-type')},location.origin);
+  },true);
+
+  document.addEventListener('mouseover',function(e){
+    var el=e.target.closest('[data-block-id]');
+    if(!el||el===selected)return;
+    clearHighlight();
+    highlighted=el;
+    el.style.outline=HOVER_OUTLINE;
+  });
+  document.addEventListener('mouseout',function(e){
+    var el=e.target.closest('[data-block-id]');
+    if(el&&el===highlighted)clearHighlight();
+  });
+
+  window.addEventListener('message',function(e){
+    if(!e.data||e.data.type!=='block-highlight')return;
+    var bid=String(e.data.blockId||'').replace(/[^a-zA-Z0-9_\-]/g,'');
+    if(!bid)return;
+    clearSelection();
+    var target=document.querySelector('[data-block-id="'+bid+'"]');
+    if(!target)return;
+    selected=target;
+    target.style.outline=OUTLINE;
+    target.scrollIntoView({behavior:'smooth',block:'center'});
+  });
+})();
+</script>`;
+        previewHtml = previewHtml.replace('</body>', bridgeScript + '</body>');
+    }
 
     const format = request.nextUrl.searchParams.get('format') || 'html';
 

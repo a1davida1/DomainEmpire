@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { BlockEditor } from '@/components/dashboard/BlockEditor';
+import { VisualConfigurator } from '@/components/dashboard/VisualConfigurator';
 
 interface PageDef {
     id: string;
@@ -34,6 +34,8 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, initialP
     const [stagingUrl, setStagingUrl] = useState<string | null>(null);
     const [editingPageId, setEditingPageId] = useState<string | null>(null);
     const [editingBlocks, setEditingBlocks] = useState<Record<string, unknown>[] | null>(null);
+    const [editingTheme, setEditingTheme] = useState('clean');
+    const [editingSkin, setEditingSkin] = useState('slate');
 
     async function handleSeed() {
         setLoading('seed');
@@ -163,6 +165,8 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, initialP
             }
             setEditingPageId(pageId);
             setEditingBlocks(Array.isArray(data.blocks) ? data.blocks : []);
+            setEditingTheme(data.theme || 'clean');
+            setEditingSkin(data.skin || 'slate');
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to load page');
         }
@@ -192,34 +196,26 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, initialP
         }
     }
 
-    // If editing a page, show the BlockEditor
+    // If editing a page, show the Visual Configurator
     if (editingPageId && editingBlocks) {
-        const editingPage = pages.find(p => p.id === editingPageId);
         return (
-            <div className="space-y-4">
-                <div className="flex items-center gap-3">
-                    <Button variant="ghost" size="sm" onClick={() => { setEditingPageId(null); setEditingBlocks(null); }}>
-                        ← Back
-                    </Button>
-                    <h3 className="text-lg font-semibold">
-                        Editing: {editingPage?.route || editingPageId}
-                    </h3>
-                </div>
-                <BlockEditor
-                    pageId={editingPageId}
-                    initialBlocks={editingBlocks as { id: string; type: string; variant?: string; config?: Record<string, unknown>; content?: Record<string, unknown> }[]}
-                    onSave={() => {
-                        setEditingPageId(null);
-                        setEditingBlocks(null);
-                        setSuccess('Blocks saved successfully');
-                        refreshPages();
-                    }}
-                    onCancel={() => {
-                        setEditingPageId(null);
-                        setEditingBlocks(null);
-                    }}
-                />
-            </div>
+            <VisualConfigurator
+                pageId={editingPageId}
+                domainId={domainId}
+                initialBlocks={editingBlocks as { id: string; type: string; variant?: string; config?: Record<string, unknown>; content?: Record<string, unknown> }[]}
+                initialTheme={editingTheme}
+                initialSkin={editingSkin}
+                onSave={() => {
+                    setEditingPageId(null);
+                    setEditingBlocks(null);
+                    setSuccess('Blocks saved successfully');
+                    refreshPages();
+                }}
+                onCancel={() => {
+                    setEditingPageId(null);
+                    setEditingBlocks(null);
+                }}
+            />
         );
     }
 

@@ -19,6 +19,7 @@ const SEO_MODEL = envModel('OPENROUTER_MODEL_SEO', 'openrouter/auto');
 const QUALITY_MODEL = envModel('OPENROUTER_MODEL_QUALITY', 'openrouter/auto');
 const REVIEW_MODEL = envModel('OPENROUTER_MODEL_REVIEW', 'anthropic/claude-opus-4.1');
 const RESEARCH_MODEL = envModel('OPENROUTER_MODEL_RESEARCH', 'openrouter/auto');
+const VISION_MODEL = envModel('OPENROUTER_MODEL_VISION', 'google/gemini-2.0-flash-001');
 const EMERGENCY_FALLBACK_MODEL = envModel('OPENROUTER_MODEL_FALLBACK', 'openrouter/auto');
 
 export const MODEL_CONFIG = {
@@ -45,6 +46,9 @@ export const MODEL_CONFIG = {
 
     // v2 Block content generation
     blockContent: QUALITY_MODEL,
+
+    // Vision (Gemini Flash)
+    vision: VISION_MODEL,
 } as const;
 
 export type AIModelTask = keyof typeof MODEL_CONFIG;
@@ -70,6 +74,7 @@ const MODEL_ROUTING_REGISTRY: Record<AIModelTask, RoutingProfile> = {
     aiReview: { fallbackTasks: ['humanization', 'seoOptimize'], promptVersion: 'ai-review.v1' },
     research: { fallbackTasks: ['seoOptimize'], promptVersion: 'research.v1' },
     blockContent: { fallbackTasks: ['draftGeneration', 'humanization'], promptVersion: 'block-content.v1' },
+    vision: { fallbackTasks: ['seoOptimize'], promptVersion: 'vision.v1' },
 };
 
 // Pricing per 1K tokens (approximate, check OpenRouter for current)
@@ -78,6 +83,7 @@ const MODEL_PRICING: Record<string, { input: number; output: number; perRequestF
     'anthropic/claude-sonnet-4-5-20250929': { input: 0.003, output: 0.015 },
     'anthropic/claude-3-5-haiku-20241022': { input: 0.0008, output: 0.004 },
     'perplexity/sonar-reasoning': { input: 0.001, output: 0.005, perRequestFee: 0.01 },
+    'google/gemini-2.0-flash-001': { input: 0.0001, output: 0.0004 },
 };
 
 interface BaseAIResponse {
@@ -105,6 +111,15 @@ export interface GenerateOptions {
     systemPrompt?: string;
     promptVersion?: string;
 }
+
+export type ContentPart =
+    | { type: 'text'; text: string }
+    | { type: 'image_url'; image_url: { url: string } };
+
+type VisionMessage = {
+    role: string;
+    content: string | ContentPart[];
+};
 
 interface OpenRouterResponse {
     id: string;
@@ -305,6 +320,102 @@ export class OpenRouterClient {
         } catch (parseError) {
             throw new Error(`Failed to parse JSON response: ${parseError}. Raw content: ${response.content.slice(0, 500)}`);
         }
+    }
+
+    /**
+     * Generate with vision (multimodal) - sends images alongside text prompt.
+     * Images can be base64 data URLs or https URLs.
+     */
+    async generateWithVision(
+        task: AIModelTask,
+        prompt: string,
+        imageUrls: string[],
+        options: GenerateOptions = {},
+    ): Promise<AIResponse> {
+        const routingProfile = MODEL_ROUTING_REGISTRY[task];
+        const promptVersion = options.promptVersion || routingProfile.promptVersion;
+        const model = options.model || MODEL_CONFIG[task];
+        const startTime = Date.now();
+
+        const contentParts: ContentPart[] = [
+            { type: 'text', text: prompt },
+            ...imageUrls.map((url) => ({
+                type: 'image_url' as const,
+                image_url: { url },
+            })),
+        ];
+
+        const messages: VisionMessage[] = [];
+        if (options.systemPrompt) {
+            messages.push({ role: 'system', content: options.systemPrompt });
+        }
+        messages.push({ role: 'user', content: contentParts });
+
+        const response = await withCircuitBreaker(
+            'openrouter',
+            () =>
+                withRetry(
+                    async () => {
+                        const res = await fetch(`${this.baseUrl}/chat/completions`, {
+                            method: 'POST',
+                            headers: {
+                                Authorization: `Bearer ${this.apiKey}`,
+                                'Content-Type': 'application/json',
+                                'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'https://localhost:3000',
+                                'X-Title': 'Domain Empire',
+                            },
+                            body: JSON.stringify({
+                                model,
+                                messages,
+                                temperature: options.temperature ?? 0.5,
+                                max_tokens: options.maxTokens ?? 2048,
+                            }),
+                        });
+
+                        if (!res.ok) {
+                            const errorText = await res.text();
+                            throw new OpenRouterHttpError(
+                                res.status,
+                                `OpenRouter Vision API error: ${res.status} - ${errorText}`,
+                            );
+                        }
+
+                        const data: OpenRouterResponse = await res.json();
+                        const durationMs = Date.now() - startTime;
+                        const cost = this.calculateCost(
+                            model,
+                            data.usage.prompt_tokens,
+                            data.usage.completion_tokens,
+                        );
+
+                        return {
+                            content: data.choices[0]?.message?.content || '',
+                            model: data.model,
+                            inputTokens: data.usage.prompt_tokens,
+                            outputTokens: data.usage.completion_tokens,
+                            cost,
+                            durationMs,
+                        };
+                    },
+                    {
+                        maxRetries: Math.max(0, this.maxAttempts - 1),
+                        baseDelayMs: this.baseDelay,
+                        maxDelayMs: 30_000,
+                        label: `openrouter-vision:${model}`,
+                        retryOn: (error: unknown) => this.isRetryableError(error),
+                    },
+                ),
+        );
+
+        return {
+            ...response,
+            modelKey: task,
+            resolvedModel: response.model || model,
+            promptVersion,
+            routingVersion: MODEL_ROUTING_VERSION,
+            fallbackUsed: false,
+            fallbackIndex: 0,
+        };
     }
 
     /**

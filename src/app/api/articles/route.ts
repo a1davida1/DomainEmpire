@@ -13,6 +13,12 @@ const generateArticleSchema = z.object({
     targetKeyword: z.string().min(1),
     secondaryKeywords: z.array(z.string()).optional().default([]),
     priority: z.number().min(1).max(10).optional().default(5),
+    contentType: z.enum([
+        'article', 'comparison', 'calculator', 'cost_guide', 'lead_capture',
+        'health_decision', 'checklist', 'faq', 'review', 'wizard',
+        'configurator', 'quiz', 'survey', 'assessment',
+        'interactive_infographic', 'interactive_map',
+    ]).optional(),
 });
 
 // GET /api/articles - List all articles with filters
@@ -141,6 +147,7 @@ export async function POST(request: NextRequest) {
             targetKeyword: data.targetKeyword,
             secondaryKeywords: data.secondaryKeywords,
             status: 'generating',
+            ...(data.contentType ? { contentType: data.contentType } : {}),
         };
 
         const result = await db.transaction(async (tx) => {
@@ -159,6 +166,7 @@ export async function POST(request: NextRequest) {
                     targetKeyword: data.targetKeyword,
                     secondaryKeywords: data.secondaryKeywords,
                     domainName: domain[0].domain,
+                    ...(data.contentType ? { contentType: data.contentType } : {}),
                 },
                 status: 'pending',
             }, tx);

@@ -146,16 +146,17 @@ function stripPortfolioCrossDomainLinks(
  * Add rel="nofollow noopener noreferrer" and target="_blank" to external
  * (absolute http/https) links.  Internal/relative links are left alone.
  */
-function addExternalLinkAttributes(html: string): string {
+export function addExternalLinkAttributes(html: string): string {
     return html.replace(
-        /<a\s+href="(https?:\/\/[^"]+)"([^>]*)>/gi,
-        (_full, href: string, rest: string) => {
+        /<a\s([^>]*?)href="(https?:\/\/[^"]+)"([^>]*)>/gi,
+        (_full, before: string, href: string, after: string) => {
+            const rest = before + after;
             const hasRel = /\brel\s*=/i.test(rest);
             const hasTarget = /\btarget\s*=/i.test(rest);
-            let attrs = rest;
-            if (!hasRel) attrs += ' rel="nofollow noopener noreferrer"';
-            if (!hasTarget) attrs += ' target="_blank"';
-            return `<a href="${href}"${attrs}>`;
+            let extra = '';
+            if (!hasRel) extra += ' rel="nofollow noopener noreferrer"';
+            if (!hasTarget) extra += ' target="_blank"';
+            return `<a ${before}href="${href}"${after}${extra}>`;
         },
     );
 }
@@ -547,4 +548,21 @@ export function generateDataSourcesSection(datasets: ArticleDatasetInfo[]): stri
     }).join('\n');
 
     return `<section class="data-sources"><h2>Data Sources</h2><ul>${items}</ul></section>`;
+}
+
+/** Extract a human-readable site title from a domain name. Handles ccTLDs like example.co.uk. */
+export function extractSiteTitle(domain: string): string {
+    const ccTlds = ['.co.uk', '.com.au', '.co.nz', '.co.za', '.com.br', '.co.in', '.org.uk', '.net.au'];
+    let sld = domain;
+    for (const ccTld of ccTlds) {
+        if (domain.endsWith(ccTld)) {
+            sld = domain.slice(0, -ccTld.length);
+            break;
+        }
+    }
+    if (sld === domain) {
+        const lastDot = domain.lastIndexOf('.');
+        sld = lastDot > 0 ? domain.slice(0, lastDot) : domain;
+    }
+    return sld.replaceAll('-', ' ').replaceAll(/\b\w/g, c => c.toUpperCase());
 }

@@ -14,6 +14,7 @@
 import { db, domains, pageDefinitions, articles } from '@/lib/db';
 import { eq, and, isNull } from 'drizzle-orm';
 import { getHomepagePreset, getArticlePagePreset } from './presets';
+import { extractSiteTitle } from '../templates/shared';
 
 // ============================================================
 // Types
@@ -239,22 +240,4 @@ export async function batchSeedPageDefinitions(
     return result;
 }
 
-// ============================================================
-// Helpers
-// ============================================================
-
-function extractSiteTitle(domain: string): string {
-    const ccTlds = ['.co.uk', '.com.au', '.co.nz', '.co.za', '.com.br', '.co.in', '.org.uk', '.net.au'];
-    let sld = domain;
-    for (const ccTld of ccTlds) {
-        if (domain.endsWith(ccTld)) {
-            sld = domain.slice(0, -ccTld.length);
-            break;
-        }
-    }
-    if (sld === domain) {
-        const lastDot = domain.lastIndexOf('.');
-        sld = lastDot > 0 ? domain.slice(0, lastDot) : domain;
-    }
-    return sld.replaceAll('-', ' ').replaceAll(/\b\w/g, c => c.toUpperCase());
-}
+// extractSiteTitle imported from '../templates/shared'

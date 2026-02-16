@@ -45,7 +45,7 @@ import {
     domainChannelProfiles,
 } from '@/lib/db';
 import { eq, and, lte, gt, gte, isNull, or, sql, asc, desc, count, inArray } from 'drizzle-orm';
-import { processOutlineJob, processDraftJob, processHumanizeJob, processSeoOptimizeJob, processResolveExternalLinksJob, processMetaJob, processKeywordResearchJob, processResearchJob } from './pipeline';
+import { processOutlineJob, processDraftJob, processHumanizeJob, processSeoOptimizeJob, processResolveExternalLinksJob, processAiDetectionCheckJob, processMetaJob, processKeywordResearchJob, processResearchJob } from './pipeline';
 import { processDeployJob } from '@/lib/deploy/processor';
 import { checkContentSchedule } from './scheduler';
 import { evaluateDomain } from '@/lib/evaluation/evaluator';
@@ -2285,6 +2285,9 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
             break;
         case 'resolve_external_links':
             await processResolveExternalLinksJob(job.id);
+            break;
+        case 'ai_detection_check':
+            await processAiDetectionCheckJob(job.id);
             break;
         case 'generate_meta':
             await processMetaJob(job.id);

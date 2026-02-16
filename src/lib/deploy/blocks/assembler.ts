@@ -10,6 +10,7 @@ import type { BlockEnvelope, BlockType } from './schemas';
 import {
     escapeHtml,
     escapeAttr,
+    sanitizeArticleHtml,
 } from '../templates/shared';
 
 // ============================================================
@@ -96,6 +97,9 @@ export function assemblePageFromBlocks(
 
     const title = ctx.pageTitle || ctx.siteTitle;
     const description = ctx.pageDescription || '';
+    const fullTitle = ctx.pageTitle && ctx.pageTitle !== ctx.siteTitle
+        ? `${escapeHtml(title)} | ${escapeHtml(ctx.siteTitle)}`
+        : escapeHtml(title);
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -104,7 +108,7 @@ export function assemblePageFromBlocks(
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="${escapeAttr(description)}">
   <meta name="robots" content="index, follow">
-  <title>${escapeHtml(title)} | ${escapeHtml(ctx.siteTitle)}</title>
+  <title>${fullTitle}</title>
   <link rel="stylesheet" href="${escapeAttr(cssHref)}">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   ${ctx.headScripts}
@@ -229,12 +233,12 @@ registerBlockRenderer('ArticleBody', (block, _ctx) => {
     const markdown = (content.markdown as string) || '';
     const title = (content.title as string) || '';
 
-    // For now, render markdown as pre-rendered HTML (the pipeline will provide contentHtml)
+    // Sanitize HTML content to prevent XSS
     const titleHtml = title ? `<h1>${escapeHtml(title)}</h1>` : '';
 
     return `<article class="article-body">
   ${titleHtml}
-  ${markdown}
+  ${sanitizeArticleHtml(markdown)}
 </article>`;
 });
 
@@ -253,7 +257,7 @@ registerBlockRenderer('FAQ', (block, _ctx) => {
         const open = i === 0 && openFirst ? ' open' : '';
         return `<details class="faq-item"${open}>
   <summary class="faq-question">${escapeHtml(item.question)}</summary>
-  <div class="faq-answer">${item.answer}</div>
+  <div class="faq-answer">${sanitizeArticleHtml(item.answer)}</div>
 </details>`;
     }).join('\n');
 
@@ -452,7 +456,7 @@ function renderChecklist(block: BlockEnvelope, _ctx: RenderContext): string {
     ${checkbox}
     <div class="checklist-content">
       <h3>${escapeHtml(step.heading)}</h3>
-      <div>${step.body}</div>
+      <div>${sanitizeArticleHtml(step.body)}</div>
     </div>
   </label>
 </li>`;
@@ -506,7 +510,7 @@ registerBlockRenderer('Sidebar', (block, _ctx) => {
     if (sections.length === 0) return '';
 
     const inner = sections.map(s =>
-        `<div class="sidebar-section"><h4>${escapeHtml(s.title)}</h4>${s.html}</div>`
+        `<div class="sidebar-section"><h4>${escapeHtml(s.title)}</h4>${sanitizeArticleHtml(s.html)}</div>`
     ).join('');
 
     return `<aside class="sidebar">${inner}</aside>`;

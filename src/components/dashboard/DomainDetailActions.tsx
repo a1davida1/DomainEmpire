@@ -6,18 +6,50 @@ import { Button } from '@/components/ui/button';
 import { Loader2, Sparkles, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
+
+const CONTENT_TYPE_OPTIONS = [
+    { value: 'auto', label: 'Auto-detect' },
+    { value: 'article', label: 'Article' },
+    { value: 'calculator', label: 'Calculator' },
+    { value: 'comparison', label: 'Comparison' },
+    { value: 'cost_guide', label: 'Cost Guide' },
+    { value: 'checklist', label: 'Checklist' },
+    { value: 'faq', label: 'FAQ' },
+    { value: 'review', label: 'Review' },
+    { value: 'wizard', label: 'Wizard / Decision Tree' },
+    { value: 'quiz', label: 'Quiz' },
+    { value: 'survey', label: 'Survey' },
+    { value: 'assessment', label: 'Assessment' },
+    { value: 'lead_capture', label: 'Lead Capture' },
+    { value: 'health_decision', label: 'Health Decision' },
+    { value: 'configurator', label: 'Configurator' },
+    { value: 'interactive_infographic', label: 'Interactive Infographic' },
+    { value: 'interactive_map', label: 'Interactive Map' },
+] as const;
 
 export function GenerateArticleButton({ domainId, hasArticles }: { domainId: string; hasArticles: boolean }) {
     const router = useRouter();
     const [loading, setLoading] = useState(false);
+    const [contentType, setContentType] = useState('auto');
 
     async function handleSeed() {
         setLoading(true);
         try {
+            const payload: Record<string, unknown> = { articleCount: 5, priority: 5 };
+            if (contentType !== 'auto') {
+                payload.contentType = contentType;
+            }
             const res = await fetch(`/api/domains/${domainId}/seed`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ articleCount: 5, priority: 5 }),
+                body: JSON.stringify(payload),
             });
             if (!res.ok) {
                 const data = await res.json().catch(() => ({}));
@@ -38,15 +70,29 @@ export function GenerateArticleButton({ domainId, hasArticles }: { domainId: str
     }
 
     return (
-        <Tooltip>
-            <TooltipTrigger asChild>
-                <Button size="sm" onClick={handleSeed} disabled={loading}>
-                    {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                    {hasArticles ? 'Generate More' : 'Generate Articles'}
-                </Button>
-            </TooltipTrigger>
-            <TooltipContent className="max-w-xs">Queue 5 new articles through the AI pipeline (keyword research → outline → draft → humanize → SEO → meta tags).</TooltipContent>
-        </Tooltip>
+        <div className="flex items-center gap-2">
+            <Select value={contentType} onValueChange={setContentType}>
+                <SelectTrigger className="w-[160px] h-9 text-xs">
+                    <SelectValue placeholder="Content type" />
+                </SelectTrigger>
+                <SelectContent>
+                    {CONTENT_TYPE_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value} className="text-xs">
+                            {opt.label}
+                        </SelectItem>
+                    ))}
+                </SelectContent>
+            </Select>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <Button size="sm" onClick={handleSeed} disabled={loading}>
+                        {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                        {hasArticles ? 'Generate More' : 'Generate Articles'}
+                    </Button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs">Queue 5 new articles through the AI pipeline (keyword research → outline → draft → humanize → SEO → meta tags).</TooltipContent>
+            </Tooltip>
+        </div>
     );
 }
 

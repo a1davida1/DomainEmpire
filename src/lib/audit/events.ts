@@ -16,7 +16,8 @@ export type ReviewEventType =
     | 'expert_signed';
 
 export async function logReviewEvent(opts: {
-    articleId: string;
+    articleId?: string | null;
+    pageDefinitionId?: string | null;
     revisionId?: string | null;
     actorId: string;
     actorRole: string;
@@ -28,7 +29,8 @@ export async function logReviewEvent(opts: {
 }): Promise<string> {
     const dbClient = opts.tx || db;
     const [event] = await dbClient.insert(reviewEvents).values({
-        articleId: opts.articleId,
+        articleId: opts.articleId || null,
+        pageDefinitionId: opts.pageDefinitionId || null,
         revisionId: opts.revisionId || null,
         actorId: opts.actorId,
         actorRole: opts.actorRole,

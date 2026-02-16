@@ -9,9 +9,17 @@ import { enqueueContentJob, requeueContentJobIds } from '@/lib/queue/content-que
 const MIN_PRIORITY = 1;
 const MAX_PRIORITY = 10;
 
+const CONTENT_TYPES = [
+    'article', 'comparison', 'calculator', 'cost_guide', 'lead_capture',
+    'health_decision', 'checklist', 'faq', 'review', 'wizard',
+    'configurator', 'quiz', 'survey', 'assessment',
+    'interactive_infographic', 'interactive_map',
+] as const;
+
 const seedSchema = z.object({
     articleCount: z.number().int().min(1).max(20).default(5),
     priority: z.number().int().min(MIN_PRIORITY).max(MAX_PRIORITY).default(5),
+    contentType: z.enum(CONTENT_TYPES).optional(),
 });
 
 interface PageProps {
@@ -77,7 +85,7 @@ export async function POST(request: NextRequest, { params }: PageProps) {
     try {
         // Validate request body
         const body = await request.json();
-        const { articleCount, priority } = seedSchema.parse(body);
+        const { articleCount, priority, contentType } = seedSchema.parse(body);
 
         // Get domain
         const domain = await db
@@ -167,6 +175,7 @@ export async function POST(request: NextRequest, { params }: PageProps) {
                     targetKeyword: kw.keyword,
                     secondaryKeywords: [],
                     status: 'generating',
+                    ...(contentType ? { contentType } : {}),
                 });
 
                 // Queue outline generation job
@@ -184,6 +193,7 @@ export async function POST(request: NextRequest, { params }: PageProps) {
                         subNiche: domainRecord.subNiche,
                         monthlyVolume: kw.monthlyVolume,
                         difficulty: kw.difficulty,
+                        ...(contentType ? { contentType } : {}),
                     },
                     status: 'pending',
                     scheduledFor: new Date(),
