@@ -46,19 +46,30 @@ export default function CitationsPage() {
     async function handleAdd(e: React.FormEvent) {
         e.preventDefault();
         setSaving(true);
-        await fetch(`/api/articles/${articleId}/citations`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ claimText, sourceUrl, sourceTitle: sourceTitle || undefined, quotedSnippet: quotedSnippet || undefined }),
-        });
-        setClaimText(''); setSourceUrl(''); setSourceTitle(''); setQuotedSnippet('');
-        setShowForm(false);
-        setSaving(false);
-        loadCitations();
+        try {
+            const res = await fetch(`/api/articles/${articleId}/citations`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ claimText, sourceUrl, sourceTitle: sourceTitle || undefined, quotedSnippet: quotedSnippet || undefined }),
+            });
+            if (!res.ok) {
+                console.error('Failed to add citation:', res.status);
+                return;
+            }
+            setClaimText(''); setSourceUrl(''); setSourceTitle(''); setQuotedSnippet('');
+            setShowForm(false);
+            loadCitations();
+        } finally {
+            setSaving(false);
+        }
     }
 
     async function handleDelete(citationId: string) {
-        await fetch(`/api/articles/${articleId}/citations?citationId=${citationId}`, { method: 'DELETE' });
+        const res = await fetch(`/api/articles/${articleId}/citations?citationId=${citationId}`, { method: 'DELETE' });
+        if (!res.ok) {
+            console.error('Failed to delete citation:', res.status);
+            return;
+        }
         loadCitations();
     }
 

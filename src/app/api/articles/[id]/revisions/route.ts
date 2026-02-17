@@ -23,7 +23,11 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
 
     // Get a diff pair
     if (diffNum) {
-        const pair = await getRevisionPair(params.id, parseInt(diffNum, 10));
+        const parsed = parseInt(diffNum, 10);
+        if (!Number.isFinite(parsed) || parsed < 1) {
+            return NextResponse.json({ error: 'diff must be a positive integer' }, { status: 400 });
+        }
+        const pair = await getRevisionPair(params.id, parsed);
         return NextResponse.json(pair);
     }
 
