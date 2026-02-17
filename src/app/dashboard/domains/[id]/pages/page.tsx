@@ -36,6 +36,7 @@ export default async function DomainPagesPage({ params }: PageProps) {
                 domainName={domain.domain}
                 siteTemplate={domain.siteTemplate || 'authority'}
                 contentTypeMix={((domain.contentConfig as Record<string, unknown>)?.contentTypeMix as Record<string, number>) ?? null}
+                initialSeed={((domain.contentConfig as Record<string, unknown>)?.quickDeploySeed as number) ?? null}
                 initialPages={pages.map(p => ({
                     id: p.id,
                     route: p.route,

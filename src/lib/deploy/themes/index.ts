@@ -18,6 +18,7 @@ export { generateSkinCSS, availableSkins, V1_THEME_TO_SKIN, type SkinTokens } fr
 
 import { baseStyles } from './base';
 import { componentStyles } from './components';
+import { blockVariantStyles } from './block-variants';
 import { responsiveStyles } from './responsive';
 import { getThemeStyles } from './theme-definitions';
 import { generateDomainVariantStyles } from './variants';
@@ -53,5 +54,5 @@ export function generateV2GlobalStyles(
     const layoutConfig = getLayoutConfig(siteTemplate);
     const layoutStyles = getLayoutStyles(layoutConfig);
     const variantStyles = generateDomainVariantStyles(domain || 'default-domain');
-    return themeVars + '\n' + skinVars + '\n' + baseStyles + layoutStyles + componentStyles + variantStyles + responsiveStyles;
+    return themeVars + '\n' + skinVars + '\n' + baseStyles + layoutStyles + componentStyles + blockVariantStyles + variantStyles + responsiveStyles;
 }

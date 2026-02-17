@@ -11,11 +11,13 @@
 
 import { randomUUID } from 'crypto';
 import type { BlockType } from './schemas';
+import { mergeBlockDefaults } from './default-content';
 
 interface PresetBlock {
     type: BlockType;
     variant?: string;
     config?: Record<string, unknown>;
+    content?: Record<string, unknown>;
 }
 
 /**
@@ -339,17 +341,25 @@ export function resetBlockIdCounter(): void {
 /**
  * Get a homepage preset for a given siteTemplate, with generated IDs.
  * Falls back to 'authority' if the template name is not recognized.
+ * When domain/niche are provided, blocks get rich default content.
  */
-export function getHomepagePreset(siteTemplate: string): Array<PresetBlock & { id: string }> {
+export function getHomepagePreset(siteTemplate: string, domain?: string, niche?: string): Array<PresetBlock & { id: string }> {
     const blocks = HOMEPAGE_PRESETS[siteTemplate] ?? HOMEPAGE_PRESETS.authority;
-    return blocks.map(b => ({ ...b, id: generateBlockId() }));
+    return blocks.map(b => {
+        const merged = mergeBlockDefaults(b, domain, niche);
+        return { ...b, id: generateBlockId(), content: merged.content, config: merged.config };
+    });
 }
 
 /**
  * Get an article page preset for a given contentType, with generated IDs.
  * Falls back to 'article' if the content type is not recognized.
+ * When domain/niche are provided, blocks get rich default content.
  */
-export function getArticlePagePreset(contentType: string): Array<PresetBlock & { id: string }> {
+export function getArticlePagePreset(contentType: string, domain?: string, niche?: string): Array<PresetBlock & { id: string }> {
     const blocks = ARTICLE_PAGE_PRESETS[contentType] ?? ARTICLE_PAGE_PRESETS.article;
-    return blocks.map(b => ({ ...b, id: generateBlockId() }));
+    return blocks.map(b => {
+        const merged = mergeBlockDefaults(b, domain, niche);
+        return { ...b, id: generateBlockId(), content: merged.content, config: merged.config };
+    });
 }

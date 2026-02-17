@@ -100,7 +100,7 @@ export async function seedPageDefinitions(
     }
 
     // --- Homepage ---
-    const homepageBlocks = getHomepagePreset(siteTemplate);
+    const homepageBlocks = getHomepagePreset(siteTemplate, domain.domain, domain.niche || undefined);
     await db.insert(pageDefinitions).values({
         domainId,
         route: '/',
@@ -136,7 +136,7 @@ export async function seedPageDefinitions(
             if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) continue;
 
             const contentType = article.contentType || 'article';
-            const articleBlocks = getArticlePagePreset(contentType);
+            const articleBlocks = getArticlePagePreset(contentType, domain.domain, domain.niche || undefined);
 
             await db.insert(pageDefinitions).values({
                 domainId,

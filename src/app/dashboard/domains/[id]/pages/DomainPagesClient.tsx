@@ -4,6 +4,12 @@ import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { VisualConfigurator } from '@/components/dashboard/VisualConfigurator';
+import {
+    computeChecklist,
+    generateRandomizePlan,
+    generateSeed,
+    type PageSnapshot,
+} from '@/lib/site-randomizer';
 
 interface PageDef {
     id: string;
@@ -24,6 +30,7 @@ interface Props {
     domainName: string;
     siteTemplate: string;
     contentTypeMix: Record<string, number> | null;
+    initialSeed: number | null;
     initialPages: PageDef[];
 }
 
@@ -52,7 +59,7 @@ function mapPage(p: Record<string, unknown>): PageDef {
     };
 }
 
-export function DomainPagesClient({ domainId, domainName, siteTemplate, contentTypeMix, initialPages }: Props) {
+export function DomainPagesClient({ domainId, domainName, siteTemplate, contentTypeMix, initialSeed, initialPages }: Props) {
     const [pages, setPages] = useState<PageDef[]>(initialPages);
     const [loading, setLoading] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -72,6 +79,7 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, contentT
     const [newTheme, setNewTheme] = useState('clean');
     const [newSkin, setNewSkin] = useState('slate');
     const [newPreset, setNewPreset] = useState<'article' | 'homepage'>('article');
+    const [quickDeploySeed, setQuickDeploySeed] = useState<number | null>(initialSeed);
 
     const pageStats = useMemo(() => {
         const published = pages.filter(p => p.status === 'published').length;
@@ -81,6 +89,132 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, contentT
         const totalBlocks = pages.reduce((sum, p) => sum + p.blockCount, 0);
         return { published, review, approved, draft, totalBlocks };
     }, [pages]);
+
+    const checklist = useMemo(() => {
+        const snapshots: PageSnapshot[] = pages.map(p => ({
+            id: p.id,
+            route: p.route,
+            title: p.title || '',
+            theme: p.theme,
+            skin: p.skin,
+            isPublished: p.isPublished,
+            blocks: [],
+        }));
+        return computeChecklist(snapshots, siteTemplate);
+    }, [pages, siteTemplate]);
+
+    async function applyRandomizePlan(seed: number) {
+        setLoading('randomize');
+        setError(null);
+        setSuccess(null);
+
+        try {
+            // If no pages exist, seed them first
+            if (pages.length === 0) {
+                const seedRes = await fetch('/api/pages/seed', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ domainId, publish: false }),
+                });
+                if (!seedRes.ok) {
+                    const data = await seedRes.json();
+                    setError(data.error || 'Failed to seed pages before randomizing');
+                    return;
+                }
+                await refreshPages();
+            }
+
+            // Re-fetch current pages list to get latest IDs
+            const listRes = await fetch(`/api/pages?domainId=${domainId}`);
+            const listData = await listRes.json();
+            const currentPageIds: string[] = Array.isArray(listData.pages)
+                ? listData.pages.map((p: Record<string, unknown>) => p.id as string)
+                : [];
+
+            // Fetch full page data for all pages
+            const fullPages: PageSnapshot[] = [];
+            for (const pid of currentPageIds) {
+                const res = await fetch(`/api/pages/${pid}`);
+                if (!res.ok) continue;
+                const data = await res.json();
+                fullPages.push({
+                    id: data.id,
+                    route: data.route,
+                    title: data.title || '',
+                    theme: data.theme,
+                    skin: data.skin,
+                    isPublished: data.isPublished,
+                    blocks: Array.isArray(data.blocks) ? data.blocks : [],
+                });
+            }
+
+            const plan = generateRandomizePlan(seed, fullPages, siteTemplate, domainName);
+
+            // Apply page updates
+            let updatedCount = 0;
+            for (const pu of plan.pageUpdates) {
+                const res = await fetch(`/api/pages/${pu.pageId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        theme: pu.theme,
+                        skin: pu.skin,
+                        blocks: pu.blocks,
+                        isPublished: true,
+                    }),
+                });
+                if (res.ok) updatedCount++;
+            }
+
+            // Create missing pages
+            let createdCount = 0;
+            for (const mp of plan.missingPages) {
+                const res = await fetch('/api/pages', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        domainId,
+                        route: mp.route,
+                        title: mp.title,
+                        theme: mp.theme,
+                        skin: mp.skin,
+                        blocks: mp.blocks,
+                        isPublished: mp.publish,
+                    }),
+                });
+                if (res.ok) createdCount++;
+            }
+
+            // Store seed in domain contentConfig
+            await fetch(`/api/domains/${domainId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ contentConfig: { quickDeploySeed: seed } }),
+            });
+
+            setQuickDeploySeed(seed);
+            setSuccess(
+                `Randomized: ${plan.theme}/${plan.skin} — ${updatedCount} page${updatedCount !== 1 ? 's' : ''} updated` +
+                (createdCount > 0 ? `, ${createdCount} created` : '') +
+                ` (seed: ${seed})`
+            );
+            await refreshPages();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Randomize failed');
+        } finally {
+            setLoading(null);
+        }
+    }
+
+    async function handleRandomize() {
+        const seed = quickDeploySeed ?? generateSeed();
+        await applyRandomizePlan(seed);
+    }
+
+    async function handleReroll() {
+        const seed = generateSeed();
+        await applyRandomizePlan(seed);
+    }
 
     const filteredPages = useMemo(() => {
         const normalizedQuery = query.trim().toLowerCase();
@@ -492,6 +626,85 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, contentT
                 <div className="rounded border p-2 text-xs"><span className="text-muted-foreground">Review</span><div className="text-lg font-semibold text-amber-600">{pageStats.review}</div></div>
                 <div className="rounded border p-2 text-xs"><span className="text-muted-foreground">Draft</span><div className="text-lg font-semibold">{pageStats.draft}</div></div>
                 <div className="rounded border p-2 text-xs"><span className="text-muted-foreground">Blocks</span><div className="text-lg font-semibold">{pageStats.totalBlocks}</div></div>
+            </div>
+
+            {/* Featured Site Checklist + Quick Deploy */}
+            <div className="grid gap-4 lg:grid-cols-2">
+                <div className="rounded-lg border p-4">
+                    <div className="mb-3 flex items-center justify-between">
+                        <h3 className="text-sm font-semibold">Featured Site Checklist</h3>
+                        <span className="text-xs font-medium text-muted-foreground">
+                            {checklist.mustHaveMet}/{checklist.mustHaveTotal} required
+                        </span>
+                    </div>
+                    <div className="mb-3 h-2 overflow-hidden rounded-full bg-muted">
+                        <div
+                            className={`h-full rounded-full transition-all ${
+                                checklist.score >= 80 ? 'bg-green-500' :
+                                checklist.score >= 50 ? 'bg-amber-500' : 'bg-red-500'
+                            }`}
+                            role="progressbar"
+                            aria-valuenow={checklist.score}
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                            aria-label={`Checklist score: ${checklist.score}%`}
+                            style={{ width: `${checklist.score}%` }}
+                        />
+                    </div>
+                    <ul className="space-y-1.5">
+                        {checklist.items.map((item, i) => (
+                            <li key={i} className="flex items-start gap-2 text-xs">
+                                <span className={`mt-0.5 flex-shrink-0 ${item.met ? 'text-green-500' : 'text-muted-foreground'}`}>
+                                    {item.met ? '✓' : '○'}
+                                </span>
+                                <span className={item.met ? 'text-muted-foreground' : 'text-foreground'}>
+                                    {item.label}
+                                    {item.priority === 'must' && !item.met && (
+                                        <Badge variant="destructive" className="ml-1.5 px-1 py-0 text-[10px]">Required</Badge>
+                                    )}
+                                    {item.priority === 'should' && !item.met && (
+                                        <Badge variant="secondary" className="ml-1.5 px-1 py-0 text-[10px]">Recommended</Badge>
+                                    )}
+                                </span>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+
+                <div className="rounded-lg border p-4">
+                    <h3 className="mb-3 text-sm font-semibold">Quick Deploy</h3>
+                    <p className="mb-3 text-xs text-muted-foreground">
+                        Apply a unique design profile (theme, skin, block variants) across all pages.
+                        Fills missing must-have pages and publishes everything for staging deploy.
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <Button
+                            onClick={handleRandomize}
+                            disabled={!!loading}
+                            size="sm"
+                        >
+                            {loading === 'randomize' ? 'Applying...' : quickDeploySeed ? 'Re-apply Design' : 'Randomize & Deploy'}
+                        </Button>
+                        <Button
+                            variant="outline"
+                            onClick={handleReroll}
+                            disabled={!!loading}
+                            size="sm"
+                        >
+                            {loading === 'randomize' ? '...' : 'Reroll (New Identity)'}
+                        </Button>
+                        {quickDeploySeed && (
+                            <span className="text-xs text-muted-foreground">
+                                Seed: <code className="rounded bg-muted px-1">{quickDeploySeed}</code>
+                            </span>
+                        )}
+                    </div>
+                    {checklist.score < 50 && pages.length === 0 && (
+                        <p className="mt-2 text-xs text-amber-600">
+                            No pages yet — Randomize will seed pages first, then apply a design.
+                        </p>
+                    )}
+                </div>
             </div>
 
             <div className="rounded-lg border p-3">

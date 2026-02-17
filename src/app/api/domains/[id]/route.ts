@@ -43,6 +43,7 @@ const contentConfigSchema = z.object({
         accentColor: z.string().optional(),
         typographyPreset: z.string().optional(),
     }).optional(),
+    quickDeploySeed: z.number().int().optional(),
 }).strict();
 
 type DomainContentConfig = NonNullable<typeof domains.$inferInsert['contentConfig']>;

@@ -101,6 +101,7 @@ export const domains = pgTable('domains', {
             accentColor?: string;
             typographyPreset?: string;
         };
+        quickDeploySeed?: number;
     }>().default({}),
 
     // Timestamps
