@@ -125,14 +125,17 @@ function resolveDeploymentState(domain: SerializedDomain): { label: string; clas
     return { label: 'Unassigned', className: 'bg-slate-100 text-slate-500 border border-slate-200' };
 }
 
+const TIERS = [1, 2, 3, 4] as const;
+
 interface Props {
     domains: SerializedDomain[];
     headerSlot: React.ReactNode;
     hasFilters: boolean;
     queueHints?: Record<string, DomainQueueHint>;
+    articleCounts?: Record<string, number>;
 }
 
-export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints = {} }: Props) {
+export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints = {}, articleCounts = {} }: Props) {
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [acting, setActing] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
@@ -256,9 +259,9 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints
     }
 
     function exportCsv() {
-        const header = 'Domain,Status,Tier,Niche,Template,Deployed,Renewal';
+        const header = 'Domain,Status,Tier,Niche,Articles,Template,Deployed,Renewal';
         const rows = domains.map(d =>
-            [d.domain, d.status, d.tier ?? '', d.niche ?? '', d.siteTemplate ?? '', d.isDeployed ? 'Yes' : 'No', d.renewalDate ?? ''].join(',')
+            [d.domain, d.status, d.tier ?? '', d.niche ?? '', articleCounts[d.id] || 0, d.siteTemplate ?? '', d.isDeployed ? 'Yes' : 'No', d.renewalDate ?? ''].join(',')
         );
         const csv = [header, ...rows].join('\n');
         const blob = new Blob([csv], { type: 'text/csv' });
@@ -466,6 +469,7 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints
                                 <Badge variant="outline" className={cn(tCfg.color, 'text-[10px]')}>T{t}</Badge>
                                 {domain.niche && <Badge variant="outline" className="text-[10px]">{domain.niche}</Badge>}
                                 <Badge variant="secondary" className={cn('text-[10px]', deployState.className)}>{deployState.label}</Badge>
+                                <Badge variant="outline" className="text-[10px]">{articleCounts[domain.id] || 0} articles</Badge>
                             </div>
                             {queueHint && queueHint.total > 0 && (
                                 <div className="flex flex-wrap gap-1">
@@ -562,6 +566,7 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints
                                     <Badge variant="outline" className={cn(tCfg.color, 'text-[10px]')}>T{t}</Badge>
                                     {domain.niche && <Badge variant="outline" className="text-[10px]">{domain.niche}</Badge>}
                                     <Badge variant="secondary" className={cn('text-[10px]', deployState.className)}>{deployState.label}</Badge>
+                                    <Badge variant="outline" className="text-[10px]">{articleCounts[domain.id] || 0} articles</Badge>
                                 </div>
                                 {queueHint && queueHint.total > 0 && (
                                     <div className="flex flex-wrap gap-1">
@@ -626,7 +631,7 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints
                 <TableBody>
                     {filtered.length === 0 ? (
                         <TableRow>
-                            <TableCell colSpan={9} className="h-40 text-center">
+                            <TableCell colSpan={10} className="h-40 text-center">
                                 <div className="flex flex-col items-center gap-3 py-8">
                                     <div className="rounded-full bg-muted p-4">
                                         <Globe className="h-8 w-8 text-muted-foreground" />
@@ -807,7 +812,60 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints
                                         </select>
                                     </TableCell>
                                     <TableCell>
-                                        <Badge variant="outline" className={tCfg.color}>T{t} {tCfg.label}</Badge>
+                                        <select
+                                            value={t}
+                                            onChange={async (e) => {
+                                                const newTier = Number(e.target.value);
+                                                const oldTier = t;
+                                                try {
+                                                    const res = await fetch(`/api/domains/${domain.id}`, {
+                                                        method: 'PATCH',
+                                                        headers: { 'Content-Type': 'application/json' },
+                                                        body: JSON.stringify({ tier: newTier }),
+                                                    });
+                                                    if (res.ok) {
+                                                        toast.success(`${domain.domain} → T${newTier}`, {
+                                                            action: {
+                                                                label: 'Undo',
+                                                                onClick: async () => {
+                                                                    try {
+                                                                        const undoRes = await fetch(`/api/domains/${domain.id}`, {
+                                                                            method: 'PATCH',
+                                                                            headers: { 'Content-Type': 'application/json' },
+                                                                            body: JSON.stringify({ tier: oldTier }),
+                                                                        });
+                                                                        if (undoRes.ok) {
+                                                                            toast.success(`Reverted ${domain.domain} → T${oldTier}`);
+                                                                        } else {
+                                                                            toast.error('Undo failed');
+                                                                        }
+                                                                    } catch {
+                                                                        toast.error('Undo failed');
+                                                                    }
+                                                                    router.refresh();
+                                                                },
+                                                            },
+                                                        });
+                                                        router.refresh();
+                                                    } else {
+                                                        toast.error('Tier update failed');
+                                                    }
+                                                } catch {
+                                                    toast.error('Tier update failed');
+                                                }
+                                            }}
+                                            className={cn(
+                                                'rounded-full border px-2 py-0.5 text-xs font-medium cursor-pointer appearance-none text-center bg-transparent',
+                                                tCfg.color,
+                                            )}
+                                            title="Change tier"
+                                        >
+                                            {TIERS.map(tier => (
+                                                <option key={tier} value={tier} className="text-foreground bg-background">
+                                                    T{tier} {tierConfig[tier]?.label || ''}
+                                                </option>
+                                            ))}
+                                        </select>
                                     </TableCell>
                                     <TableCell>
                                         {domain.niche ? (
@@ -815,6 +873,18 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints
                                         ) : (
                                             <span className="italic text-amber-500">Unclassified</span>
                                         )}
+                                    </TableCell>
+                                    <TableCell>
+                                        {(() => {
+                                            const count = articleCounts[domain.id] || 0;
+                                            return (
+                                                <Link href={`/dashboard/domains/${domain.id}`} className="hover:underline">
+                                                    <span className={cn('tabular-nums text-sm', count > 0 ? 'font-medium' : 'text-muted-foreground')}>
+                                                        {count}
+                                                    </span>
+                                                </Link>
+                                            );
+                                        })()}
                                     </TableCell>
                                     <TableCell>
                                         {domain.siteTemplate && domain.siteTemplate !== 'authority' ? (

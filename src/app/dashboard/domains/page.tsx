@@ -534,6 +534,24 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
     const totalDeployed = unfilteredDomains.filter(d => d.isDeployed).length;
     const totalUnpointed = unfilteredDomains.filter(d => d.cloudflareAccount && !d.isDeployed && !d.cloudflareProject).length;
 
+    // Fetch article counts for visible domains
+    const articleCountRows = allDomains.length > 0
+        ? await db.select({
+            domainId: articles.domainId,
+            count: sql<number>`count(*)::int`,
+        })
+            .from(articles)
+            .where(and(
+                inArray(articles.domainId, allDomains.map((d) => d.id)),
+                isNull(articles.deletedAt),
+            ))
+            .groupBy(articles.domainId)
+        : [];
+    const articleCountsByDomain: Record<string, number> = {};
+    for (const row of articleCountRows) {
+        if (row.domainId) articleCountsByDomain[row.domainId] = row.count;
+    }
+
     return (
         <div className="space-y-6">
             {/* Header */}
@@ -561,21 +579,6 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                 </div>
             </div>
 
-            <Card className="border-sky-200 dark:border-sky-900 bg-sky-50/40 dark:bg-sky-950/30">
-                <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
-                    <div className="space-y-1">
-                        <p className="text-sm font-semibold text-sky-900 dark:text-sky-300">DNS Onboarding</p>
-                        <p className="text-xs text-sky-900/80 dark:text-sky-400/80">
-                            Single click flow for GoDaddy and Namecheap: preflight, create missing Cloudflare zones, switch nameservers, then refresh status.
-                        </p>
-                        <p className="text-xs text-sky-900/70 dark:text-sky-400/60">
-                            Scope: {dnsActionDomainIds.length} eligible domains in the current filter (all pages, not just visible rows).
-                        </p>
-                    </div>
-                    <BulkNameserverCutoverButton domainIds={dnsActionDomainIds} />
-                </CardContent>
-            </Card>
-
             {/* Status Summary Cards */}
             <div className="grid gap-4 md:grid-cols-5">
                 {['active', 'parked', 'redirect', 'forsale', 'defensive'].map((status) => {
@@ -596,6 +599,135 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                 })}
             </div>
 
+            {/* Status Filter Chips */}
+            <StatusFilterChips />
+
+            {/* Search and Filter */}
+            <Suspense>
+                <DomainSearch />
+            </Suspense>
+
+            {/* Domains Table — primary view */}
+            <div id="domains-table" />
+            <Card>
+                <CardContent className="p-0">
+                    <DomainsTableClient
+                        domains={allDomains.map(d => ({
+                            id: d.id,
+                            domain: d.domain,
+                            status: d.status,
+                            tier: d.tier,
+                            niche: d.niche,
+                            siteTemplate: d.siteTemplate,
+                            isDeployed: d.isDeployed,
+                            registrar: d.registrar,
+                            renewalDate: formatDate(d.renewalDate),
+                            cloudflareAccount: d.cloudflareAccount,
+                            cloudflareProject: d.cloudflareProject,
+                            nameserverConfigured: nameserverHintsByDomainId[d.id]?.configured ?? false,
+                            nameserverPending: nameserverHintsByDomainId[d.id]?.pending ?? false,
+                        }))}
+                        queueHints={queueSpotlight.hintsByDomain}
+                        articleCounts={articleCountsByDomain}
+                        hasFilters={!!(params.q || params.status || params.tier || params.account || params.deploy || params.renewalSoon)}
+                        headerSlot={
+                            <>
+                                <TableHead><Link href={sortHref('domain')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Domain<SortIndicator col="domain" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
+                                <TableHead>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Link href={sortHref('status')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Ops Status<SortIndicator col="status" activeCol={sortCol} activeDir={sortDir} /></Link>
+                                        </TooltipTrigger>
+                                        <TooltipContent>Operational status: parked (inactive), active (building content), redirect, for-sale, or defensive (brand protection).</TooltipContent>
+                                    </Tooltip>
+                                </TableHead>
+                                <TableHead>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Link href={sortHref('tier')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Tier<SortIndicator col="tier" activeCol={sortCol} activeDir={sortDir} /></Link>
+                                        </TooltipTrigger>
+                                        <TooltipContent>Investment priority: Tier 1 = highest value (most content, best keywords), Tier 4 = brand/hold.</TooltipContent>
+                                    </Tooltip>
+                                </TableHead>
+                                <TableHead><Link href={sortHref('niche')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Niche<SortIndicator col="niche" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
+                                <TableHead>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <span className="cursor-help">Content</span>
+                                        </TooltipTrigger>
+                                        <TooltipContent>Number of articles / site content pieces for this domain.</TooltipContent>
+                                    </Tooltip>
+                                </TableHead>
+                                <TableHead>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <span className="cursor-help">Template</span>
+                                        </TooltipTrigger>
+                                        <TooltipContent>Site layout template (authority, affiliate, magazine, etc.) used when generating and deploying the static site.</TooltipContent>
+                                    </Tooltip>
+                                </TableHead>
+                                <TableHead>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Link href={sortHref('isDeployed')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Deploy State<SortIndicator col="isDeployed" activeCol={sortCol} activeDir={sortDir} /></Link>
+                                        </TooltipTrigger>
+                                        <TooltipContent>Whether a static site has been built and uploaded to Cloudflare Pages. &quot;Deployed&quot; means the site is live if nameservers are pointed.</TooltipContent>
+                                    </Tooltip>
+                                </TableHead>
+                                <TableHead><Link href={sortHref('renewalDate')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Renewal<SortIndicator col="renewalDate" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
+                                <TableHead className="w-12"></TableHead>
+                            </>
+                        }
+                    />
+                </CardContent>
+            </Card>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+                <div className="flex items-center justify-between">
+                    <p className="text-sm text-muted-foreground">
+                        Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filteredCount)} of {filteredCount}
+                    </p>
+                    <div className="flex gap-1">
+                        {page > 1 && (
+                            <Link href={pageHref(page - 1)}>
+                                <Button variant="outline" size="sm">← Prev</Button>
+                            </Link>
+                        )}
+                        {/* Full pagination on desktop */}
+                        <span className="hidden sm:flex gap-1">
+                            {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
+                                let pg: number;
+                                if (totalPages <= 7) {
+                                    pg = i + 1;
+                                } else if (page <= 4) {
+                                    pg = i + 1;
+                                } else if (page >= totalPages - 3) {
+                                    pg = totalPages - 6 + i;
+                                } else {
+                                    pg = page - 3 + i;
+                                }
+                                return (
+                                    <Link key={pg} href={pageHref(pg)}>
+                                        <Button variant={pg === page ? 'default' : 'outline'} size="sm" className="min-w-[2rem]">
+                                            {pg}
+                                        </Button>
+                                    </Link>
+                                );
+                            })}
+                        </span>
+                        {/* Compact pagination on mobile */}
+                        <span className="flex sm:hidden items-center gap-1 text-xs text-muted-foreground tabular-nums">
+                            {page} / {totalPages}
+                        </span>
+                        {page < totalPages && (
+                            <Link href={pageHref(page + 1)}>
+                                <Button variant="outline" size="sm">Next →</Button>
+                            </Link>
+                        )}
+                    </div>
+                </div>
+            )}
             {/* Uncategorized Warning */}
             {(() => {
                 const uncategorized = allDomains.filter(d => !d.niche);
@@ -616,9 +748,6 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                     </Card>
                 );
             })()}
-
-            {/* Status Filter Chips */}
-            <StatusFilterChips />
 
             {/* Cloudflare Account Filter */}
             {cfAccounts.length > 1 && (
@@ -695,10 +824,20 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                 </div>
             )}
 
-            {/* Search and Filter */}
-            <Suspense>
-                <DomainSearch />
-            </Suspense>
+            <Card className="border-sky-200 dark:border-sky-900 bg-sky-50/40 dark:bg-sky-950/30">
+                <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+                    <div className="space-y-1">
+                        <p className="text-sm font-semibold text-sky-900 dark:text-sky-300">DNS Onboarding</p>
+                        <p className="text-xs text-sky-900/80 dark:text-sky-400/80">
+                            Single click flow for GoDaddy and Namecheap: preflight, create missing Cloudflare zones, switch nameservers, then refresh status.
+                        </p>
+                        <p className="text-xs text-sky-900/70 dark:text-sky-400/60">
+                            Scope: {dnsActionDomainIds.length} eligible domains in the current filter (all pages, not just visible rows).
+                        </p>
+                    </div>
+                    <BulkNameserverCutoverButton domainIds={dnsActionDomainIds} />
+                </CardContent>
+            </Card>
 
             {/* ROI Priority Queue */}
             <Card>
@@ -799,6 +938,7 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                 </CardContent>
             </Card>
 
+            {/* Queue Spotlight */}
             <Card>
                 <CardContent className="space-y-4 p-4">
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -861,118 +1001,6 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                 </CardContent>
             </Card>
 
-            {/* Domains Table */}
-            <div id="domains-table" />
-            <Card>
-                <CardContent className="p-0">
-                    <DomainsTableClient
-                        domains={allDomains.map(d => ({
-                            id: d.id,
-                            domain: d.domain,
-                            status: d.status,
-                            tier: d.tier,
-                            niche: d.niche,
-                            siteTemplate: d.siteTemplate,
-                            isDeployed: d.isDeployed,
-                            registrar: d.registrar,
-                            renewalDate: formatDate(d.renewalDate),
-                            cloudflareAccount: d.cloudflareAccount,
-                            cloudflareProject: d.cloudflareProject,
-                            nameserverConfigured: nameserverHintsByDomainId[d.id]?.configured ?? false,
-                            nameserverPending: nameserverHintsByDomainId[d.id]?.pending ?? false,
-                        }))}
-                        queueHints={queueSpotlight.hintsByDomain}
-                        hasFilters={!!(params.q || params.status || params.tier || params.account || params.deploy || params.renewalSoon)}
-                        headerSlot={
-                            <>
-                                <TableHead><Link href={sortHref('domain')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Domain<SortIndicator col="domain" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
-                                <TableHead>
-                                    <Tooltip>
-                                        <TooltipTrigger asChild>
-                                            <Link href={sortHref('status')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Ops Status<SortIndicator col="status" activeCol={sortCol} activeDir={sortDir} /></Link>
-                                        </TooltipTrigger>
-                                        <TooltipContent>Operational status: parked (inactive), active (building content), redirect, for-sale, or defensive (brand protection).</TooltipContent>
-                                    </Tooltip>
-                                </TableHead>
-                                <TableHead>
-                                    <Tooltip>
-                                        <TooltipTrigger asChild>
-                                            <Link href={sortHref('tier')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Tier<SortIndicator col="tier" activeCol={sortCol} activeDir={sortDir} /></Link>
-                                        </TooltipTrigger>
-                                        <TooltipContent>Investment priority: Tier 1 = highest value (most content, best keywords), Tier 3 = lowest.</TooltipContent>
-                                    </Tooltip>
-                                </TableHead>
-                                <TableHead><Link href={sortHref('niche')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Niche<SortIndicator col="niche" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
-                                <TableHead>
-                                    <Tooltip>
-                                        <TooltipTrigger asChild>
-                                            <span className="cursor-help">Template</span>
-                                        </TooltipTrigger>
-                                        <TooltipContent>Site layout template (authority, affiliate, magazine, etc.) used when generating and deploying the static site.</TooltipContent>
-                                    </Tooltip>
-                                </TableHead>
-                                <TableHead>
-                                    <Tooltip>
-                                        <TooltipTrigger asChild>
-                                            <Link href={sortHref('isDeployed')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Deploy State<SortIndicator col="isDeployed" activeCol={sortCol} activeDir={sortDir} /></Link>
-                                        </TooltipTrigger>
-                                        <TooltipContent>Whether a static site has been built and uploaded to Cloudflare Pages. &quot;Deployed&quot; means the site is live if nameservers are pointed.</TooltipContent>
-                                    </Tooltip>
-                                </TableHead>
-                                <TableHead><Link href={sortHref('renewalDate')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Renewal<SortIndicator col="renewalDate" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>
-                                <TableHead className="w-12"></TableHead>
-                            </>
-                        }
-                    />
-                </CardContent>
-            </Card>
-
-            {/* Pagination */}
-            {totalPages > 1 && (
-                <div className="flex items-center justify-between">
-                    <p className="text-sm text-muted-foreground">
-                        Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filteredCount)} of {filteredCount}
-                    </p>
-                    <div className="flex gap-1">
-                        {page > 1 && (
-                            <Link href={pageHref(page - 1)}>
-                                <Button variant="outline" size="sm">← Prev</Button>
-                            </Link>
-                        )}
-                        {/* Full pagination on desktop */}
-                        <span className="hidden sm:flex gap-1">
-                            {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
-                                let pg: number;
-                                if (totalPages <= 7) {
-                                    pg = i + 1;
-                                } else if (page <= 4) {
-                                    pg = i + 1;
-                                } else if (page >= totalPages - 3) {
-                                    pg = totalPages - 6 + i;
-                                } else {
-                                    pg = page - 3 + i;
-                                }
-                                return (
-                                    <Link key={pg} href={pageHref(pg)}>
-                                        <Button variant={pg === page ? 'default' : 'outline'} size="sm" className="min-w-[2rem]">
-                                            {pg}
-                                        </Button>
-                                    </Link>
-                                );
-                            })}
-                        </span>
-                        {/* Compact pagination on mobile */}
-                        <span className="flex sm:hidden items-center gap-1 text-xs text-muted-foreground tabular-nums">
-                            {page} / {totalPages}
-                        </span>
-                        {page < totalPages && (
-                            <Link href={pageHref(page + 1)}>
-                                <Button variant="outline" size="sm">Next →</Button>
-                            </Link>
-                        )}
-                    </div>
-                </div>
-            )}
             <QuickAddDomainFab />
         </div>
     );

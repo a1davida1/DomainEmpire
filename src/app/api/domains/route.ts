@@ -62,7 +62,7 @@ const createDomainSchema = z.object({
     status: z.enum(['parked', 'active', 'redirect', 'forsale', 'defensive']).optional().default('parked'),
     lifecycleState: z.enum(DOMAIN_LIFECYCLE_STATES).optional().default('sourced'),
     bucket: z.enum(['build', 'redirect', 'park', 'defensive']).optional().default('build'), // Strategy
-    tier: z.number().min(1).max(3).optional().default(3),
+    tier: z.number().min(1).max(4).optional().default(3),
     niche: z.string().optional(),
     subNiche: z.string().optional(),
     vertical: z.string().optional(), // Legal, Insurance, etc.

@@ -85,7 +85,7 @@ const updateDomainSchema = z.object({
     renewalPrice: z.number().optional(),
     status: z.enum(['parked', 'active', 'redirect', 'forsale', 'defensive']).optional(),
     bucket: z.enum(['build', 'redirect', 'park', 'defensive']).optional(),
-    tier: z.number().min(1).max(3).optional(),
+    tier: z.number().min(1).max(4).optional(),
     niche: z.string().optional(),
     subNiche: z.string().optional(),
     siteTemplate: z.enum(SITE_TEMPLATE_VALUES).optional(),

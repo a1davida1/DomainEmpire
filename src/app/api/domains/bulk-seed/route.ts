@@ -8,7 +8,7 @@ import { enqueueContentJob } from '@/lib/queue/content-queue';
 
 const bulkSeedSchema = z.object({
     domainIds: z.array(z.string()).optional(),
-    tier: z.number().int().min(1).max(3).optional(),
+    tier: z.number().int().min(1).max(4).optional(),
     status: z.enum(['parked', 'active', 'redirect', 'forsale', 'defensive']).optional(),
     articleCount: z.number().int().min(1).max(10).default(5),
     priority: z.number().int().min(1).max(10).default(5),
