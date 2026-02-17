@@ -250,6 +250,8 @@ async function generateV2SiteFiles(
             skin: pageDef.skin || skinName,
             pageTitle: pageDef.title || undefined,
             pageDescription: pageDef.metaDescription || undefined,
+            publishedAt: pageDef.createdAt ? new Date(pageDef.createdAt).toISOString() : undefined,
+            updatedAt: pageDef.updatedAt ? new Date(pageDef.updatedAt).toISOString() : undefined,
             headScripts: scripts.head,
             bodyScripts: scripts.body,
         };
@@ -272,6 +274,22 @@ async function generateV2SiteFiles(
         content: generateV2GlobalStyles(themeName, skinName, domain.siteTemplate || 'authority', domain.domain),
     });
 
+    // Auto-inject trust pages from disclosure config
+    const disclosure = await getDisclosureConfig(domain.id);
+    const trustPageSlugs: string[] = [];
+    if (disclosure.aboutPage) {
+        files.push({ path: 'about/index.html', content: await generateV2TrustPage('About', disclosure.aboutPage, domain.domain, 'about', themeName, skinName, siteTitle) });
+        trustPageSlugs.push('about');
+    }
+    if (disclosure.editorialPolicyPage) {
+        files.push({ path: 'editorial-policy/index.html', content: await generateV2TrustPage('Editorial Policy', disclosure.editorialPolicyPage, domain.domain, 'editorial-policy', themeName, skinName, siteTitle) });
+        trustPageSlugs.push('editorial-policy');
+    }
+    if (disclosure.howWeMoneyPage) {
+        files.push({ path: 'how-we-make-money/index.html', content: await generateV2TrustPage('How We Make Money', disclosure.howWeMoneyPage, domain.domain, 'how-we-make-money', themeName, skinName, siteTitle) });
+        trustPageSlugs.push('how-we-make-money');
+    }
+
     // Static files (same as v1)
     const niche = domain.niche || 'general';
     files.push(
@@ -281,7 +299,7 @@ async function generateV2SiteFiles(
         { path: '_headers', content: generateHeaders() },
         {
             path: 'sitemap.xml',
-            content: generateV2Sitemap(domain.domain, pageDefs),
+            content: generateV2Sitemap(domain.domain, pageDefs, trustPageSlugs),
         },
     );
 
@@ -595,7 +613,7 @@ function generateHeaders(): string {
 }
 
 /** Generate sitemap for v2 block-based sites using actual page definition routes */
-function generateV2Sitemap(domain: string, pageDefs: PageDefinitionRow[]): string {
+function generateV2Sitemap(domain: string, pageDefs: PageDefinitionRow[], trustPageSlugs: string[] = []): string {
     const now = new Date().toISOString().split('T')[0];
     const urls = pageDefs.map(pd => {
         const route = pd.route === '/' ? '' : pd.route.replace(/^\//, '');
@@ -604,10 +622,58 @@ function generateV2Sitemap(domain: string, pageDefs: PageDefinitionRow[]): strin
         const priority = pd.route === '/' ? '1.0' : '0.8';
         return `<url><loc>${loc}</loc><lastmod>${lastmod}</lastmod><changefreq>weekly</changefreq><priority>${priority}</priority></url>`;
     });
+    for (const slug of trustPageSlugs) {
+        urls.push(`<url><loc>https://${domain}/${slug}</loc><lastmod>${now}</lastmod><changefreq>monthly</changefreq><priority>0.5</priority></url>`);
+    }
     return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${urls.join('\n')}
 </urlset>`;
+}
+
+/** Generate a trust page (About, Editorial Policy, etc.) styled with v2 theme/skin tokens */
+async function generateV2TrustPage(
+    title: string,
+    markdownContent: string,
+    domain: string,
+    slug: string,
+    theme: string,
+    skin: string,
+    siteTitle: string,
+): Promise<string> {
+    const result = marked.parse(markdownContent);
+    const htmlContent = typeof result === 'string' ? result : await result;
+    const sanitized = sanitizeHtml(htmlContent, {
+        allowedTags: sanitizeHtml.defaults.allowedTags.concat(['h1', 'h2', 'h3', 'h4', 'h5', 'h6']),
+    });
+    const canonicalUrl = `https://${domain}/${slug}`;
+    const fullTitle = `${escapeHtml(title)} | ${escapeHtml(siteTitle)}`;
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="index, follow">
+  <title>${fullTitle}</title>
+  <link rel="canonical" href="${escapeAttr(canonicalUrl)}">
+  <meta property="og:title" content="${escapeAttr(title)}">
+  <meta property="og:url" content="${escapeAttr(canonicalUrl)}">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="${escapeAttr(domain)}">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+</head>
+<body data-theme="${escapeAttr(theme)}" data-skin="${escapeAttr(skin)}">
+<div class="site-container">
+  <main>
+    <article class="article-body">
+      <h1>${escapeHtml(title)}</h1>
+      ${sanitized}
+    </article>
+  </main>
+</div>
+</body>
+</html>`;
 }
 
 function generateSitemap(config: SiteConfig, articleList: typeof articles.$inferSelect[], trustPages?: string[]): string {

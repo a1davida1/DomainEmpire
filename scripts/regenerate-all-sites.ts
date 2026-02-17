@@ -60,6 +60,7 @@ function generateBlockId(): string {
 
 function extractSiteTitle(domain: string): string {
     return domain
+        .replace(/\.(co\.uk|co\.nz|com\.au|com\.br|co\.in|co\.za|org\.uk|net\.au)$/i, '')
         .replace(/\.(com|net|org|io|co|app|dev|info|biz|us|uk|ca|au)$/i, '')
         .replace(/[-.]/g, ' ')
         .replace(/\b\w/g, c => c.toUpperCase());
@@ -72,7 +73,7 @@ async function main() {
         ? parseFlagValue(args, '--domain', '')
         : '';
     const articlesPerDomain = parsePositiveInteger(
-        parseFlagValue(args, '--articles-per-domain', '5'),
+        parseFlagValue(args, '--articles-per-domain', '1'),
         '--articles-per-domain',
     );
 
@@ -189,24 +190,25 @@ async function main() {
                             .where(
                                 sql`${schema.contentQueue.domainId} = ${domain.id} AND ${schema.contentQueue.status} IN ('pending', 'processing')`,
                             );
-                    });
 
-                    // Seed v2 homepage page definition with block presets
-                    const siteTemplate = domain.siteTemplate || 'authority';
-                    const skinName = domain.skin || 'slate';
-                    const presetBlocks = HOMEPAGE_PRESETS[siteTemplate] ?? HOMEPAGE_PRESETS.authority;
-                    const blocks = presetBlocks.map(b => ({ ...b, id: generateBlockId() }));
+                        // Seed v2 homepage page definition with block presets (inside tx so
+                        // if this fails the deletes above are rolled back — no data loss)
+                        const siteTemplate = domain.siteTemplate || 'authority';
+                        const skinName = domain.skin || 'slate';
+                        const presetBlocks = HOMEPAGE_PRESETS[siteTemplate] ?? HOMEPAGE_PRESETS.authority;
+                        const blocks = presetBlocks.map(b => ({ ...b, id: generateBlockId() }));
 
-                    await db.insert(schema.pageDefinitions).values({
-                        domainId: domain.id,
-                        route: '/',
-                        title: extractSiteTitle(domain.domain),
-                        metaDescription: `Expert guides about ${domain.niche || 'various topics'}`,
-                        theme: 'clean',
-                        skin: skinName,
-                        blocks,
-                        isPublished: true,
-                        version: 1,
+                        await tx.insert(schema.pageDefinitions).values({
+                            domainId: domain.id,
+                            route: '/',
+                            title: extractSiteTitle(domain.domain),
+                            metaDescription: `Expert guides about ${domain.niche || 'various topics'}`,
+                            theme: 'clean',
+                            skin: skinName,
+                            blocks,
+                            isPublished: true,
+                            version: 1,
+                        });
                     });
                     summary.homepageSeeded = true;
 
@@ -315,10 +317,8 @@ async function main() {
         if (!execute) {
             console.log('\n⚠  DRY RUN — no changes were made. Use --execute to apply.');
         } else {
-            console.log('\n✅ Done. v2 homepage page definitions created. Run the worker to generate articles:');
-            console.log('   npm run worker');
-            console.log('\nAfter articles are published, seed article page definitions via:');
-            console.log('   curl -X POST http://localhost:3000/api/pages/seed -d \'{"batch":true,"publish":true}\'');
+            console.log('\n✅ Done. v2 homepage page definitions created.');
+            console.log('   The worker will pick up queued article generation jobs automatically.');
         }
     } finally {
         await client.end();

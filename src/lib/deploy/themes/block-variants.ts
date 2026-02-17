@@ -726,19 +726,9 @@ section + section{margin-top:calc(var(--spacing-unit,1.6rem) * 2)}
 .comparison-section{margin:2rem 0;padding:1rem 0}
 
 /* ================================================================
-   PDF DOWNLOAD
+   PDF DOWNLOAD (button, gate form, etc.)
    ================================================================ */
 
-.pdf-download{
-  background:var(--color-bg-surface);
-  border:var(--border-width,1px) solid var(--color-border);
-  border-radius:var(--radius-lg,.75rem);
-  padding:1.25rem 1.5rem;
-  margin:2rem 0;
-  display:flex;
-  align-items:center;
-  gap:1rem;
-}
 .pdf-download-btn{
   display:inline-block;
   background:var(--color-accent);

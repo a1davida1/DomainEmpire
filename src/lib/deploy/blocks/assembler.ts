@@ -33,6 +33,8 @@ export interface RenderContext {
     skin: string;
     pageTitle?: string;
     pageDescription?: string;
+    publishedAt?: string;
+    updatedAt?: string;
     headScripts: string;
     bodyScripts: string;
 }
@@ -134,6 +136,122 @@ export function getConfiguratorBridgeScript(allowedParentOrigin: string): string
 }
 
 // ============================================================
+// Enhancement Script (scroll animations, reading progress, back-to-top)
+// ============================================================
+
+function getEnhancementScript(): string {
+    return `<script>
+(function(){
+  /* Scroll-triggered fade-in via IntersectionObserver */
+  if('IntersectionObserver' in window){
+    var io=new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if(e.isIntersecting){e.target.classList.add('is-visible');io.unobserve(e.target)}
+      });
+    },{threshold:0.08,rootMargin:'0px 0px -40px 0px'});
+    document.querySelectorAll('section[data-animate]').forEach(function(s){io.observe(s)});
+  }else{
+    document.querySelectorAll('section[data-animate]').forEach(function(s){s.classList.add('is-visible')});
+  }
+
+  /* Reading progress bar */
+  var bar=document.querySelector('.reading-progress');
+  if(bar){
+    window.addEventListener('scroll',function(){
+      var h=document.documentElement;
+      var pct=h.scrollTop/(h.scrollHeight-h.clientHeight)*100;
+      bar.style.width=Math.min(pct,100)+'%';
+    },{passive:true});
+  }
+
+  /* Back-to-top button */
+  var btn=document.querySelector('.back-to-top');
+  if(btn){
+    window.addEventListener('scroll',function(){
+      btn.classList.toggle('visible',window.scrollY>400);
+    },{passive:true});
+    btn.addEventListener('click',function(){window.scrollTo({top:0,behavior:'smooth'})});
+  }
+})();
+</script>`;
+}
+
+// ============================================================
+// SEO Helpers
+// ============================================================
+
+function buildOpenGraphMeta(ctx: RenderContext, pageUrl: string): string {
+    const title = escapeAttr(ctx.pageTitle || ctx.siteTitle);
+    const description = escapeAttr(ctx.pageDescription || '');
+    const domain = escapeAttr(ctx.domain);
+    const isHomepage = ctx.route === '/';
+
+    const tags = [
+        `<meta property="og:title" content="${title}">`,
+        `<meta property="og:description" content="${description}">`,
+        `<meta property="og:url" content="${escapeAttr(pageUrl)}">`,
+        `<meta property="og:type" content="${isHomepage ? 'website' : 'article'}">`,
+        `<meta property="og:site_name" content="${domain}">`,
+        `<meta property="og:locale" content="en_US">`,
+        `<meta name="twitter:card" content="summary">`,
+        `<meta name="twitter:title" content="${title}">`,
+        `<meta name="twitter:description" content="${description}">`,
+    ];
+
+    if (ctx.publishedAt) {
+        tags.push(`<meta property="article:published_time" content="${escapeAttr(ctx.publishedAt)}">`);
+    }
+    if (ctx.updatedAt) {
+        tags.push(`<meta property="article:modified_time" content="${escapeAttr(ctx.updatedAt)}">`);
+    }
+
+    return tags.join('\n  ');
+}
+
+function buildStructuredData(ctx: RenderContext, canonicalUrl: string): string {
+    const scripts: string[] = [];
+    const isHomepage = ctx.route === '/';
+
+    // WebPage or Article schema
+    const pageSchema: Record<string, unknown> = {
+        '@context': 'https://schema.org',
+        '@type': isHomepage ? 'WebPage' : 'Article',
+        name: ctx.pageTitle || ctx.siteTitle,
+        headline: ctx.pageTitle || ctx.siteTitle,
+        description: ctx.pageDescription || '',
+        url: canonicalUrl,
+        mainEntityOfPage: { '@type': 'WebPage', '@id': canonicalUrl },
+        inLanguage: 'en',
+        author: { '@type': 'Organization', name: ctx.domain },
+        publisher: { '@type': 'Organization', name: ctx.domain },
+    };
+    if (ctx.publishedAt) pageSchema.datePublished = ctx.publishedAt;
+    if (ctx.updatedAt) pageSchema.dateModified = ctx.updatedAt;
+    scripts.push(`<script type="application/ld+json">${JSON.stringify(pageSchema)}</script>`);
+
+    // BreadcrumbList
+    const breadcrumbItems: Array<Record<string, unknown>> = [
+        { '@type': 'ListItem', position: 1, name: 'Home', item: `https://${ctx.domain}/` },
+    ];
+    if (!isHomepage) {
+        breadcrumbItems.push({
+            '@type': 'ListItem',
+            position: 2,
+            name: ctx.pageTitle || ctx.route,
+            item: canonicalUrl,
+        });
+    }
+    const breadcrumb = {
+        '@context': 'https://schema.org',
+        '@type': 'BreadcrumbList',
+        itemListElement: breadcrumbItems,
+    };
+    scripts.push(`<script type="application/ld+json">${JSON.stringify(breadcrumb)}</script>`);
+
+    return scripts.join('\n  ');
+}
+
+// ============================================================
 // Page Assembly
 // ============================================================
 
@@ -161,7 +279,7 @@ export function assemblePageFromBlocks(
             footerHtml = `<div data-block-id="${escapeAttr(block.id)}" data-block-type="Footer">${html}</div>`;
         } else {
             contentBlocks.push(
-                `<section data-block-id="${escapeAttr(block.id)}" data-block-type="${escapeAttr(block.type)}"${block.variant ? ` data-block-variant="${escapeAttr(block.variant)}"` : ''}>${html}</section>`,
+                `<section data-block-id="${escapeAttr(block.id)}" data-block-type="${escapeAttr(block.type)}"${block.variant ? ` data-block-variant="${escapeAttr(block.variant)}"` : ''} data-animate>${html}</section>`,
             );
         }
     }
@@ -179,6 +297,15 @@ export function assemblePageFromBlocks(
   <link rel="stylesheet" href="${escapeAttr(fontUrl)}">`
         : '';
 
+    const pageUrl = `https://${ctx.domain}${ctx.route === '/' ? '' : ctx.route}`;
+    const canonicalUrl = `https://${ctx.domain}${ctx.route}`;
+
+    // OpenGraph + Twitter meta tags
+    const ogMeta = buildOpenGraphMeta(ctx, pageUrl);
+
+    // Structured data: Article/WebPage JSON-LD + BreadcrumbList
+    const structuredData = buildStructuredData(ctx, canonicalUrl);
+
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -187,9 +314,12 @@ export function assemblePageFromBlocks(
   <meta name="description" content="${escapeAttr(description)}">
   <meta name="robots" content="index, follow">
   <title>${fullTitle}</title>
+  <link rel="canonical" href="${escapeAttr(canonicalUrl)}">
+  ${ogMeta}
   ${fontLinks}
   <link rel="stylesheet" href="${escapeAttr(cssHref)}">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  ${structuredData}
   ${ctx.headScripts}
 </head>
 <body data-theme="${escapeAttr(ctx.theme)}" data-skin="${escapeAttr(ctx.skin)}">
@@ -200,6 +330,9 @@ ${contentBlocks.join('\n')}
   </main>
 </div>
 ${footerHtml}
+<div class="reading-progress" aria-hidden="true"></div>
+<button class="back-to-top" aria-label="Back to top">&uarr;</button>
+${getEnhancementScript()}
 ${ctx.bodyScripts}
 </body>
 </html>`;
@@ -307,16 +440,21 @@ registerBlockRenderer('Hero', (block, ctx) => {
 });
 
 // --- ArticleBody ---
-registerBlockRenderer('ArticleBody', (block, _ctx) => {
+registerBlockRenderer('ArticleBody', (block, ctx) => {
     const content = (block.content || {}) as Record<string, unknown>;
     const markdown = (content.markdown as string) || '';
     const title = (content.title as string) || '';
+    const isArticlePage = ctx.route !== '/';
 
     // Sanitize HTML content to prevent XSS
     const titleHtml = title ? `<h1>${escapeHtml(title)}</h1>` : '';
+    const printBtn = isArticlePage
+        ? '<button type="button" class="print-btn" onclick="window.print()">Print</button>'
+        : '';
 
     return `<article class="article-body">
   ${titleHtml}
+  ${printBtn}
   ${sanitizeArticleHtml(markdown)}
 </article>`;
 });

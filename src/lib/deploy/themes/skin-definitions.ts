@@ -244,6 +244,36 @@ export function generateSkinCSS(skinName: string): string {
 }`;
 }
 
+/**
+ * Generate dark-mode overrides for light-themed skins via prefers-color-scheme.
+ * Midnight skin is already dark, so it gets no override.
+ */
+export function generateDarkModeCSS(skinName: string): string {
+    if (skinName === 'midnight') return '';
+    return `
+@media(prefers-color-scheme:dark){
+  :root{
+    --color-bg:#0f172a;
+    --color-bg-surface:#1e293b;
+    --color-text:#e2e8f0;
+    --color-text-muted:#94a3b8;
+    --color-border:#334155;
+    --color-border-strong:#475569;
+    --color-hero-bg:#1e293b;
+    --color-hero-text:#f1f5f9;
+    --color-footer-bg:#020617;
+    --color-footer-text:#64748b;
+    --color-header-border:#334155;
+    --color-badge-bg:#38bdf8;
+    --color-badge-text:#0f172a;
+    --color-success-light:#064e3b;
+    --color-warning-light:#78350f;
+    --color-error-light:#7f1d1d;
+  }
+  img{opacity:0.9}
+}`;
+}
+
 /** List all available skin names */
 export const availableSkins = Object.keys(skins);
 

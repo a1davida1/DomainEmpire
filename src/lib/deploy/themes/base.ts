@@ -66,4 +66,80 @@ section + section{margin-top:var(--spacing-unit,1.6rem)}
 
 /* Badge utility */
 .badge{display:inline-flex;align-items:center;gap:0.375rem;font-size:0.78rem;font-weight:600;padding:0.25rem 0.75rem;border-radius:var(--radius-full,999px);background:var(--color-badge-bg,#1e293b);color:var(--color-badge-text,#fff)}
+
+/* Print button */
+.print-btn{display:inline-flex;align-items:center;gap:0.5rem;padding:0.5rem 1rem;font-size:0.875rem;font-weight:500;border:1px solid var(--color-border,#e2e8f0);background:var(--color-bg-surface,#f8fafc);color:var(--color-text-muted,#64748b);border-radius:var(--radius-md,.5rem);cursor:pointer;transition:all .15s ease}
+.print-btn:hover{background:var(--color-bg,#fff);color:var(--color-text,#1e293b);border-color:var(--color-border-strong,#cbd5e1)}
+.print-btn::before{content:'\\1F5A8'}
+
+/* Smooth transitions for interactive elements */
+button,a,.cta-button,[role="button"]{transition:all .15s ease}
+
+/* Card base transitions + hover lift */
+.review-card,.pricing-card,.testimonial-card,.ranking-item,.trust-badge,.faq-item,.factor-card,.cost-range,.vs-side,.stat-item,.comparison-verdict,.calc-form,.lead-form{transition:transform .2s ease,box-shadow .2s ease}
+.review-card:hover,.pricing-card:hover,.testimonial-card:hover,.ranking-item:hover,.stat-item:hover{box-shadow:var(--shadow-md,0 4px 12px rgba(0,0,0,.08))}
+.vs-side:hover,.factor-card:hover,.cost-range:hover{box-shadow:var(--shadow-sm,0 2px 6px rgba(0,0,0,.06))}
+
+/* Button press effect */
+.cta-button:active,.hero-cta:active,.lead-form button[type="submit"]:active,.wizard-next:active,.scroll-cta-btn:active{transform:scale(0.97)}
+
+/* Scroll-triggered fade-in animation */
+@keyframes fadeInUp{
+  from{opacity:0;transform:translateY(24px)}
+  to{opacity:1;transform:translateY(0)}
+}
+@keyframes fadeIn{
+  from{opacity:0}
+  to{opacity:1}
+}
+section[data-animate]{opacity:0}
+section[data-animate].is-visible{animation:fadeInUp .5s ease forwards}
+@media(prefers-reduced-motion:reduce){
+  section[data-animate]{opacity:1}
+  section[data-animate].is-visible{animation:none}
+}
+
+/* Staggered child animations */
+section.is-visible .review-card,section.is-visible .pricing-card,section.is-visible .testimonial-card,section.is-visible .stat-item,section.is-visible .ranking-item,section.is-visible .faq-item{
+  opacity:0;animation:fadeInUp .4s ease forwards
+}
+section.is-visible .review-card:nth-child(1),section.is-visible .pricing-card:nth-child(1),section.is-visible .stat-item:nth-child(1){animation-delay:.05s}
+section.is-visible .review-card:nth-child(2),section.is-visible .pricing-card:nth-child(2),section.is-visible .stat-item:nth-child(2){animation-delay:.1s}
+section.is-visible .review-card:nth-child(3),section.is-visible .pricing-card:nth-child(3),section.is-visible .stat-item:nth-child(3){animation-delay:.15s}
+section.is-visible .review-card:nth-child(4),section.is-visible .pricing-card:nth-child(4),section.is-visible .stat-item:nth-child(4){animation-delay:.2s}
+
+/* Gradient accent text utility */
+.gradient-text{background:linear-gradient(135deg,var(--color-accent,#2563eb),var(--color-secondary,#7c3aed));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+
+/* Decorative top-border accent for cards */
+.accent-top{border-top:3px solid var(--color-accent,#2563eb)}
+
+/* Subtle background pattern for hero sections */
+.hero::after{content:'';position:absolute;inset:0;opacity:0.03;background-image:radial-gradient(circle at 1px 1px,var(--color-text,#1e293b) 1px,transparent 0);background-size:32px 32px;pointer-events:none;z-index:0}
+
+/* Reading progress indicator */
+.reading-progress{position:fixed;top:0;left:0;height:3px;background:var(--color-accent,#2563eb);z-index:9999;transition:width .1s linear;width:0}
+
+/* Back-to-top button */
+.back-to-top{position:fixed;bottom:2rem;right:2rem;width:2.75rem;height:2.75rem;border-radius:var(--radius-full,999px);background:var(--color-accent,#2563eb);color:#fff;border:none;cursor:pointer;font-size:1.25rem;display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow-md,0 4px 12px rgba(0,0,0,.15));opacity:0;transform:translateY(1rem);transition:opacity .3s,transform .3s;z-index:999;pointer-events:none}
+.back-to-top.visible{opacity:1;transform:translateY(0);pointer-events:auto}
+.back-to-top:hover{background:var(--color-accent-hover,#1d4ed8);transform:translateY(-2px)}
+
+/* Separator decorations */
+.separator{width:60px;height:3px;background:var(--color-accent,#2563eb);margin:1.5rem 0;border-radius:999px}
+.separator--center{margin:1.5rem auto}
+
+/* Print media query */
+@media print{
+  body{background:#fff;color:#000;font-size:12pt}
+  .header,.footer,.scroll-cta,.print-btn,.cta-section,.lead-section,nav,button[type="submit"]{display:none!important}
+  main{padding:0}
+  .site-container{max-width:100%;padding:0}
+  a{color:#000;text-decoration:underline}
+  a[href]::after{content:' (' attr(href) ')';font-size:0.8em;color:#666}
+  article{max-width:100%}
+  section{break-inside:avoid}
+  h1,h2,h3{break-after:avoid}
+  .hero{background:none!important;color:#000!important;padding:1rem 0}
+}
 `;

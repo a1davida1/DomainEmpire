@@ -324,6 +324,7 @@ export function generateRandomizePlan(
     siteTemplate: string,
     domainName: string,
 ): RandomizePlan {
+    resetBlockCounter();
     const rng = createSeededRng(seed);
 
     // Pick global identity
@@ -361,13 +362,14 @@ export function generateRandomizePlan(
         ensureMustHaveBlocks(rng, homepageUpdate.blocks, siteTemplate, domainName);
     }
 
-    // Ensure conversion block exists somewhere
-    const allPlannedBlockTypes = new Set([
+    // Helper to compute all block types across page updates and missing pages
+    const collectBlockTypes = () => new Set([
         ...pageUpdates.flatMap(pu => pu.blocks.map(b => b.type)),
         ...missingPages.flatMap(mp => mp.blocks.map(b => b.type)),
     ]);
-    if (![...CONVERSION_BLOCKS].some(t => allPlannedBlockTypes.has(t))) {
-        // Add CTABanner to homepage
+
+    // Ensure conversion block exists somewhere
+    if (![...CONVERSION_BLOCKS].some(t => collectBlockTypes().has(t))) {
         if (homepageUpdate) {
             const ctaVariant = seededPick(rng, VARIANT_OPTIONS.CTABanner ?? ['banner']);
             homepageUpdate.blocks.splice(
@@ -379,7 +381,7 @@ export function generateRandomizePlan(
     }
 
     // Ensure trust signal exists somewhere
-    if (![...TRUST_BLOCKS].some(t => allPlannedBlockTypes.has(t))) {
+    if (![...TRUST_BLOCKS].some(t => collectBlockTypes().has(t))) {
         if (homepageUpdate) {
             homepageUpdate.blocks.splice(
                 Math.max(homepageUpdate.blocks.length - 1, 0),
@@ -390,7 +392,7 @@ export function generateRandomizePlan(
     }
 
     // Ensure FAQ exists somewhere
-    if (!allPlannedBlockTypes.has('FAQ')) {
+    if (!collectBlockTypes().has('FAQ')) {
         if (homepageUpdate) {
             homepageUpdate.blocks.splice(
                 Math.max(homepageUpdate.blocks.length - 1, 0),
@@ -508,6 +510,10 @@ function getTemplateMiddleBlocks(siteTemplate: string): MiddleBlock[] {
 }
 
 let blockCounter = 0;
+
+function resetBlockCounter(): void {
+    blockCounter = 0;
+}
 
 function makeBlock(type: string, variant?: string, domain?: string, niche?: string): BlockSnapshot {
     blockCounter++;

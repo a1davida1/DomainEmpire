@@ -88,6 +88,8 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
         skin: skinName,
         pageTitle: pageDef.title || undefined,
         pageDescription: pageDef.metaDescription || undefined,
+        publishedAt: pageDef.createdAt ? new Date(pageDef.createdAt).toISOString() : undefined,
+        updatedAt: pageDef.updatedAt ? new Date(pageDef.updatedAt).toISOString() : undefined,
         headScripts: '',
         bodyScripts: '',
     };
@@ -179,6 +181,8 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         skin: skinName,
         pageTitle: pageDef.title || undefined,
         pageDescription: pageDef.metaDescription || undefined,
+        publishedAt: pageDef.createdAt ? new Date(pageDef.createdAt).toISOString() : undefined,
+        updatedAt: pageDef.updatedAt ? new Date(pageDef.updatedAt).toISOString() : undefined,
         headScripts: '',
         bodyScripts: '',
     };

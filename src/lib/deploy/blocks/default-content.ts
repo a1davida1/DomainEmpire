@@ -97,27 +97,28 @@ export function getDefaultBlockContent(
             },
         },
         LeadForm: {
-            config: { requireConsent: true },
+            config: { requireConsent: true, endpoint: '#', submitLabel: 'Get My Free Quote' },
             content: {
                 headline: `Get Your Free ${capitalize(nicheLabel)} Quote`,
                 description: `Fill out the form below and receive personalized recommendations within 24 hours. No obligation, completely free.`,
                 fields: [
-                    { label: 'Full Name', type: 'text', required: true },
-                    { label: 'Email Address', type: 'email', required: true },
-                    { label: 'Phone Number', type: 'tel', required: false },
-                    { label: 'ZIP Code', type: 'text', required: true },
+                    { name: 'fullName', label: 'Full Name', type: 'text', required: true },
+                    { name: 'email', label: 'Email Address', type: 'email', required: true },
+                    { name: 'phone', label: 'Phone Number', type: 'tel', required: false },
+                    { name: 'zipCode', label: 'ZIP Code', type: 'text', required: true },
                 ],
-                submitText: 'Get My Free Quote',
                 consentText: 'I agree to the privacy policy and consent to being contacted about my inquiry.',
+                successMessage: 'Thank you! We\'ll be in touch within 24 hours.',
             },
         },
         StatGrid: {
+            config: { filterable: false },
             content: {
-                stats: [
-                    { value: '10,000+', label: 'Readers Helped' },
-                    { value: '98%', label: 'Satisfaction Rate' },
-                    { value: '150+', label: 'Expert Reviews' },
-                    { value: `${year}`, label: 'Last Updated' },
+                items: [
+                    { id: 'readers', title: 'Readers Helped', metricLabel: 'Total Reach', metricValue: 95, summary: 'Over 10,000 readers have used our guides to make informed decisions.', group: 'Impact' },
+                    { id: 'satisfaction', title: 'Satisfaction Rate', metricLabel: 'Satisfaction', metricValue: 98, summary: '98% of readers rate our content as helpful or very helpful.', group: 'Quality' },
+                    { id: 'reviews', title: 'Expert Reviews', metricLabel: 'Coverage', metricValue: 85, summary: 'Over 150 products and services independently reviewed by our team.', group: 'Impact' },
+                    { id: 'accuracy', title: 'Data Accuracy', metricLabel: 'Verified', metricValue: 99, summary: 'All data points verified against primary sources and updated regularly.', group: 'Quality' },
                 ],
             },
         },
@@ -195,11 +196,15 @@ export function getDefaultBlockContent(
         QuoteCalculator: {
             content: {
                 title: `${capitalize(nicheLabel)} Cost Calculator`,
-                fields: [
-                    { label: 'Size / Quantity', type: 'number', min: 1, max: 10000 },
-                    { label: 'Quality Level', type: 'select', options: ['Basic', 'Standard', 'Premium', 'Luxury'] },
-                    { label: 'Location Type', type: 'select', options: ['Urban', 'Suburban', 'Rural'] },
+                inputs: [
+                    { id: 'quantity', label: 'Size / Quantity', type: 'number', min: 1, max: 10000, default: 100 },
+                    { id: 'quality', label: 'Quality Level', type: 'select', options: [{ label: 'Basic', value: 1 }, { label: 'Standard', value: 2 }, { label: 'Premium', value: 3 }, { label: 'Luxury', value: 4 }] },
+                    { id: 'location', label: 'Location Type', type: 'select', options: [{ label: 'Urban', value: 1.2 }, { label: 'Suburban', value: 1.0 }, { label: 'Rural', value: 0.85 }] },
                 ],
+                outputs: [
+                    { id: 'estimate', label: 'Estimated Cost', format: 'currency', decimals: 0 },
+                ],
+                formula: 'quantity * quality * location * 15',
                 methodology: `Estimates are based on current ${year} market rates, verified by industry experts. Actual costs may vary based on your specific requirements and local market conditions.`,
             },
         },
@@ -243,17 +248,13 @@ export function getDefaultBlockContent(
         },
         DataTable: {
             content: {
-                columns: [
-                    { key: 'name', label: 'Provider', sortable: true },
-                    { key: 'rating', label: 'Rating', sortable: true },
-                    { key: 'price', label: 'Starting Price', sortable: true },
-                    { key: 'coverage', label: 'Coverage', sortable: false },
-                ],
+                headers: ['Provider', 'Rating', 'Starting Price', 'Coverage'],
                 rows: [
-                    { name: 'Provider A', rating: '4.9/5', price: '$29/mo', coverage: 'Nationwide' },
-                    { name: 'Provider B', rating: '4.7/5', price: '$19/mo', coverage: '45 States' },
-                    { name: 'Provider C', rating: '4.5/5', price: '$15/mo', coverage: '30 States' },
+                    ['Provider A', '4.9/5', '$29/mo', 'Nationwide'],
+                    ['Provider B', '4.7/5', '$19/mo', '45 States'],
+                    ['Provider C', '4.5/5', '$15/mo', '30 States'],
                 ],
+                caption: `Top ${capitalize(nicheLabel)} Providers Comparison`,
             },
         },
         Checklist: {
@@ -299,9 +300,16 @@ export function getDefaultBlockContent(
             },
         },
         InteractiveMap: {
+            config: { showTileGrid: false, showDropdown: true },
             content: {
                 title: `${capitalize(nicheLabel)} Service Areas`,
-                regions: [{ id: 'nationwide', label: 'Nationwide', states: ['All 50 States'] }],
+                regions: {
+                    northeast: { label: 'Northeast', content: `${capitalize(nicheLabel)} services available throughout the Northeast region with competitive pricing and fast turnaround.` },
+                    southeast: { label: 'Southeast', content: `${capitalize(nicheLabel)} coverage across the Southeast with local expertise and regional pricing.` },
+                    midwest: { label: 'Midwest', content: `${capitalize(nicheLabel)} providers serving the Midwest with reliable service and value pricing.` },
+                    west: { label: 'West', content: `${capitalize(nicheLabel)} options on the West Coast with premium and budget tiers available.` },
+                },
+                defaultRegion: 'northeast',
             },
         },
         GeoContent: {
@@ -315,13 +323,12 @@ export function getDefaultBlockContent(
         },
         PdfDownload: {
             content: {
-                title: `Download Our Free ${capitalize(nicheLabel)} Guide`,
-                description: `Get the complete ${year} guide as a downloadable PDF.`,
-                buttonText: 'Download Free Guide',
+                articleId: '',
+                buttonText: `Download Free ${capitalize(nicheLabel)} Guide`,
             },
         },
         ScrollCTA: {
-            config: { trigger: 'scroll', style: 'bar' },
+            config: { style: 'bar', trigger: 'scroll' },
             content: {
                 text: `Looking for the best ${nicheLabel} deal?`,
                 buttonLabel: 'Compare Top Picks',

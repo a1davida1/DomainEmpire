@@ -14,7 +14,7 @@ export { resolveDomainTheme, getPolicyThemes, type ThemeResolution, type ThemeRe
 
 // v2 theme/skin system
 export { generateThemeCSS, availableV2Themes, V1_THEME_TO_V2_THEME, type ThemeTokens } from './theme-tokens';
-export { generateSkinCSS, availableSkins, V1_THEME_TO_SKIN, type SkinTokens } from './skin-definitions';
+export { generateSkinCSS, generateDarkModeCSS, availableSkins, V1_THEME_TO_SKIN, type SkinTokens } from './skin-definitions';
 
 import { baseStyles } from './base';
 import { componentStyles } from './components';
@@ -24,7 +24,7 @@ import { getThemeStyles } from './theme-definitions';
 import { generateDomainVariantStyles } from './variants';
 import { getLayoutConfig, getLayoutStyles } from '../layouts';
 import { generateThemeCSS } from './theme-tokens';
-import { generateSkinCSS } from './skin-definitions';
+import { generateSkinCSS, generateDarkModeCSS } from './skin-definitions';
 
 /**
  * v1: Generate the complete global CSS stylesheet for a given theme and layout.
@@ -54,5 +54,6 @@ export function generateV2GlobalStyles(
     const layoutConfig = getLayoutConfig(siteTemplate);
     const layoutStyles = getLayoutStyles(layoutConfig);
     const variantStyles = generateDomainVariantStyles(domain || 'default-domain');
-    return themeVars + '\n' + skinVars + '\n' + baseStyles + layoutStyles + componentStyles + blockVariantStyles + variantStyles + responsiveStyles;
+    const darkMode = generateDarkModeCSS(skinName);
+    return themeVars + '\n' + skinVars + '\n' + baseStyles + layoutStyles + componentStyles + blockVariantStyles + variantStyles + darkMode + responsiveStyles;
 }

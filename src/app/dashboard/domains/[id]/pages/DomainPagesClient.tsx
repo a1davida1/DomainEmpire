@@ -21,6 +21,7 @@ interface PageDef {
     status: string;
     version: number;
     blockCount: number;
+    blockTypes: string[];
     createdAt: string | null;
     updatedAt: string | null;
 }
@@ -54,6 +55,9 @@ function mapPage(p: Record<string, unknown>): PageDef {
         status: (p.status as string) || 'draft',
         version: Number(p.version || 1),
         blockCount: Array.isArray(p.blocks) ? (p.blocks as unknown[]).length : 0,
+        blockTypes: Array.isArray(p.blocks)
+            ? (p.blocks as { type?: string }[]).map(b => b.type || '').filter(Boolean)
+            : [],
         createdAt: (p.createdAt as string | null) ?? null,
         updatedAt: (p.updatedAt as string | null) ?? null,
     };
@@ -98,7 +102,7 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, contentT
             theme: p.theme,
             skin: p.skin,
             isPublished: p.isPublished,
-            blocks: [],
+            blocks: p.blockTypes.map((type, i) => ({ id: `chk_${i}`, type })),
         }));
         return computeChecklist(snapshots, siteTemplate);
     }, [pages, siteTemplate]);
@@ -126,6 +130,11 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, contentT
 
             // Re-fetch current pages list to get latest IDs
             const listRes = await fetch(`/api/pages?domainId=${domainId}`);
+            if (!listRes.ok) {
+                const listErr = await listRes.json().catch(() => ({}));
+                setError((listErr as Record<string, string>).error || 'Failed to fetch page list');
+                return;
+            }
             const listData = await listRes.json();
             const currentPageIds: string[] = Array.isArray(listData.pages)
                 ? listData.pages.map((p: Record<string, unknown>) => p.id as string)
@@ -327,6 +336,7 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, contentT
             setSuccess(`Created page ${normalizedRoute}`);
             setShowCreateForm(false);
             setNewTitle('');
+            setNewRoute('/landing');
             await refreshPages();
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Create page failed');
@@ -348,7 +358,7 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, contentT
             }
 
             const sourceRoute = typeof source.route === 'string' ? source.route : '/page';
-            const duplicatedRoute = `${sourceRoute}-copy-${Date.now().toString().slice(-4)}`;
+            const duplicatedRoute = `${sourceRoute}-copy-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
             const createRes = await fetch('/api/pages', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -420,20 +430,55 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, contentT
 
     async function handleBulkStatus(newStatus: string) {
         if (selectedIds.length === 0) return;
+
+        // Pre-filter: only attempt pages whose current status allows this transition
+        const VALID_TRANSITIONS: Record<string, string[]> = {
+            draft: ['review'],
+            review: ['approved', 'draft'],
+            approved: ['published', 'review', 'draft'],
+            published: ['draft'],
+        };
+        const eligible = selectedIds.filter((id) => {
+            const page = pages.find((p) => p.id === id);
+            if (!page) return false;
+            const allowed = VALID_TRANSITIONS[page.status];
+            return allowed?.includes(newStatus) ?? false;
+        });
+        const skippedCount = selectedIds.length - eligible.length;
+
+        if (eligible.length === 0) {
+            setError(`No selected pages can transition to "${newStatus}". Valid transitions depend on current status.`);
+            return;
+        }
+
         setLoading(`bulk-${newStatus}`);
         setError(null);
         setSuccess(null);
         try {
-            const results = await Promise.all(selectedIds.map(async (pageId) => {
-                const res = await fetch(`/api/pages/${pageId}/status`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ status: newStatus }),
-                });
-                return res.ok;
-            }));
-            const okCount = results.filter(Boolean).length;
-            setSuccess(`Updated ${okCount}/${selectedIds.length} selected pages to ${newStatus}`);
+            let okCount = 0;
+            const errors: string[] = [];
+            // Process in batches of 5 to avoid overwhelming the server
+            for (let i = 0; i < eligible.length; i += 5) {
+                const batch = eligible.slice(i, i + 5);
+                const results = await Promise.all(batch.map(async (pageId) => {
+                    const res = await fetch(`/api/pages/${pageId}/status`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ status: newStatus }),
+                    });
+                    if (res.ok) return { ok: true, error: '' };
+                    const data = await res.json().catch(() => ({}));
+                    return { ok: false, error: (data as Record<string, unknown>).error as string || `HTTP ${res.status}` };
+                }));
+                for (const r of results) {
+                    if (r.ok) okCount++;
+                    else errors.push(r.error);
+                }
+            }
+            let msg = `Updated ${okCount}/${eligible.length} eligible pages to ${newStatus}`;
+            if (skippedCount > 0) msg += ` (${skippedCount} skipped — wrong status)`;
+            if (errors.length > 0) msg += `. Errors: ${[...new Set(errors)].join('; ')}`;
+            setSuccess(msg);
             setSelectedIds([]);
             await refreshPages();
         } catch (err) {
@@ -449,11 +494,16 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, contentT
         setError(null);
         setSuccess(null);
         try {
-            const results = await Promise.all(selectedIds.map(async (pageId) => {
-                const res = await fetch(`/api/pages/${pageId}/generate`, { method: 'POST' });
-                return res.ok;
-            }));
-            const okCount = results.filter(Boolean).length;
+            let okCount = 0;
+            // Process in batches of 5 to avoid overwhelming the server
+            for (let i = 0; i < selectedIds.length; i += 5) {
+                const batch = selectedIds.slice(i, i + 5);
+                const results = await Promise.all(batch.map(async (pageId) => {
+                    const res = await fetch(`/api/pages/${pageId}/generate`, { method: 'POST' });
+                    return res.ok;
+                }));
+                okCount += results.filter(Boolean).length;
+            }
             setSuccess(`Triggered generation for ${okCount}/${selectedIds.length} selected pages`);
             await refreshPages();
         } catch (err) {

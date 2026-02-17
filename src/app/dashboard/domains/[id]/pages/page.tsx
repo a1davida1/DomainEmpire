@@ -47,6 +47,9 @@ export default async function DomainPagesPage({ params }: PageProps) {
                     status: p.status,
                     version: p.version,
                     blockCount: Array.isArray(p.blocks) ? p.blocks.length : 0,
+                    blockTypes: Array.isArray(p.blocks)
+                        ? (p.blocks as { type?: string }[]).map(b => b.type || '').filter(Boolean)
+                        : [],
                     createdAt: p.createdAt?.toISOString() || null,
                     updatedAt: p.updatedAt?.toISOString() || null,
                 }))}

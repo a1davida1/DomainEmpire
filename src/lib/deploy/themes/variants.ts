@@ -111,8 +111,8 @@ body{letter-spacing:var(--de-body-tracking)}
 h1,h2,h3{letter-spacing:var(--de-heading-tracking);font-weight:var(--de-heading-weight)}
 h2{text-transform:var(--de-heading-transform)}
 
-/* Hero */
-.hero{padding:var(--de-hero-padding)}
+/* Hero — only override padding when no variant class is present */
+.hero:not([class*="hero--"]){padding:var(--de-hero-padding)}
 .hero h1{font-size:var(--de-hero-size);letter-spacing:var(--de-heading-tracking)}
 
 /* Section spacing & dividers */
