@@ -5,6 +5,7 @@ import { requireAuth, getRequestUser } from '@/lib/auth';
 import { canTransition, getApprovalPolicy } from '@/lib/review/workflow';
 import type { YmylLevel } from '@/lib/review/ymyl';
 import { parseStructuredRationale } from '@/lib/review/rationale-policy';
+import { analyzeContentQuality, toPlainText } from '@/lib/review/content-quality';
 import { eq } from 'drizzle-orm';
 
 // Valid status transitions
@@ -20,6 +21,9 @@ const TRANSITIONS: Record<string, string[]> = {
     published: ['archived', 'review'],  // archive or pull back for review
     archived: ['draft'],                // unarchive back to draft
 };
+
+const MIN_REVIEW_QUALITY_SCORE = 70;
+const MIN_REVIEW_WORD_COUNT = 900;
 
 async function tryAutoPublish(
     articleId: string,
@@ -76,8 +80,15 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     const user = getRequestUser(request);
 
     try {
-        const body = await request.json();
-        const { status: newStatus, rationale, rationaleDetails } = body;
+        let body: Record<string, unknown>;
+        try {
+            body = await request.json();
+        } catch {
+            return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+        }
+        const newStatus = typeof body.status === 'string' ? body.status : '';
+        const rationale = typeof body.rationale === 'string' ? body.rationale : null;
+        const rationaleDetails = body.rationaleDetails;
 
         if (!newStatus) {
             return NextResponse.json({ error: 'Status is required' }, { status: 400 });
@@ -107,7 +118,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
 
         const rationaleValidation = parseStructuredRationale({
             contentType: article.contentType,
-            rationale: typeof rationale === 'string' ? rationale : null,
+            rationale,
             rationaleDetails,
             fromStatus: currentStatus,
             toStatus: newStatus,
@@ -137,6 +148,40 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
                 { error: policyCheck.reason || 'Transition blocked by approval policy' },
                 { status: 403 }
             );
+        }
+
+        if (newStatus === 'approved' || newStatus === 'published') {
+            const plainText = toPlainText(article.contentMarkdown, article.contentHtml);
+            const quality = analyzeContentQuality(plainText);
+            const qualityFailures: string[] = [];
+
+            if (quality.qualityScore < MIN_REVIEW_QUALITY_SCORE) {
+                qualityFailures.push(
+                    `Quality score ${quality.qualityScore} is below required ${MIN_REVIEW_QUALITY_SCORE}`,
+                );
+            }
+
+            if (quality.metrics.wordCount < MIN_REVIEW_WORD_COUNT) {
+                qualityFailures.push(
+                    `Word count ${quality.metrics.wordCount} is below required ${MIN_REVIEW_WORD_COUNT}`,
+                );
+            }
+
+            if (qualityFailures.length > 0) {
+                return NextResponse.json(
+                    {
+                        error: 'Content quality gate failed. Improve content before approving/publishing.',
+                        details: qualityFailures,
+                        quality: {
+                            score: quality.qualityScore,
+                            status: quality.status,
+                            metrics: quality.metrics,
+                            recommendations: quality.recommendations,
+                        },
+                    },
+                    { status: 403 },
+                );
+            }
         }
 
         // Build update

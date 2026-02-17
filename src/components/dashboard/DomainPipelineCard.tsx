@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -190,10 +191,18 @@ export function DomainPipelineCard({ state }: { state: PipelineState }) {
                         </Badge>
                     )}
                     {state.keywordCount > 0 && (
-                        <Badge variant="outline">{state.keywordCount} keywords</Badge>
+                        <Link href={`/dashboard/keywords?domainId=${state.domainId}`}>
+                            <Badge variant="outline" className="hover:bg-muted">
+                                {state.keywordCount} keywords
+                            </Badge>
+                        </Link>
                     )}
                     {state.articleCount > 0 && (
-                        <Badge variant="outline">{state.articleCount} articles</Badge>
+                        <Link href={`/dashboard/content/articles?domainId=${state.domainId}`}>
+                            <Badge variant="outline" className="hover:bg-muted">
+                                {state.articleCount} articles
+                            </Badge>
+                        </Link>
                     )}
                     {state.isDeployed && (
                         <Badge variant="outline" className="border-emerald-200 text-emerald-700">Deployed</Badge>
@@ -207,6 +216,11 @@ export function DomainPipelineCard({ state }: { state: PipelineState }) {
 
                 {/* Action Buttons */}
                 <div className="flex flex-wrap gap-2">
+                    <Link href={`/dashboard/domains/${state.domainId}/pages`}>
+                        <Button size="sm" variant="outline">
+                            Page Configurator
+                        </Button>
+                    </Link>
                     {!state.isClassified && (
                         <Tooltip>
                             <TooltipTrigger asChild>

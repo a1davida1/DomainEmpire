@@ -27,29 +27,29 @@ export async function POST(request: NextRequest) {
         // Batch mode
         if (body.batch) {
             const result = await batchSeedPageDefinitions({
-                publish: body.publish ?? false,
-                theme: body.theme,
-                skin: body.skin,
-                seedArticlePages: body.seedArticlePages ?? true,
-                filterTemplate: body.filterTemplate,
-                limit: Math.min(body.limit ?? 50, 200),
+                publish: typeof body.publish === 'boolean' ? body.publish : false,
+                theme: typeof body.theme === 'string' ? body.theme : undefined,
+                skin: typeof body.skin === 'string' ? body.skin : undefined,
+                seedArticlePages: typeof body.seedArticlePages === 'boolean' ? body.seedArticlePages : true,
+                filterTemplate: typeof body.filterTemplate === 'string' ? body.filterTemplate : undefined,
+                limit: Math.min(typeof body.limit === 'number' ? body.limit : 50, 200),
             });
 
             return NextResponse.json(result);
         }
 
         // Single domain mode
-        const { domainId } = body;
+        const domainId = typeof body.domainId === 'string' ? body.domainId : '';
         if (!domainId || !UUID_RE.test(domainId)) {
             return NextResponse.json({ error: 'domainId is required (UUID)' }, { status: 400 });
         }
 
         const result = await seedPageDefinitions(domainId, {
-            publish: body.publish ?? false,
-            theme: body.theme,
-            skin: body.skin,
-            seedArticlePages: body.seedArticlePages ?? true,
-            skipIfExists: body.skipIfExists ?? true,
+            publish: typeof body.publish === 'boolean' ? body.publish : false,
+            theme: typeof body.theme === 'string' ? body.theme : undefined,
+            skin: typeof body.skin === 'string' ? body.skin : undefined,
+            seedArticlePages: typeof body.seedArticlePages === 'boolean' ? body.seedArticlePages : true,
+            skipIfExists: typeof body.skipIfExists === 'boolean' ? body.skipIfExists : true,
         });
 
         if (result.skipped) {

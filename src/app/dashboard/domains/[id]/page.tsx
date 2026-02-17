@@ -485,6 +485,17 @@ export default async function DomainDetailPage({ params }: PageProps) {
                     </Tooltip>
                     <Tooltip>
                         <TooltipTrigger asChild>
+                            <Link href={`/dashboard/domains/${id}/pages`}>
+                                <Button variant="outline">
+                                    <FileText className="mr-2 h-4 w-4" />
+                                    Page Configurator
+                                </Button>
+                            </Link>
+                        </TooltipTrigger>
+                        <TooltipContent>Edit block layouts, theme, and content for this domain&apos;s pages.</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
                             <Link href={`/dashboard/content/articles?domainId=${id}`}>
                                 <Button variant="outline">
                                     <FileText className="mr-2 h-4 w-4" />
@@ -567,29 +578,33 @@ export default async function DomainDetailPage({ params }: PageProps) {
             <div className="grid gap-4 md:grid-cols-4">
                 <Card>
                     <CardContent className="p-4">
-                        <div className="flex items-center gap-3">
-                            <div className="rounded-lg bg-primary/10 p-2">
-                                <FileText className="h-5 w-5 text-primary" />
+                        <Link href={`/dashboard/content/articles?domainId=${id}`} className="group block">
+                            <div className="flex items-center gap-3">
+                                <div className="rounded-lg bg-primary/10 p-2">
+                                    <FileText className="h-5 w-5 text-primary" />
+                                </div>
+                                <div>
+                                    <p className="text-2xl font-bold">{stats.articles}</p>
+                                    <p className="text-sm text-muted-foreground group-hover:underline">Articles</p>
+                                </div>
                             </div>
-                            <div>
-                                <p className="text-2xl font-bold">{stats.articles}</p>
-                                <p className="text-sm text-muted-foreground">Articles</p>
-                            </div>
-                        </div>
+                        </Link>
                     </CardContent>
                 </Card>
 
                 <Card>
                     <CardContent className="p-4">
-                        <div className="flex items-center gap-3">
-                            <div className="rounded-lg bg-blue-500/10 p-2">
-                                <Tag className="h-5 w-5 text-blue-500" />
+                        <Link href={`/dashboard/keywords?domainId=${id}`} className="group block">
+                            <div className="flex items-center gap-3">
+                                <div className="rounded-lg bg-blue-500/10 p-2">
+                                    <Tag className="h-5 w-5 text-blue-500" />
+                                </div>
+                                <div>
+                                    <p className="text-2xl font-bold">{stats.keywords}</p>
+                                    <p className="text-sm text-muted-foreground group-hover:underline">Keywords</p>
+                                </div>
                             </div>
-                            <div>
-                                <p className="text-2xl font-bold">{stats.keywords}</p>
-                                <p className="text-sm text-muted-foreground">Keywords</p>
-                            </div>
-                        </div>
+                        </Link>
                     </CardContent>
                 </Card>
 

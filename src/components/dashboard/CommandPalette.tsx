@@ -6,7 +6,7 @@ import {
     LayoutDashboard, Globe, FileText, Search, BarChart3, DollarSign,
     Beaker, Settings, ListTodo, Wallet, Swords, Megaphone, PlugZap,
     ClipboardCheck, ShieldCheck, Gauge, Rocket, Activity, Mail, PlayCircle,
-    Command,
+    Target, Command,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -28,7 +28,8 @@ const NAV_ITEMS = [
     { name: 'Monitoring', href: '/dashboard/monitoring', icon: Activity, keywords: 'alerts health uptime' },
     { name: 'Subscribers', href: '/dashboard/subscribers', icon: Mail, keywords: 'email capture list' },
     { name: 'Queue', href: '/dashboard/queue', icon: ListTodo, keywords: 'jobs processing pipeline' },
-    { name: 'Research', href: '/dashboard/research', icon: Beaker, keywords: 'domain evaluation acquisition' },
+    { name: 'Research', href: '/dashboard/research', icon: Beaker, keywords: 'domain evaluation discovery' },
+    { name: 'Acquisition', href: '/dashboard/acquisition', icon: Target, keywords: 'acquisition pipeline candidates buy' },
     { name: 'Settings', href: '/dashboard/settings', icon: Settings, keywords: 'users templates policies config' },
     { name: 'Add Domain', href: '/dashboard/domains/new', icon: Globe, keywords: 'new create register' },
     { name: 'Import CSV', href: '/dashboard/domains/import', icon: Globe, keywords: 'bulk upload spreadsheet' },

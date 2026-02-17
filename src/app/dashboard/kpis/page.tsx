@@ -15,6 +15,18 @@ type ComplianceMetrics = {
     totalInReview: number;
 };
 
+type RevenueApiResponse = {
+    summary: {
+        totalRevenue: number;
+        totalClicks: number;
+        totalImpressions: number;
+        avgRpm: number;
+        ctr: number;
+    };
+    bySource: Array<{ source: string; totalRevenue: number }>;
+    topDomains: Array<{ domain: string; totalRevenue: number }>;
+};
+
 type RevenueData = {
     totalRevenue: number;
     adRevenue: number;
@@ -22,6 +34,18 @@ type RevenueData = {
     leadGenRevenue: number;
     domainCount: number;
     avgRevenuePerDomain: number;
+};
+
+type CostsApiResponse = {
+    summary: {
+        totalCost: number;
+        totalTokens: number;
+        totalCalls: number;
+        avgCostPerCall: number;
+    };
+    costsByStage: Array<{ stage: string; totalCost: number }>;
+    queueCosts: Array<{ jobType: string; totalCost: number }>;
+    articleCosts: { totalCost: number; avgCostPerArticle: number; articleCount: number };
 };
 
 type CostData = {
@@ -93,8 +117,34 @@ export default function KpiDashboardPage() {
 
                 if (controller.signal.aborted) return;
                 setCompliance(await complianceRes.json());
-                setRevenue(await revenueRes.json());
-                setCosts(await costsRes.json());
+
+                // Revenue API returns nested shape: { summary, bySource, topDomains }
+                const revRaw: RevenueApiResponse = await revenueRes.json();
+                const adRev = revRaw.bySource?.find(s => s.source === 'ads')?.totalRevenue ?? 0;
+                const affRev = revRaw.bySource?.find(s => s.source === 'affiliate')?.totalRevenue ?? 0;
+                const leadRev = revRaw.bySource?.find(s => s.source === 'leadgen')?.totalRevenue ?? 0;
+                const domainCount = revRaw.topDomains?.length ?? 0;
+                const totalRev = revRaw.summary?.totalRevenue ?? 0;
+                setRevenue({
+                    totalRevenue: totalRev,
+                    adRevenue: adRev,
+                    affiliateRevenue: affRev,
+                    leadGenRevenue: leadRev,
+                    domainCount,
+                    avgRevenuePerDomain: domainCount > 0 ? totalRev / domainCount : 0,
+                });
+
+                // Costs API returns nested shape: { summary, costsByStage, queueCosts, articleCosts }
+                const costRaw: CostsApiResponse = await costsRes.json();
+                const aiApiCosts = costRaw.summary?.totalCost ?? 0;
+                const deployStage = costRaw.costsByStage?.find(s => s.stage === 'deploy');
+                const hostingCosts = deployStage?.totalCost ?? 0;
+                setCosts({
+                    totalCosts: aiApiCosts,
+                    aiApiCosts,
+                    domainCosts: 0, // domain registration costs not tracked in this API
+                    hostingCosts,
+                });
             } catch (err: unknown) {
                 if (err instanceof DOMException && err.name === 'AbortError') return;
                 console.error('Failed to load KPI data:', err);

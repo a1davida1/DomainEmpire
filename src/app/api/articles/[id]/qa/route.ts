@@ -43,12 +43,22 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     const user = getRequestUser(request);
 
     try {
-        const body = await request.json();
-        const { results, templateId, unitTestPassId, calculationHarnessVersion } = body;
+        let body: Record<string, unknown>;
+        try {
+            body = await request.json();
+        } catch {
+            return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+        }
+        const templateId = typeof body.templateId === 'string' ? body.templateId : null;
+        const unitTestPassId = body.unitTestPassId;
+        const calculationHarnessVersion = body.calculationHarnessVersion;
+        const results = body.results;
 
         if (!results || typeof results !== 'object') {
             return NextResponse.json({ error: 'Results object is required' }, { status: 400 });
         }
+
+        const typedResults = results as Record<string, { checked: boolean; notes?: string }>;
 
         const article = await db.query.articles.findFirst({
             where: eq(articles.id, params.id),
@@ -70,7 +80,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
             );
         }
 
-        const calcTested = Boolean((results as Record<string, { checked?: boolean }>).calc_tested?.checked);
+        const calcTested = Boolean(typedResults.calc_tested?.checked);
         if (article.contentType === 'calculator' && calcTested && normalizedUnitTestPassId.length === 0) {
             return NextResponse.json(
                 { error: 'unitTestPassId is required when calc_tested is checked for calculator content' },
@@ -97,7 +107,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
             articleId: params.id,
             templateId: templateId || null,
             reviewerId: user.id,
-            results,
+            results: typedResults,
             unitTestPassId: normalizedUnitTestPassId || null,
             calculationConfigHash,
             calculationHarnessVersion: normalizedUnitTestPassId.length > 0

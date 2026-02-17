@@ -133,7 +133,12 @@ export async function POST(request: NextRequest) {
     const user = getRequestUser(request);
 
     try {
-        const body = await request.json();
+        let body: unknown;
+        try {
+            body = await request.json();
+        } catch {
+            return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+        }
         const parsed = bulkDecisionSchema.safeParse(body);
         if (!parsed.success) {
             return NextResponse.json(

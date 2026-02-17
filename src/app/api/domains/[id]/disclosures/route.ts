@@ -33,7 +33,12 @@ export async function PUT(request: NextRequest, props: { params: Promise<{ id: s
     if (authError) return authError;
 
     try {
-        const body = await request.json();
+        let body: unknown;
+        try {
+            body = await request.json();
+        } catch {
+            return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+        }
         const parsed = disclosureUpdateSchema.safeParse(body);
         if (!parsed.success) {
             return NextResponse.json(

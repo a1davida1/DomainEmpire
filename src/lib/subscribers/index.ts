@@ -119,7 +119,11 @@ export async function captureSubscriber(input: CaptureInput) {
         })
         .returning();
 
-    return result[0];
+    const subscriber = result[0];
+    if (!subscriber) {
+        throw new Error('Subscriber upsert returned no rows');
+    }
+    return subscriber;
 }
 
 interface SubscriberFilters {

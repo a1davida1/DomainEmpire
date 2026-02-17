@@ -91,8 +91,18 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
     const { id } = params;
 
     try {
-        const body = await request.json();
-        const { title, slug, content, targetKeyword, metaDescription, contentType } = body;
+        let body: Record<string, unknown>;
+        try {
+            body = await request.json();
+        } catch {
+            return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+        }
+        const title = typeof body.title === 'string' ? body.title : '';
+        const slug = typeof body.slug === 'string' ? body.slug : '';
+        const content = typeof body.content === 'string' ? body.content : undefined;
+        const targetKeyword = typeof body.targetKeyword === 'string' ? body.targetKeyword : undefined;
+        const metaDescription = typeof body.metaDescription === 'string' ? body.metaDescription : undefined;
+        const contentType = typeof body.contentType === 'string' ? body.contentType : undefined;
 
         // Basic validation
         if (!title || !slug) {
@@ -147,10 +157,10 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
                 tx,
                 articleId: id,
                 title,
-                contentMarkdown: content,
-                metaDescription: metaDescription || null,
+                contentMarkdown: content ?? null,
+                metaDescription: metaDescription ?? null,
                 changeType: 'manual_edit',
-                changeSummary: body.changeSummary || 'Manual edit via dashboard',
+                changeSummary: typeof body.changeSummary === 'string' ? body.changeSummary : 'Manual edit via dashboard',
                 createdById: user.id || null,
             });
 

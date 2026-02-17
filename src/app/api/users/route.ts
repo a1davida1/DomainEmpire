@@ -36,7 +36,12 @@ export async function POST(request: NextRequest) {
         } catch {
             return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
         }
-        const { email, name, password, role, expertise, credentials } = body;
+        const email = typeof body.email === 'string' ? body.email : '';
+        const name = typeof body.name === 'string' ? body.name : '';
+        const password = typeof body.password === 'string' ? body.password : '';
+        const role = typeof body.role === 'string' ? body.role : '';
+        const expertise = Array.isArray(body.expertise) ? body.expertise as string[] : [];
+        const credentials = typeof body.credentials === 'string' ? body.credentials : undefined;
 
         if (!email || !name || !password) {
             return NextResponse.json(
@@ -52,8 +57,8 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const validRoles = ['admin', 'editor', 'reviewer', 'expert'];
-        if (role && !validRoles.includes(role)) {
+        const validRoles = ['admin', 'editor', 'reviewer', 'expert'] as const;
+        if (role && !validRoles.includes(role as typeof validRoles[number])) {
             return NextResponse.json(
                 { error: `Invalid role. Must be one of: ${validRoles.join(', ')}` },
                 { status: 400 }
@@ -64,9 +69,9 @@ export async function POST(request: NextRequest) {
             email,
             name,
             password,
-            role: role || 'editor',
-            expertise: expertise || [],
-            credentials: credentials || undefined,
+            role: (role || 'editor') as typeof validRoles[number],
+            expertise,
+            credentials,
         });
 
         return NextResponse.json({ id: userId }, { status: 201 });

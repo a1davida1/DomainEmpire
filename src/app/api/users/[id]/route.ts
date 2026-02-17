@@ -33,7 +33,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
         }
         if (role !== undefined) {
             const validRoles = ['admin', 'editor', 'reviewer', 'expert'];
-            if (!validRoles.includes(role)) {
+            if (typeof role !== 'string' || !validRoles.includes(role)) {
                 return NextResponse.json(
                     { error: `Invalid role. Must be one of: ${validRoles.join(', ')}` },
                     { status: 400 }
@@ -45,8 +45,8 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
         if (credentials !== undefined) updates.credentials = credentials;
         if (isActive !== undefined) updates.isActive = isActive;
         if (password) {
-            if (password.length < 8) {
-                return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 });
+            if (typeof password !== 'string' || password.length < 8) {
+                return NextResponse.json({ error: 'Password must be a string of at least 8 characters' }, { status: 400 });
             }
             updates.passwordHash = await hashPassword(password);
         }

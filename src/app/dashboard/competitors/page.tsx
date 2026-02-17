@@ -3,7 +3,7 @@ import { competitors, domains } from '@/lib/db/schema';
 import { desc } from 'drizzle-orm';
 import { addCompetitor } from '@/lib/competitors/monitor';
 import { revalidatePath } from 'next/cache';
-import Link from 'next/link';
+
 
 async function addCompetitorAction(formData: FormData) {
     'use server';
@@ -112,13 +112,12 @@ export default async function CompetitorsPage() {
                                                     {comp.lastCheckedAt ? new Date(comp.lastCheckedAt).toLocaleDateString('en-US', { timeZone: 'UTC' }) : 'Never'}
                                                 </td>
                                                 <td className="p-3 text-right">
-                                                    <Link
-                                                        href={`/dashboard/competitors/${comp.id}/history`}
-                                                        className="px-2 py-1 bg-muted rounded text-xs hover:bg-muted/80"
-                                                        title="View SERP history snapshots"
+                                                    <span
+                                                        className="px-2 py-1 bg-muted rounded text-xs text-muted-foreground cursor-not-allowed"
+                                                        title="SERP history tracking coming soon"
                                                     >
-                                                        View History
-                                                    </Link>
+                                                        History
+                                                    </span>
                                                 </td>
                                             </tr>
                                         );

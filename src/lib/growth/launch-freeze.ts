@@ -1577,7 +1577,7 @@ export async function decideGrowthLaunchFreezeOverrideRequest(input: {
             actorUserId: input.decidedByUserId,
             reason: `Approved request ${request.id}: ${input.decisionReason}`,
             override: request.override,
-            expiresAt: request.expiresAt ? new Date(request.expiresAt) : null,
+            expiresAt: request.expiresAt && !Number.isNaN(new Date(request.expiresAt).getTime()) ? new Date(request.expiresAt) : null,
             postmortemUrl: request.postmortemUrl,
             incidentKey: request.incidentKey,
         });

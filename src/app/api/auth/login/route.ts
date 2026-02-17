@@ -26,10 +26,16 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-        const body = await request.json();
-        const { email, password } = body;
+        let body: Record<string, unknown>;
+        try {
+            body = await request.json();
+        } catch {
+            return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+        }
+        const email = typeof body.email === 'string' ? body.email : '';
+        const password = typeof body.password === 'string' ? body.password : '';
 
-        if (!password || typeof password !== 'string') {
+        if (!password) {
             return NextResponse.json(
                 { error: 'Password is required' },
                 { status: 400 }

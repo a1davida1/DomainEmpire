@@ -140,38 +140,46 @@ export default async function MonitoringPage() {
                         </div>
                     ) : (
                         <div className="divide-y">
-                            {alerts.map(alert => (
-                                <Link
-                                    key={alert.id}
-                                    href={alert.actionUrl || '#'}
-                                    className={`flex items-start gap-3 px-5 py-3.5 transition-colors hover:bg-accent/50 ${
-                                        !alert.isRead ? 'bg-primary/[0.03] dark:bg-primary/[0.06]' : ''
-                                    }`}
-                                >
-                                    {!alert.isRead && (
-                                        <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary" />
-                                    )}
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2 mb-0.5">
-                                            <Badge variant={SEVERITY_COLORS[alert.severity] as 'destructive' | 'secondary' | 'outline' || 'secondary'}>
-                                                {alert.severity}
-                                            </Badge>
-                                            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                                                {alert.type.replace(/_/g, ' ')}
-                                            </span>
-                                        </div>
-                                        <p className="font-medium text-sm">{alert.title}</p>
-                                        {alert.message && (
-                                            <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{alert.message}</p>
+                            {alerts.map(alert => {
+                                const rowClass = `flex items-start gap-3 px-5 py-3.5 transition-colors hover:bg-accent/50 ${
+                                    !alert.isRead ? 'bg-primary/[0.03] dark:bg-primary/[0.06]' : ''
+                                }`;
+                                const inner = (
+                                    <>
+                                        {!alert.isRead && (
+                                            <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary" />
                                         )}
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2 mb-0.5">
+                                                <Badge variant={SEVERITY_COLORS[alert.severity] as 'destructive' | 'secondary' | 'outline' || 'secondary'}>
+                                                    {alert.severity}
+                                                </Badge>
+                                                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                                                    {alert.type.replace(/_/g, ' ')}
+                                                </span>
+                                            </div>
+                                            <p className="font-medium text-sm">{alert.title}</p>
+                                            {alert.message && (
+                                                <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{alert.message}</p>
+                                            )}
+                                        </div>
+                                        <span className="text-[10px] text-muted-foreground whitespace-nowrap tabular-nums mt-1">
+                                            {alert.createdAt ? new Date(alert.createdAt).toLocaleString('en-US', {
+                                                month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+                                            }) : ''}
+                                        </span>
+                                    </>
+                                );
+                                return alert.actionUrl ? (
+                                    <Link key={alert.id} href={alert.actionUrl} className={rowClass}>
+                                        {inner}
+                                    </Link>
+                                ) : (
+                                    <div key={alert.id} className={rowClass}>
+                                        {inner}
                                     </div>
-                                    <span className="text-[10px] text-muted-foreground whitespace-nowrap tabular-nums mt-1">
-                                        {alert.createdAt ? new Date(alert.createdAt).toLocaleString('en-US', {
-                                            month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-                                        }) : ''}
-                                    </span>
-                                </Link>
-                            ))}
+                                );
+                            })}
                         </div>
                     )}
                 </CardContent>

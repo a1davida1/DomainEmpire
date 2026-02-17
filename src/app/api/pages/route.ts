@@ -36,17 +36,26 @@ export async function POST(request: NextRequest) {
         }
         const { domainId, route, title, metaDescription, theme, skin, blocks, preset, contentType } = body;
 
-        if (!domainId || !UUID_RE.test(domainId)) {
+        const domainIdValue = typeof domainId === 'string' ? domainId : '';
+        if (!domainIdValue || !UUID_RE.test(domainIdValue)) {
             return NextResponse.json({ error: 'domainId is required (UUID)' }, { status: 400 });
         }
 
-        if (!route || typeof route !== 'string') {
+        const routeValue = typeof route === 'string' ? route : '';
+        if (!routeValue) {
             return NextResponse.json({ error: 'route is required (e.g., "/" or "/about")' }, { status: 400 });
         }
 
+        const titleValue = typeof title === 'string' ? title : null;
+        const metaDescriptionValue = typeof metaDescription === 'string' ? metaDescription : null;
+        const themeValue = typeof theme === 'string' ? theme : 'clean';
+        const skinValue = typeof skin === 'string' ? skin : 'slate';
+        const presetValue = typeof preset === 'string' ? preset : null;
+        const contentTypeValue = typeof contentType === 'string' ? contentType : null;
+
         // Check for duplicate route
         const existing = await db.select({ id: pageDefinitions.id }).from(pageDefinitions)
-            .where(and(eq(pageDefinitions.domainId, domainId), eq(pageDefinitions.route, route)))
+            .where(and(eq(pageDefinitions.domainId, domainIdValue), eq(pageDefinitions.route, routeValue)))
             .limit(1);
 
         if (existing.length > 0) {
@@ -58,12 +67,12 @@ export async function POST(request: NextRequest) {
 
         // Resolve blocks from preset or direct input
         let resolvedBlocks = blocks;
-        if (!resolvedBlocks && preset) {
-            if (route === '/' || preset.startsWith('homepage:')) {
-                const presetKey = preset.replace('homepage:', '');
+        if (!resolvedBlocks && presetValue) {
+            if (routeValue === '/' || presetValue.startsWith('homepage:')) {
+                const presetKey = presetValue.replace('homepage:', '');
                 resolvedBlocks = getHomepagePreset(presetKey);
             } else {
-                const presetKey = contentType || preset.replace('article:', '');
+                const presetKey = contentTypeValue || presetValue.replace('article:', '');
                 resolvedBlocks = getArticlePagePreset(presetKey);
             }
         }
@@ -76,12 +85,12 @@ export async function POST(request: NextRequest) {
         }
 
         const rows = await db.insert(pageDefinitions).values({
-            domainId,
-            route,
-            title: title || null,
-            metaDescription: metaDescription || null,
-            theme: theme || 'clean',
-            skin: skin || 'slate',
+            domainId: domainIdValue,
+            route: routeValue,
+            title: titleValue,
+            metaDescription: metaDescriptionValue,
+            theme: themeValue,
+            skin: skinValue,
             blocks: resolvedBlocks,
             isPublished: false,
             version: 1,

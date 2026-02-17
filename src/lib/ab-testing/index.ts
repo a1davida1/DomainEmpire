@@ -63,7 +63,11 @@ export async function createTest(
     };
 
     const result = await db.insert(abTests).values(record).returning();
-    return result[0];
+    const inserted = result[0];
+    if (!inserted) {
+        throw new Error('A/B test insert returned no rows');
+    }
+    return inserted;
 }
 
 /**

@@ -188,7 +188,12 @@ export async function POST(request: NextRequest) {
     const actor = getRequestUser(request);
 
     try {
-        const body = await request.json();
+        let body: unknown;
+        try {
+            body = await request.json();
+        } catch {
+            return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+        }
         const parsed = upsertSchema.safeParse(body);
         if (!parsed.success) {
             return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });

@@ -67,7 +67,12 @@ export async function POST(
     const { id } = await params;
 
     try {
-        const body = await request.json();
+        let body: unknown;
+        try {
+            body = await request.json();
+        } catch {
+            return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+        }
         const parsed = purchaseSchema.safeParse(body);
         if (!parsed.success) {
             return NextResponse.json({ error: 'Validation failed', details: parsed.error.flatten() }, { status: 400 });
@@ -80,7 +85,7 @@ export async function POST(
             );
         }
 
-        const [research] = await db
+        const researchRows = await db
             .select({
                 id: domainResearch.id,
                 domain: domainResearch.domain,
@@ -92,6 +97,7 @@ export async function POST(
             .from(domainResearch)
             .where(eq(domainResearch.id, id))
             .limit(1);
+        const research = researchRows[0];
 
         if (!research) {
             return NextResponse.json({ error: 'Domain research record not found' }, { status: 404 });
@@ -148,7 +154,7 @@ export async function POST(
             }, { status: 403 });
         }
 
-        const [approvedReviewTask] = await db
+        const approvedReviewTaskRows = await db
             .select({
                 id: reviewTasks.id,
                 reviewerId: reviewTasks.reviewerId,
@@ -162,6 +168,7 @@ export async function POST(
             ))
             .orderBy(desc(reviewTasks.reviewedAt))
             .limit(1);
+        const approvedReviewTask = approvedReviewTaskRows[0];
 
         const previewGateEnabled = isFeatureEnabled('preview_gate_v1', { userId: user.id });
         if (previewGateEnabled && !approvedReviewTask && !wantsOverride) {

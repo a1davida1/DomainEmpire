@@ -224,13 +224,15 @@ export function Sidebar() {
                 .then(r => r.ok ? r.json() : null)
                 .then(data => {
                     if (!active || !data) return;
-                    const stats = data.stats ?? {};
-                    const failed = Number(stats.failed ?? 0);
+                    // detailed=true spreads health at top level, not under data.stats
+                    const pending = data.pending ?? data.stats?.pending;
+                    const processing = data.processing ?? data.stats?.processing;
+                    const failed = Number(data.failed ?? data.stats?.failed ?? 0);
                     setFailedCount(Number.isFinite(failed) ? failed : 0);
                     setQueueHeartbeat(resolveQueueHeartbeat({
-                        pending: stats.pending,
-                        processing: stats.processing,
-                        failed: stats.failed,
+                        pending,
+                        processing,
+                        failed,
                         latestWorkerActivityAgeMs: data.latestWorkerActivityAgeMs,
                     }));
                 })
@@ -243,9 +245,12 @@ export function Sidebar() {
 
     // Fetch domain count
     useEffect(() => {
-        fetch('/api/domains?countOnly=1')
+        fetch('/api/domains?limit=1')
             .then(r => r.ok ? r.json() : null)
-            .then(data => { if (data?.total != null) setDomainCount(data.total); })
+            .then(data => {
+                const total = data?.pagination?.total ?? data?.total;
+                if (total != null) setDomainCount(total);
+            })
             .catch((err) => console.error('[Sidebar] Domain count fetch failed:', err));
     }, []);
 

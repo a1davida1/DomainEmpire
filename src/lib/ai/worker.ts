@@ -377,21 +377,21 @@ async function logAcquisitionEvent(
 }
 
 async function upsertResearchCandidate(candidate: ListingCandidate) {
-    const [linkedDomain] = await db.select({ id: domains.id })
+    const linkedDomainRows = await db.select({ id: domains.id })
         .from(domains)
         .where(and(
             eq(domains.domain, candidate.domain),
             isNull(domains.deletedAt),
         ))
         .limit(1);
-    const resolvedDomainId = linkedDomain?.id ?? null;
+    const resolvedDomainId = linkedDomainRows[0]?.id ?? null;
 
     const inferredAftermarket = candidate.currentBid ?? candidate.buyNowPrice ?? null;
     const inferredRegPrice = candidate.acquisitionCost && candidate.acquisitionCost <= 50
         ? candidate.acquisitionCost
         : null;
 
-    const [research] = await db.insert(domainResearch).values({
+    const researchRows = await db.insert(domainResearch).values({
         domain: candidate.domain,
         tld: candidate.tld,
         listingSource: candidate.listingSource,
@@ -420,6 +420,7 @@ async function upsertResearchCandidate(candidate: ListingCandidate) {
             underwritingVersion: UNDERWRITING_VERSION,
         },
     }).returning();
+    const research = researchRows[0];
 
     if (!research) {
         throw new Error(`Failed to upsert candidate ${candidate.domain}`);
@@ -485,18 +486,19 @@ async function resolveResearchRowFromPayload(
         .limit(1);
     if (byDomain.length > 0) {
         if (!byDomain[0].domainId) {
-            const [linkedDomain] = await db.select({ id: domains.id })
+            const linkedDomainRows = await db.select({ id: domains.id })
                 .from(domains)
                 .where(and(
                     eq(domains.domain, normalized.domain),
                     isNull(domains.deletedAt),
                 ))
                 .limit(1);
+            const linkedDomain = linkedDomainRows[0];
             if (linkedDomain?.id) {
-                const [updated] = await db.update(domainResearch).set({
+                const updatedRows = await db.update(domainResearch).set({
                     domainId: linkedDomain.id,
                 }).where(eq(domainResearch.id, byDomain[0].id)).returning();
-                return updated ?? byDomain[0];
+                return updatedRows[0] ?? byDomain[0];
             }
         }
         return byDomain[0];
@@ -506,7 +508,7 @@ async function resolveResearchRowFromPayload(
         return null;
     }
 
-    const [linkedDomain] = await db.select({ id: domains.id })
+    const linkedDomainRows2 = await db.select({ id: domains.id })
         .from(domains)
         .where(and(
             eq(domains.domain, normalized.domain),
@@ -514,15 +516,15 @@ async function resolveResearchRowFromPayload(
         ))
         .limit(1);
 
-    const [created] = await db.insert(domainResearch).values({
+    const createdRows = await db.insert(domainResearch).values({
         domain: normalized.domain,
         tld: normalized.tld,
-        domainId: linkedDomain?.id ?? null,
+        domainId: linkedDomainRows2[0]?.id ?? null,
         decision: 'researching',
         underwritingVersion: UNDERWRITING_VERSION,
     }).returning();
 
-    return created ?? null;
+    return createdRows[0] ?? null;
 }
 
 type AcquisitionStageJobType = 'enrich_candidate' | 'score_candidate' | 'create_bid_plan';
@@ -800,12 +802,13 @@ async function enqueueGrowthExecutionJob(opts: {
             return false;
         }
 
-        const [promotionJob] = await tx.insert(promotionJobs).values({
+        const promotionJobRows = await tx.insert(promotionJobs).values({
             campaignId: opts.campaignId,
             jobType: opts.jobType,
             status: 'pending',
             payload: opts.payload ?? {},
         }).returning({ id: promotionJobs.id });
+        const promotionJob = promotionJobRows[0];
 
         if (!promotionJob) {
             throw new Error(`Failed to create promotion_jobs row for ${opts.jobType}`);
@@ -838,19 +841,19 @@ async function enqueueGrowthExecutionJob(opts: {
 
 async function countCampaignPublishesToday(campaignId: string): Promise<number> {
     const today = getUtcDayStart();
-    const [row] = await db.select({ value: count() })
+    const countRows = await db.select({ value: count() })
         .from(promotionEvents)
         .where(and(
             eq(promotionEvents.campaignId, campaignId),
             eq(promotionEvents.eventType, 'published'),
             gte(promotionEvents.occurredAt, today),
         ));
-    return Number(row?.value ?? 0);
+    return Number(countRows[0]?.value ?? 0);
 }
 
 async function countCampaignPublishesTodayByChannel(campaignId: string, channel: GrowthChannel): Promise<number> {
     const today = getUtcDayStart();
-    const [row] = await db.select({ value: count() })
+    const countByChannelRows = await db.select({ value: count() })
         .from(promotionEvents)
         .where(and(
             eq(promotionEvents.campaignId, campaignId),
@@ -858,7 +861,7 @@ async function countCampaignPublishesTodayByChannel(campaignId: string, channel:
             gte(promotionEvents.occurredAt, today),
             sql`${promotionEvents.attributes} ->> 'channel' = ${channel}`,
         ));
-    return Number(row?.value ?? 0);
+    return Number(countByChannelRows[0]?.value ?? 0);
 }
 
 async function isCreativeSuppressed(opts: {
@@ -869,7 +872,7 @@ async function isCreativeSuppressed(opts: {
 }): Promise<{ duplicate: boolean; cooldown: boolean }> {
     const since = new Date(Date.now() - (GROWTH_COOLDOWN_HOURS * 60 * 60 * 1000));
 
-    const [duplicate] = await db.select({ id: promotionEvents.id })
+    const duplicateRows = await db.select({ id: promotionEvents.id })
         .from(promotionEvents)
         .where(and(
             eq(promotionEvents.campaignId, opts.campaignId),
@@ -879,6 +882,7 @@ async function isCreativeSuppressed(opts: {
             sql`${promotionEvents.attributes} ->> 'creativeHash' = ${opts.creativeHash}`,
         ))
         .limit(1);
+    const duplicate = duplicateRows[0];
 
     const domainCooldownRows = await db.select({ id: promotionEvents.id })
         .from(promotionEvents)
@@ -1141,7 +1145,7 @@ async function resolvePromotionContext(
             ? Math.max(1, Math.floor(rawDailyCap))
             : GROWTH_DEFAULT_DAILY_CAP;
 
-        const [created] = await db.insert(promotionCampaigns).values({
+        const campaignRows = await db.insert(promotionCampaigns).values({
             domainResearchId,
             channels,
             budget,
@@ -1150,7 +1154,7 @@ async function resolvePromotionContext(
             metrics: {},
         }).returning();
 
-        campaign = created ?? null;
+        campaign = campaignRows[0] ?? null;
     }
 
     if (!campaign) {
@@ -1291,11 +1295,11 @@ async function runPublishJob(
     const assetId = await resolvePublishAssetId(channel, context.payload);
     let assetUrl: string | null = null;
     if (assetId) {
-        const [assetRow] = await db.select({ url: mediaAssets.url })
+        const assetRows = await db.select({ url: mediaAssets.url })
             .from(mediaAssets)
             .where(and(eq(mediaAssets.id, assetId), isNull(mediaAssets.deletedAt)))
             .limit(1);
-        assetUrl = assetRow?.url ?? null;
+        assetUrl = assetRows[0]?.url ?? null;
     }
 
     const destinationUrl = toOptionalString(context.payload.destinationUrl) || `https://${context.research.domain}`;
@@ -2966,11 +2970,12 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
                 || `generated://shorts/${context.campaign.id}/${creativeHash}.mp4`;
             const tags = [context.research.domain, 'youtube_shorts', creativeHash];
 
-            const [asset] = await db.insert(mediaAssets).values({
+            const assetInsertRows = await db.insert(mediaAssets).values({
                 type: 'video',
                 url: assetUrl,
                 tags,
             }).returning({ id: mediaAssets.id });
+            const asset = assetInsertRows[0];
             if (!asset) {
                 throw new Error('Failed to persist rendered video asset');
             }
@@ -3167,7 +3172,8 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
  * The keyword_research pipeline will chain into outline -> draft -> humanize -> SEO.
  */
 async function processBulkSeedJob(jobId: string) {
-    const [job] = await db.select().from(contentQueue).where(eq(contentQueue.id, jobId)).limit(1);
+    const jobRows = await db.select().from(contentQueue).where(eq(contentQueue.id, jobId)).limit(1);
+    const job = jobRows[0];
     if (!job?.domainId) {
         await markJobFailed(jobId, 'No domainId provided');
         return;
@@ -3212,7 +3218,7 @@ async function processBulkSeedJob(jobId: string) {
     for (const kw of availableKeywords) {
         // Create article stub
         const slug = kw.keyword.toLowerCase().replaceAll(/\s+/g, '-').replaceAll(/[^a-z0-9-]/g, '').replaceAll(/-+/g, '-').replaceAll(/^-|-$/g, '') || `article-${kw.id.slice(0, 8)}`;
-        const [article] = await db.insert(articles).values({
+        const articleRows = await db.insert(articles).values({
             domainId: domain.id,
             title: kw.keyword,
             slug,
@@ -3220,6 +3226,8 @@ async function processBulkSeedJob(jobId: string) {
             status: 'generating',
             isSeedArticle: true,
         }).returning();
+        const article = articleRows[0];
+        if (!article) throw new Error(`Article insert returned no rows for keyword ${kw.keyword}`);
 
         // Link keyword to article
         await db.update(keywords).set({ articleId: article.id, status: 'assigned' }).where(eq(keywords.id, kw.id));

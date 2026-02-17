@@ -131,7 +131,12 @@ export async function POST(
     const { id } = await params;
 
     try {
-        const body = await request.json();
+        let body: unknown;
+        try {
+            body = await request.json();
+        } catch {
+            return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+        }
         const parsed = decisionSchema.safeParse(body);
         if (!parsed.success) {
             return NextResponse.json(
@@ -140,7 +145,7 @@ export async function POST(
             );
         }
 
-        const [research] = await db
+        const researchRows = await db
             .select({
                 id: domainResearch.id,
                 domain: domainResearch.domain,
@@ -152,6 +157,7 @@ export async function POST(
             .from(domainResearch)
             .where(eq(domainResearch.id, id))
             .limit(1);
+        const research = researchRows[0];
 
         if (!research) {
             return NextResponse.json({ error: 'Candidate not found' }, { status: 404 });

@@ -13,25 +13,29 @@ async function main() {
     let domain = await db.query.domains.findFirst();
     if (!domain) {
         console.log('No domain found. Creating test domain...');
-        const [newDomain] = await db.insert(domains).values({
+        const rows = await db.insert(domains).values({
             domain: 'spacex-test.com',
             tld: 'com',
             niche: 'space-technology',
             status: 'active',
         }).returning();
+        const newDomain = rows[0];
+        if (!newDomain) throw new Error('Domain insert returned no rows');
         domain = newDomain;
     }
     console.log(`Using domain: ${domain.domain} (${domain.id})`);
 
     // 2. Create Article Placeholder
     const keyword = 'SpaceX Starship Updates 2026';
-    const [article] = await db.insert(articles).values({
+    const articleRows = await db.insert(articles).values({
         domainId: domain.id,
         targetKeyword: keyword,
         title: 'Draft: ' + keyword,
         slug: 'spacex-starship-updates-2026-' + Date.now(),
         status: 'draft',
     }).returning();
+    const article = articleRows[0];
+    if (!article) throw new Error('Article insert returned no rows');
     console.log(`Created article: ${article.id}`);
 
     // 3. Insert Research Job

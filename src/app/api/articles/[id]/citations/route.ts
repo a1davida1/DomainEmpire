@@ -27,8 +27,17 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     const user = getRequestUser(request);
 
     try {
-        const body = await request.json();
-        const { claimText, sourceUrl, sourceTitle, quotedSnippet, notes } = body;
+        let body: Record<string, unknown>;
+        try {
+            body = await request.json();
+        } catch {
+            return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+        }
+        const claimText = typeof body.claimText === 'string' ? body.claimText : '';
+        const sourceUrl = typeof body.sourceUrl === 'string' ? body.sourceUrl : '';
+        const sourceTitle = typeof body.sourceTitle === 'string' ? body.sourceTitle : undefined;
+        const quotedSnippet = typeof body.quotedSnippet === 'string' ? body.quotedSnippet : undefined;
+        const notes = typeof body.notes === 'string' ? body.notes : undefined;
 
         if (!claimText || !sourceUrl) {
             return NextResponse.json({ error: 'claimText and sourceUrl are required' }, { status: 400 });
@@ -58,12 +67,24 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
     if (authError) return authError;
 
     try {
-        const body = await request.json();
-        const { citationId, ...updates } = body;
+        let body: Record<string, unknown>;
+        try {
+            body = await request.json();
+        } catch {
+            return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+        }
+        const citationId = typeof body.citationId === 'string' ? body.citationId : '';
 
         if (!citationId) {
             return NextResponse.json({ error: 'citationId is required' }, { status: 400 });
         }
+
+        const updates: Record<string, unknown> = {};
+        if (body.claimText !== undefined) updates.claimText = body.claimText;
+        if (body.sourceUrl !== undefined) updates.sourceUrl = body.sourceUrl;
+        if (body.sourceTitle !== undefined) updates.sourceTitle = body.sourceTitle;
+        if (body.quotedSnippet !== undefined) updates.quotedSnippet = body.quotedSnippet;
+        if (body.notes !== undefined) updates.notes = body.notes;
 
         await updateCitation(citationId, updates);
         return NextResponse.json({ success: true });

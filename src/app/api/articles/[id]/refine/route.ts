@@ -26,11 +26,17 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     }
 
     try {
-        const body = await request.json();
-        const { content, instructions } = body;
+        let body: Record<string, unknown>;
+        try {
+            body = await request.json();
+        } catch {
+            return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+        }
+        const content = typeof body.content === 'string' ? body.content : '';
+        const instructions = typeof body.instructions === 'string' ? body.instructions : '';
 
         // Fetch article if content not provided (optional)
-        let articleContent = content;
+        let articleContent: string | null = content || null;
         if (!articleContent) {
             const article = await db.query.articles.findFirst({
                 where: eq(articles.id, id),
@@ -55,7 +61,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         
         Return ONLY the refined markdown content. Do not include any conversational preamble.`;
 
-        const safeInstructions = (instructions || '').slice(0, 1000);
+        const safeInstructions = instructions.slice(0, 1000);
         const userPrompt = `Refine the following article content based on these instructions: ${safeInstructions || 'General polish and humanization'}\n\nCONTENT:\n${articleContent}`;
 
         const response = await client.generate('humanization', userPrompt, {

@@ -34,10 +34,16 @@ export async function POST(request: NextRequest) {
     if (authError) return authError;
 
     try {
-        const body = await request.json();
-        const { domainId, affiliates } = body; // Expect full list 'affiliates'
+        let body: Record<string, unknown>;
+        try {
+            body = await request.json();
+        } catch {
+            return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+        }
+        const domainId = typeof body.domainId === 'string' ? body.domainId : '';
+        const affiliates = Array.isArray(body.affiliates) ? body.affiliates : null;
 
-        if (!domainId || !Array.isArray(affiliates)) {
+        if (!domainId || !affiliates) {
             return NextResponse.json({ error: 'Domain ID and affiliates array required' }, { status: 400 });
         }
 

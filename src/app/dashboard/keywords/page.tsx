@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -31,6 +32,8 @@ export default function KeywordsPage() {
     const [summary, setSummary] = useState<Summary | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const searchParams = useSearchParams();
+    const domainIdParam = searchParams.get('domainId') ?? '';
 
     // Filters
     const [search, setSearch] = useState('');
@@ -46,6 +49,7 @@ export default function KeywordsPage() {
                 limit: '200',
                 minVolume: String(minVolume),
             });
+            if (domainIdParam) params.set('domainId', domainIdParam);
             if (maxDifficulty !== null) params.set('maxDifficulty', String(maxDifficulty));
             if (unassignedOnly) params.set('unassigned', 'true');
 
@@ -59,7 +63,7 @@ export default function KeywordsPage() {
         } finally {
             setLoading(false);
         }
-    }, [maxDifficulty, minVolume, unassignedOnly]);
+    }, [domainIdParam, maxDifficulty, minVolume, unassignedOnly]);
 
     useEffect(() => {
         loadKeywords();
