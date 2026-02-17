@@ -84,7 +84,7 @@ const VARIANT_ID = '00000000-0000-4000-8000-000000000002';
 
 describe('page variants API', () => {
     beforeEach(() => {
-        vi.clearAllMocks();
+        vi.resetAllMocks();
         mockRequireAuth.mockResolvedValue(null);
     });
 
@@ -121,17 +121,14 @@ describe('page variants API', () => {
         });
 
         it('returns 409 for duplicate variant key', async () => {
-            mockSelectResult
-                .mockResolvedValueOnce([{ id: PAGE_ID, blocks: [] }])  // page lookup
-                .mockResolvedValueOnce([{ id: VARIANT_ID }]);           // existing variant
+            mockSelectResult.mockResolvedValueOnce([{ id: PAGE_ID, blocks: [] }]); // page lookup
+            mockInsertReturning.mockRejectedValue({ code: '23505' });
             const res = await POST(makeRequest({ variantKey: 'control' }), { params: Promise.resolve({ id: PAGE_ID }) });
             expect(res.status).toBe(409);
         });
 
         it('creates variant with default weight', async () => {
-            mockSelectResult
-                .mockResolvedValueOnce([{ id: PAGE_ID, blocks: [{ id: 'b1', type: 'Hero' }] }])
-                .mockResolvedValueOnce([]);
+            mockSelectResult.mockResolvedValueOnce([{ id: PAGE_ID, blocks: [{ id: 'b1', type: 'Hero' }] }]);
             const created = { id: VARIANT_ID, variantKey: 'test-b', weight: 50 };
             mockInsertReturning.mockResolvedValue([created]);
 

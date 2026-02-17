@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const [inserted] = await db.insert(pageDefinitions).values({
+        const rows = await db.insert(pageDefinitions).values({
             domainId,
             route,
             title: title || null,
@@ -81,6 +81,11 @@ export async function POST(request: NextRequest) {
             isPublished: false,
             version: 1,
         }).returning();
+        const inserted = rows[0];
+
+        if (!inserted) {
+            return NextResponse.json({ error: 'Insert succeeded but returned no row' }, { status: 500 });
+        }
 
         return NextResponse.json(inserted, { status: 201 });
     } catch (error) {

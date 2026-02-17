@@ -17,9 +17,18 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 function deriveAllowedParentOrigin(request: NextRequest): string {
     const configured = process.env.ALLOWED_PARENT_ORIGIN?.trim();
-    const allowedOrigins = new Set([request.nextUrl.origin]);
+    let configuredOrigin: string | null = null;
     if (configured) {
-        allowedOrigins.add(configured);
+        try {
+            configuredOrigin = new URL(configured).origin;
+        } catch {
+            configuredOrigin = null;
+        }
+    }
+
+    const allowedOrigins = new Set([request.nextUrl.origin]);
+    if (configuredOrigin) {
+        allowedOrigins.add(configuredOrigin);
     }
 
     const originHeader = request.headers.get('origin');
@@ -34,12 +43,15 @@ function deriveAllowedParentOrigin(request: NextRequest): string {
         }
     }
 
-    const candidate = configured
-        ?? originHeader
-        ?? refererOrigin
-        ?? request.nextUrl.origin;
+    const candidates = [originHeader, refererOrigin, request.nextUrl.origin, configuredOrigin];
 
-    return allowedOrigins.has(candidate) ? candidate : '';
+    for (const candidate of candidates) {
+        if (candidate && allowedOrigins.has(candidate)) {
+            return candidate;
+        }
+    }
+
+    return '';
 }
 
 // extractSiteTitle imported from '@/lib/deploy/templates/shared'

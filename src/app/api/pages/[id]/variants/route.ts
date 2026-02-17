@@ -85,13 +85,16 @@ export async function POST(
 
     let created: typeof pageVariants.$inferSelect;
     try {
-        const [inserted] = await db.insert(pageVariants).values({
+        const rows = await db.insert(pageVariants).values({
             pageId: id,
             variantKey,
             weight,
             blocks,
         }).returning();
-        created = inserted;
+        if (!rows[0]) {
+            return NextResponse.json({ error: 'Insert succeeded but returned no row' }, { status: 500 });
+        }
+        created = rows[0];
     } catch (error) {
         if (isUniqueViolation(error)) {
             return NextResponse.json({ error: `Variant '${variantKey}' already exists` }, { status: 409 });

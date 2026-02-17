@@ -46,8 +46,6 @@ export default function CalendarPage() {
 
     useEffect(() => {
         const controller = new AbortController();
-        setLoading(true);
-        setError(null);
         const start = `${year}-${String(month + 1).padStart(2, '0')}-01`;
         const endDate = new Date(year, month + 1, 0);
         const end = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}`;
@@ -71,12 +69,16 @@ export default function CalendarPage() {
     }, [year, month]);
 
     function prevMonth() {
+        setLoading(true);
+        setError(null);
         if (month === 0) { setYear(y => y - 1); setMonth(11); }
         else setMonth(m => m - 1);
         setSelectedDay(null);
     }
 
     function nextMonth() {
+        setLoading(true);
+        setError(null);
         if (month === 11) { setYear(y => y + 1); setMonth(0); }
         else setMonth(m => m + 1);
         setSelectedDay(null);

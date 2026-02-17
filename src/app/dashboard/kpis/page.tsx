@@ -78,6 +78,7 @@ export default function KpiDashboardPage() {
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
+        let cancelled = false;
         const loadData = async () => {
             try {
                 const [complianceRes, revenueRes, costsRes] = await Promise.all([
@@ -85,6 +86,8 @@ export default function KpiDashboardPage() {
                     fetch('/api/analytics/revenue'),
                     fetch('/api/analytics/costs'),
                 ]);
+
+                if (cancelled) return;
 
                 if (!complianceRes.ok) throw new Error(`Compliance metrics failed: ${complianceRes.statusText}`);
                 if (!revenueRes.ok) throw new Error(`Revenue data failed: ${revenueRes.statusText}`);
@@ -94,13 +97,15 @@ export default function KpiDashboardPage() {
                 setRevenue(await revenueRes.json());
                 setCosts(await costsRes.json());
             } catch (err: unknown) {
+                if (cancelled) return;
                 console.error('Failed to load KPI data:', err);
                 setError(err instanceof Error ? err.message : 'Failed to load dashboard data');
             } finally {
-                setLoading(false);
+                if (!cancelled) setLoading(false);
             }
         };
         loadData();
+        return () => { cancelled = true; };
     }, []);
 
     if (loading) {

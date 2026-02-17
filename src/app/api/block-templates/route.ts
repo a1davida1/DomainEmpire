@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Only admins can create global templates' }, { status: 403 });
     }
 
-    const [created] = await db.insert(blockTemplates).values({
+    const rows = await db.insert(blockTemplates).values({
         name,
         description: typeof body.description === 'string' ? body.description : null,
         blockType,
@@ -102,6 +102,11 @@ export async function POST(request: NextRequest) {
         isGlobal: body.isGlobal === true,
         createdBy: user.id,
     }).returning();
+    const created = rows[0];
+
+    if (!created) {
+        return NextResponse.json({ error: 'Insert succeeded but returned no row' }, { status: 500 });
+    }
 
     return NextResponse.json(created, { status: 201 });
 }

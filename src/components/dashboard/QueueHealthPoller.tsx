@@ -16,7 +16,8 @@ export function QueueHealthPoller() {
         }, POLL_INTERVAL_MS);
 
         return () => clearInterval(timer);
-    }, [router]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- router is stable in Next.js App Router
+    }, []);
 
     return (
         <span className="text-[11px] text-muted-foreground">

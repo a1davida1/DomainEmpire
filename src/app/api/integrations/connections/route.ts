@@ -246,6 +246,10 @@ export async function POST(request: NextRequest) {
                 .where(eq(integrationConnections.id, data.id))
                 .returning(connectionReturning);
 
+            if (updatedRows.length === 0) {
+                return NextResponse.json({ error: 'Connection not found after update' }, { status: 404 });
+            }
+
             const updated = updatedRows[0];
             return NextResponse.json({
                 connection: {

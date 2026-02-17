@@ -68,6 +68,7 @@ export default function CompliancePage() {
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
+        let cancelled = false;
         const loadData = async () => {
             try {
                 const [metricsRes, trendRes] = await Promise.all([
@@ -75,6 +76,7 @@ export default function CompliancePage() {
                     fetch('/api/compliance/trend?days=90'),
                 ]);
 
+                if (cancelled) return;
                 if (!metricsRes.ok) throw new Error(`Failed to load metrics: ${metricsRes.statusText}`);
                 if (!trendRes.ok) throw new Error(`Failed to load trend: ${trendRes.statusText}`);
 
@@ -84,13 +86,15 @@ export default function CompliancePage() {
                 setMetrics(metricsData);
                 setTrend(trendData);
             } catch (err: unknown) {
+                if (cancelled) return;
                 console.error('Failed to load compliance data:', err);
                 setError(err instanceof Error ? err.message : 'Failed to load compliance metrics');
             } finally {
-                setLoading(false);
+                if (!cancelled) setLoading(false);
             }
         };
         loadData();
+        return () => { cancelled = true; };
     }, []);
 
     async function takeSnapshot() {
@@ -240,8 +244,8 @@ export default function CompliancePage() {
                         Compliance Issues
                     </h2>
                     <ul className="space-y-2">
-                        {issues.map((issue, i) => (
-                            <li key={i} className="flex items-start gap-2 text-sm">
+                        {issues.map((issue) => (
+                            <li key={issue} className="flex items-start gap-2 text-sm">
                                 <AlertTriangle className="h-4 w-4 text-yellow-500 shrink-0 mt-0.5" />
                                 {issue}
                             </li>

@@ -46,10 +46,16 @@ export default function RevisionsPage() {
     const [expandedRev, setExpandedRev] = useState<number | null>(null);
 
     useEffect(() => {
+        let cancelled = false;
         fetch(`/api/articles/${articleId}/revisions`)
-            .then(r => r.json())
-            .then(setRevisions)
-            .finally(() => setLoading(false));
+            .then(r => {
+                if (!r.ok) throw new Error(`Failed to load revisions: ${r.statusText}`);
+                return r.json();
+            })
+            .then(data => { if (!cancelled) setRevisions(data); })
+            .catch(err => console.error('Failed to load revisions:', err))
+            .finally(() => { if (!cancelled) setLoading(false); });
+        return () => { cancelled = true; };
     }, [articleId]);
 
     async function loadDiff(revisionNumber: number) {
@@ -60,9 +66,16 @@ export default function RevisionsPage() {
         }
         setDiffLoading(true);
         setExpandedRev(revisionNumber);
-        const res = await fetch(`/api/articles/${articleId}/revisions?diff=${revisionNumber}`);
-        setDiffPair(await res.json());
-        setDiffLoading(false);
+        try {
+            const res = await fetch(`/api/articles/${articleId}/revisions?diff=${revisionNumber}`);
+            if (!res.ok) throw new Error(`Failed to load diff: ${res.statusText}`);
+            setDiffPair(await res.json());
+        } catch (err) {
+            console.error('Failed to load diff:', err);
+            setDiffPair(null);
+        } finally {
+            setDiffLoading(false);
+        }
     }
 
     if (loading) {

@@ -50,12 +50,16 @@ export default function DisclosuresPage() {
     const doSave = useCallback(async (cfg: Config) => {
         setSaving(true);
         setSaved(false);
-        await fetch(`/api/domains/${domainId}/disclosures`, {
+        const res = await fetch(`/api/domains/${domainId}/disclosures`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(cfg),
         });
         setSaving(false);
+        if (!res.ok) {
+            console.error('Disclosures save failed:', res.status);
+            return;
+        }
         setSaved(true);
         setDirty(false);
         setTimeout(() => setSaved(false), 3000);

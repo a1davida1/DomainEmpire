@@ -131,12 +131,13 @@ export default function ArticleReviewPage() {
     const [aiSentencesExpanded, setAiSentencesExpanded] = useState(false);
 
     useEffect(() => {
+        const controller = new AbortController();
         const fetchData = async () => {
             try {
                 const [qaRes, articleRes, meRes] = await Promise.all([
-                    fetch(`/api/articles/${articleId}/qa`),
-                    fetch(`/api/articles/${articleId}`),
-                    fetch('/api/auth/me')
+                    fetch(`/api/articles/${articleId}/qa`, { signal: controller.signal }),
+                    fetch(`/api/articles/${articleId}`, { signal: controller.signal }),
+                    fetch('/api/auth/me', { signal: controller.signal })
                 ]);
 
                 if (!qaRes.ok) throw new Error(`QA data fetch failed: ${qaRes.statusText}`);
@@ -146,6 +147,8 @@ export default function ArticleReviewPage() {
                 const qaResponse = await qaRes.json();
                 const articleResponse = await articleRes.json();
                 const meResponse = await meRes.json();
+
+                if (controller.signal.aborted) return;
 
                 setQaData(qaResponse as QaData);
                 setArticleInfo({
@@ -175,14 +178,16 @@ export default function ArticleReviewPage() {
                     setUnitTestPassId(qaResponse.latestResult.unitTestPassId);
                 }
             } catch (err: unknown) {
+                if (err instanceof DOMException && err.name === 'AbortError') return;
                 console.error('Failed to load review data:', err);
                 setActionError(err instanceof Error ? err.message : 'Failed to load page data');
             } finally {
-                setLoading(false);
+                if (!controller.signal.aborted) setLoading(false);
             }
         };
 
         fetchData();
+        return () => controller.abort();
     }, [articleId]);
 
     function parseIssueCodes(): string[] {

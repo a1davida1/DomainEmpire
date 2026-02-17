@@ -511,9 +511,9 @@ export default async function DashboardPage() {
                             </p>
                         ) : (
                             <div className="space-y-3">
-                                {needsAttention.map((issue, index) => (
+                                {needsAttention.map((issue) => (
                                     <Link
-                                        key={index}
+                                        key={`${issue.type}-${issue.link}`}
                                         href={issue.link}
                                         className="flex items-center gap-3 rounded-lg border p-3 transition-colors hover:bg-accent"
                                     >

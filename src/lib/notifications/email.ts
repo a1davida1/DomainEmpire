@@ -28,7 +28,8 @@ function escapeHtml(unsafe: string): string {
 
 function getTransporter() {
     const host = process.env.SMTP_HOST;
-    const port = parseInt(process.env.SMTP_PORT || '587', 10);
+    const parsedPort = parseInt(process.env.SMTP_PORT || '587', 10);
+    const port = Number.isFinite(parsedPort) ? parsedPort : 587;
     const user = process.env.SMTP_USER;
     const pass = process.env.SMTP_PASS;
     if (!host || !user || !pass) return null;

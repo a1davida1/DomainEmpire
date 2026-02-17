@@ -110,11 +110,6 @@ export function QueueBackgroundProcessor() {
                 timer = setTimeout(runTick, PROCESS_INTERVAL_MS);
                 return;
             }
-            if (pathname.startsWith('/dashboard/queue')) {
-                timer = setTimeout(runTick, PROCESS_INTERVAL_MS);
-                return;
-            }
-
             const tabId = tabIdRef.current;
             if (!tabId) {
                 timer = setTimeout(runTick, PROCESS_INTERVAL_MS);

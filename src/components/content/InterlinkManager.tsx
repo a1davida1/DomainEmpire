@@ -45,11 +45,15 @@ export function InterlinkManager({ articleId }: InterlinkManagerProps) {
         }
     };
 
-    const copyToClipboard = (slug: string, phrase: string) => {
+    const copyToClipboard = async (slug: string, phrase: string) => {
         const link = `[${phrase}](${slug}/)`;
-        navigator.clipboard.writeText(link);
-        setCopied(slug);
-        setTimeout(() => setCopied(null), 2000);
+        try {
+            await navigator.clipboard.writeText(link);
+            setCopied(slug);
+            setTimeout(() => setCopied(null), 2000);
+        } catch {
+            console.error('Clipboard write failed');
+        }
     };
 
     const toggleSelect = (targetArticleId: string) => {

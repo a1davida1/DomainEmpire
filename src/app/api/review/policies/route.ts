@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'ymylLevel is required' }, { status: 400 });
         }
 
-        const [policy] = await db.insert(approvalPolicies).values({
+        const inserted = await db.insert(approvalPolicies).values({
             domainId: domainId || null,
             contentType: contentType || null,
             ymylLevel,
@@ -40,7 +40,11 @@ export async function POST(request: NextRequest) {
             autoPublish: autoPublish ?? false,
         }).returning();
 
-        return NextResponse.json(policy, { status: 201 });
+        if (inserted.length === 0) {
+            return NextResponse.json({ error: 'Policy insert returned no rows' }, { status: 500 });
+        }
+
+        return NextResponse.json(inserted[0], { status: 201 });
     } catch (error) {
         console.error('Failed to create policy:', error);
         return NextResponse.json({ error: 'Internal Server Error', message: 'Failed to create policy' }, { status: 500 });

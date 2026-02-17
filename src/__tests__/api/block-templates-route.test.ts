@@ -13,6 +13,7 @@ vi.mock('@/lib/auth', () => ({
 
 vi.mock('drizzle-orm', () => ({
     eq: vi.fn((...args: unknown[]) => args),
+    and: vi.fn((...args: unknown[]) => args),
     or: vi.fn((...args: unknown[]) => args),
     ilike: (...args: unknown[]) => mockIlike(...args),
     sql: Object.assign(vi.fn((...args: unknown[]) => args), {
@@ -41,7 +42,9 @@ vi.mock('@/lib/db', () => ({
             }),
         }),
         delete: () => ({
-            where: () => mockDeleteResult(),
+            where: () => ({
+                returning: () => mockDeleteResult(),
+            }),
         }),
     },
 }));
@@ -54,6 +57,7 @@ vi.mock('@/lib/db/schema', () => ({
         blockType: 'block_type',
         tags: 'tags',
         isGlobal: 'is_global',
+        createdBy: 'created_by',
     },
 }));
 
@@ -71,7 +75,7 @@ function makeRequest(url: string, body?: unknown): NextRequest {
 
 describe('block templates API', () => {
     beforeEach(() => {
-        vi.clearAllMocks();
+        vi.resetAllMocks();
     });
 
     describe('GET', () => {
@@ -200,24 +204,21 @@ describe('block templates API', () => {
 
         it('returns 404 when template not found', async () => {
             mockGetAuthUser.mockResolvedValue({ id: 'u1', role: 'admin' });
-            mockSelectResult.mockResolvedValue([]);
+            mockDeleteResult.mockResolvedValue([]);
             const res = await DELETE(makeRequest('http://localhost/api/block-templates', { templateId: TEMPLATE_ID }));
             expect(res.status).toBe(404);
         });
 
-        it('returns 403 when non-owner non-admin tries to delete', async () => {
+        it('returns 404 when non-owner non-admin tries to delete', async () => {
             mockGetAuthUser.mockResolvedValue({ id: 'u2', role: 'editor' });
-            mockSelectResult.mockResolvedValue([{ id: TEMPLATE_ID, createdBy: 'u1' }]);
+            mockDeleteResult.mockResolvedValue([]);
             const res = await DELETE(makeRequest('http://localhost/api/block-templates', { templateId: TEMPLATE_ID }));
-            expect(res.status).toBe(403);
-            const body = await res.json();
-            expect(body.error).toContain('creator');
+            expect(res.status).toBe(404);
         });
 
         it('allows owner to delete', async () => {
             mockGetAuthUser.mockResolvedValue({ id: 'u1', role: 'editor' });
-            mockSelectResult.mockResolvedValue([{ id: TEMPLATE_ID, createdBy: 'u1' }]);
-            mockDeleteResult.mockResolvedValue(undefined);
+            mockDeleteResult.mockResolvedValue([{ id: TEMPLATE_ID }]);
             const res = await DELETE(makeRequest('http://localhost/api/block-templates', { templateId: TEMPLATE_ID }));
             expect(res.status).toBe(200);
             const body = await res.json();
@@ -226,8 +227,7 @@ describe('block templates API', () => {
 
         it('allows admin to delete any template', async () => {
             mockGetAuthUser.mockResolvedValue({ id: 'u2', role: 'admin' });
-            mockSelectResult.mockResolvedValue([{ id: TEMPLATE_ID, createdBy: 'u1' }]);
-            mockDeleteResult.mockResolvedValue(undefined);
+            mockDeleteResult.mockResolvedValue([{ id: TEMPLATE_ID }]);
             const res = await DELETE(makeRequest('http://localhost/api/block-templates', { templateId: TEMPLATE_ID }));
             expect(res.status).toBe(200);
             const body = await res.json();

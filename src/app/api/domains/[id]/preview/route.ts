@@ -10,6 +10,16 @@ interface PageProps {
     params: Promise<{ id: string }>;
 }
 
+function previewHtmlHeaders(): HeadersInit {
+    return {
+        'Content-Type': 'text/html; charset=utf-8',
+        // Isolate preview documents from first-party origin privileges.
+        'Content-Security-Policy': "sandbox allow-scripts allow-forms",
+        'X-Content-Type-Options': 'nosniff',
+        'Referrer-Policy': 'no-referrer',
+    };
+}
+
 function escapeHtml(str: string): string {
     return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
@@ -135,7 +145,7 @@ export async function GET(request: NextRequest, { params }: PageProps) {
             </div><div style="height:32px"></div>`;
             const injected = content.replace(/(<body[^>]*>)/i, `$1${banner}`);
             return new NextResponse(injected, {
-                headers: { 'Content-Type': 'text/html; charset=utf-8' },
+                headers: previewHtmlHeaders(),
             });
         }
 
@@ -180,7 +190,7 @@ export async function GET(request: NextRequest, { params }: PageProps) {
 </html>`;
 
         return new NextResponse(html, {
-            headers: { 'Content-Type': 'text/html; charset=utf-8' },
+            headers: previewHtmlHeaders(),
         });
     }
 
@@ -228,6 +238,6 @@ export async function GET(request: NextRequest, { params }: PageProps) {
 </html>`;
 
     return new NextResponse(html, {
-        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+        headers: previewHtmlHeaders(),
     });
 }
