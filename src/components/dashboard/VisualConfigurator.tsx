@@ -22,6 +22,7 @@ interface VisualConfiguratorProps {
     initialBlocks: Block[];
     initialTheme: string;
     initialSkin: string;
+    contentTypeMix?: Record<string, number> | null;
     onSave?: (blocks: Block[]) => void;
     onCancel?: () => void;
 }
@@ -248,6 +249,29 @@ const SECTION_TEMPLATES: SectionTemplate[] = [
     { name: 'Interactive Decision', description: 'Multi-step wizard flow', icon: '\u{1F9ED}', blocks: [{ type: 'Wizard' }] },
     { name: 'Article Footer', description: 'Author + last updated + sources', icon: '\u{1F4CC}', blocks: [{ type: 'AuthorBio' }, { type: 'LastUpdated' }, { type: 'CitationBlock' }] },
 ];
+
+// ============================================================
+// Content Type → Recommended Block Mapping
+// ============================================================
+
+const CONTENT_TYPE_BLOCK_MAP: Record<string, string[]> = {
+    article: ['Hero', 'ArticleBody', 'AuthorBio', 'CitationBlock', 'LastUpdated'],
+    comparison: ['ComparisonTable', 'VsCard', 'ProsConsCard', 'RankingList'],
+    calculator: ['QuoteCalculator', 'CostBreakdown', 'StatGrid'],
+    cost_guide: ['CostBreakdown', 'QuoteCalculator', 'DataTable', 'StatGrid'],
+    lead_capture: ['LeadForm', 'CTABanner', 'TrustBadges', 'TestimonialGrid'],
+    checklist: ['Checklist', 'StepByStep'],
+    faq: ['FAQ'],
+    review: ['ProsConsCard', 'RankingList', 'TestimonialGrid', 'ComparisonTable'],
+    wizard: ['Wizard'],
+    quiz: ['Wizard'],
+    survey: ['Wizard'],
+    assessment: ['Wizard'],
+    configurator: ['Wizard'],
+    interactive_infographic: ['StatGrid', 'DataTable', 'EmbedWidget'],
+    interactive_map: ['InteractiveMap', 'GeoContent'],
+    guide: ['ArticleBody', 'StepByStep', 'FAQ', 'AuthorBio', 'CitationBlock'],
+};
 
 type ViewportSize = 'desktop' | 'tablet' | 'mobile';
 
@@ -671,6 +695,7 @@ export function VisualConfigurator({
     initialBlocks,
     initialTheme,
     initialSkin,
+    contentTypeMix,
     onSave,
     onCancel,
 }: VisualConfiguratorProps) {
@@ -692,6 +717,22 @@ export function VisualConfigurator({
     const [successMsg, setSuccessMsg] = useState<string | null>(null);
     const [iframeLoading, setIframeLoading] = useState(true);
     const [jsonError, setJsonError] = useState<string | null>(null);
+
+    // --- Recommended blocks based on domain content types ---
+    const recommendedBlockTypes: string[] = (() => {
+        if (!contentTypeMix || Object.keys(contentTypeMix).length === 0) return [];
+        const blockSet = new Set<string>();
+        for (const [contentType, weight] of Object.entries(contentTypeMix)) {
+            if (weight > 0 && CONTENT_TYPE_BLOCK_MAP[contentType]) {
+                for (const bt of CONTENT_TYPE_BLOCK_MAP[contentType]) blockSet.add(bt);
+            }
+        }
+        return [...blockSet];
+    })();
+
+    const activeContentTypes = contentTypeMix
+        ? Object.entries(contentTypeMix).filter(([, w]) => w > 0).map(([k]) => k)
+        : [];
 
     const iframeRef = useRef<HTMLIFrameElement>(null);
     const blockListRef = useRef<HTMLDivElement>(null);
@@ -888,6 +929,37 @@ export function VisualConfigurator({
         if (newBlocks.length > 0) setSelectedBlockId(newBlocks[0].id);
     }
 
+    async function handleRandomize() {
+        const pick = <T,>(arr: readonly T[]): T => arr[Math.floor(Math.random() * arr.length)];
+        const newTheme = pick(AVAILABLE_THEMES);
+        const newSkin = pick(AVAILABLE_SKINS);
+
+        // Randomize block variants
+        const updated = blocks.map(b => {
+            const variants = VARIANT_OPTIONS[b.type];
+            if (!variants || variants.length <= 1) return b;
+            return { ...b, variant: pick(variants) };
+        });
+
+        setTheme(newTheme);
+        setSkin(newSkin);
+        updateBlocks(updated);
+        setSuccessMsg(`Randomized: ${newTheme} / ${newSkin}`);
+        setTimeout(() => setSuccessMsg(null), 2500);
+
+        // Persist theme + skin immediately so preview reflects it
+        try {
+            await fetch(`/api/pages/${pageId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ theme: newTheme, skin: newSkin }),
+            });
+            refreshPreview();
+        } catch {
+            // Will be persisted on next save
+        }
+    }
+
     function updateBlockField(blockId: string, field: 'variant' | 'config' | 'content', value: unknown) {
         const updated = blocks.map(b => {
             if (b.id !== blockId) return b;
@@ -991,14 +1063,18 @@ export function VisualConfigurator({
                     <div className="flex items-center gap-1.5">
                         {onCancel && (
                             <Button size="sm" variant="ghost" onClick={onCancel} className="h-7 px-2 text-xs">
-                                \u2190 Back
+                                {'\u2190'} Back
                             </Button>
                         )}
                         <Button size="sm" variant="ghost" onClick={undo} disabled={!canUndo} className="h-7 w-7 p-0" title="Undo (Ctrl+Z)">
-                            \u21A9
+                            {'\u21A9'}
                         </Button>
                         <Button size="sm" variant="ghost" onClick={redo} disabled={!canRedo} className="h-7 w-7 p-0" title="Redo (Ctrl+Y)">
-                            \u21AA
+                            {'\u21AA'}
+                        </Button>
+                        <div className="w-px h-4 bg-border mx-0.5" />
+                        <Button size="sm" variant="ghost" onClick={handleRandomize} className="h-7 px-2 text-xs" title="Randomize theme, skin & variants">
+                            {'\u{1F3B2}'} Randomize
                         </Button>
                     </div>
                     <div className="flex items-center gap-1.5">
@@ -1009,6 +1085,16 @@ export function VisualConfigurator({
                         </Button>
                     </div>
                 </div>
+
+                {/* Content types indicator */}
+                {activeContentTypes.length > 0 && (
+                    <div className="flex items-center gap-1 border-b px-3 py-1.5 overflow-x-auto">
+                        <span className="text-[9px] text-muted-foreground font-medium shrink-0">Content types:</span>
+                        {activeContentTypes.map(ct => (
+                            <Badge key={ct} variant="outline" className="text-[9px] h-4 px-1.5 shrink-0">{ct}</Badge>
+                        ))}
+                    </div>
+                )}
 
                 {/* Theme/Skin pickers */}
                 <div className="flex gap-2 border-b px-3 py-2">
@@ -1101,17 +1187,29 @@ export function VisualConfigurator({
                             onDragOver={(e) => handleDragOver(e, blocks.length)}
                             onDrop={() => handleDrop(blocks.length)}
                         />
-                        {/* Quick-add popular components */}
+                        {/* Empty state */}
+                        {blocks.length === 0 && (
+                            <div className="flex flex-col items-center justify-center py-8 text-center">
+                                <div className="text-3xl mb-2">{'\u{1F3D7}\u{FE0F}'}</div>
+                                <p className="text-sm font-medium">No blocks yet</p>
+                                <p className="text-[11px] text-muted-foreground mt-0.5">Add components to build your page</p>
+                            </div>
+                        )}
+
+                        {/* Quick-add components */}
                         <div className="mt-2 space-y-1.5">
                             <div className="flex flex-wrap gap-1">
-                                {[
-                                    { type: 'FAQ', icon: '\u2753' },
-                                    { type: 'CTABanner', icon: '\u{1F3AF}' },
-                                    { type: 'LeadForm', icon: '\u{1F4E7}' },
-                                    { type: 'StatGrid', icon: '\u{1F4CA}' },
-                                    { type: 'PricingTable', icon: '\u{1F4B3}' },
-                                    { type: 'ComparisonTable', icon: '\u{2696}\u{FE0F}' },
-                                ].map(({ type, icon }) => (
+                                {(recommendedBlockTypes.length > 0
+                                    ? recommendedBlockTypes.slice(0, 6).map(type => ({ type, icon: CATEGORY_ICONS[Object.entries(BLOCK_CATEGORIES).find(([, types]) => types.includes(type))?.[0] || ''] || '\u2B50' }))
+                                    : [
+                                        { type: 'FAQ', icon: '\u2753' },
+                                        { type: 'CTABanner', icon: '\u{1F3AF}' },
+                                        { type: 'LeadForm', icon: '\u{1F4E7}' },
+                                        { type: 'StatGrid', icon: '\u{1F4CA}' },
+                                        { type: 'PricingTable', icon: '\u{1F4B3}' },
+                                        { type: 'ComparisonTable', icon: '\u{2696}\u{FE0F}' },
+                                    ]
+                                ).map(({ type, icon }) => (
                                     <button
                                         key={type}
                                         className="flex items-center gap-1 rounded-md border bg-muted/30 px-2 py-1 text-[10px] font-medium hover:bg-muted hover:border-foreground/20 transition-colors"
@@ -1437,7 +1535,10 @@ export function VisualConfigurator({
                     </div>
                     <div className="flex items-center gap-2">
                         <span className="text-[10px] text-muted-foreground">
-                            {blocks.length} blocks {'\u00B7'} {theme}/{skin}
+                            {blocks.length} block{blocks.length !== 1 ? 's' : ''} {'\u00B7'} {theme}/{skin}
+                        </span>
+                        <span className="text-[9px] text-muted-foreground/50 hidden lg:inline">
+                            Ctrl+Z undo {'\u00B7'} Ctrl+S save
                         </span>
                         <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={refreshPreview}>
                             {'\u21BB'} Refresh
@@ -1545,6 +1646,43 @@ export function VisualConfigurator({
                                                             ))}
                                                         </span>
                                                     </div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                );
+                            })()}
+
+                            {/* === Recommended for Your Domain === */}
+                            {recommendedBlockTypes.length > 0 && (() => {
+                                const filtered = recommendedBlockTypes.filter(t =>
+                                    !paletteSearch || t.toLowerCase().includes(paletteSearch.toLowerCase()) ||
+                                    (BLOCK_DESCRIPTIONS[t] || '').toLowerCase().includes(paletteSearch.toLowerCase())
+                                );
+                                if (filtered.length === 0) return null;
+                                return (
+                                    <div>
+                                        <h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                                            <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-amber-100 dark:bg-amber-950 text-amber-600 text-[10px]">{'\u2B50'}</span>
+                                            Recommended for Your Domain
+                                        </h4>
+                                        <p className="mb-3 text-[11px] text-muted-foreground">
+                                            Based on your content types: {activeContentTypes.join(', ')}
+                                        </p>
+                                        <div className="grid grid-cols-2 gap-1.5">
+                                            {filtered.map(type => (
+                                                <button
+                                                    key={type}
+                                                    className="group flex flex-col items-start rounded-lg border-2 border-amber-200 dark:border-amber-900 bg-amber-50/50 dark:bg-amber-950/30 px-3 py-2.5 text-left transition-all hover:border-amber-400 hover:shadow-sm"
+                                                    onClick={() => addBlock(type)}
+                                                >
+                                                    <div className="flex items-center gap-1.5 w-full">
+                                                        <span className="text-sm font-medium">{type}</span>
+                                                        <span className="ml-auto text-[9px] font-medium text-amber-600 bg-amber-100 dark:bg-amber-950 px-1.5 py-0.5 rounded-full">{'\u2B50'} match</span>
+                                                    </div>
+                                                    <span className="text-[10px] text-muted-foreground leading-tight mt-0.5">
+                                                        {BLOCK_DESCRIPTIONS[type] || ''}
+                                                    </span>
                                                 </button>
                                             ))}
                                         </div>

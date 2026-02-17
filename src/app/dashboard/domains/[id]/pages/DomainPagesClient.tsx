@@ -23,6 +23,7 @@ interface Props {
     domainId: string;
     domainName: string;
     siteTemplate: string;
+    contentTypeMix: Record<string, number> | null;
     initialPages: PageDef[];
 }
 
@@ -51,7 +52,7 @@ function mapPage(p: Record<string, unknown>): PageDef {
     };
 }
 
-export function DomainPagesClient({ domainId, domainName, siteTemplate, initialPages }: Props) {
+export function DomainPagesClient({ domainId, domainName, siteTemplate, contentTypeMix, initialPages }: Props) {
     const [pages, setPages] = useState<PageDef[]>(initialPages);
     const [loading, setLoading] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -445,6 +446,7 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, initialP
                 initialBlocks={editingBlocks as { id: string; type: string; variant?: string; config?: Record<string, unknown>; content?: Record<string, unknown> }[]}
                 initialTheme={editingTheme}
                 initialSkin={editingSkin}
+                contentTypeMix={contentTypeMix}
                 onSave={() => {
                     setEditingPageId(null);
                     setEditingBlocks(null);

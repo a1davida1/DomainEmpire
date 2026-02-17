@@ -69,10 +69,10 @@ describe('VisualConfigurator DOM tests', () => {
     describe('rendering', () => {
         it('renders the editor panel with block list', () => {
             renderConfigurator();
-            // Should show block types in the list
-            expect(screen.getByText('Hero')).toBeTruthy();
-            expect(screen.getByText('FAQ')).toBeTruthy();
-            expect(screen.getByText('Footer')).toBeTruthy();
+            // Should show block types in the list (some also appear in quick-add bar)
+            expect(screen.getAllByText('Hero').length).toBeGreaterThan(0);
+            expect(screen.getAllByText('FAQ').length).toBeGreaterThan(0);
+            expect(screen.getAllByText('Footer').length).toBeGreaterThan(0);
         });
 
         it('renders the preview iframe with correct src', () => {
@@ -117,9 +117,9 @@ describe('VisualConfigurator DOM tests', () => {
             expect(screen.queryByText(/Back/)).toBeNull();
         });
 
-        it('renders + Add Block button', () => {
+        it('renders + Browse All Components button', () => {
             renderConfigurator();
-            expect(screen.getByText('+ Add Block')).toBeTruthy();
+            expect(screen.getByText('+ Browse All Components')).toBeTruthy();
         });
 
         it('renders loading spinner initially for iframe', () => {
@@ -253,27 +253,31 @@ describe('VisualConfigurator DOM tests', () => {
     });
 
     describe('block palette', () => {
-        it('opens palette modal when + Add Block clicked', async () => {
+        it('opens palette modal when + Browse All Components clicked', async () => {
             renderConfigurator();
-            fireEvent.click(screen.getByText('+ Add Block'));
+            fireEvent.click(screen.getByText('+ Browse All Components'));
             await waitFor(() => {
-                expect(screen.getByText('Add Block')).toBeTruthy();
-                expect(screen.getByPlaceholderText('Search blocks...')).toBeTruthy();
+                expect(screen.getByText('Add Component')).toBeTruthy();
+                expect(screen.getByPlaceholderText('Search components... (e.g. FAQ, calculator, pricing)')).toBeTruthy();
             });
         });
 
         it('palette search filters block types', async () => {
             const user = userEvent.setup();
             renderConfigurator();
-            fireEvent.click(screen.getByText('+ Add Block'));
+            fireEvent.click(screen.getByText('+ Browse All Components'));
             await waitFor(() => {
-                expect(screen.getByPlaceholderText('Search blocks...')).toBeTruthy();
+                expect(screen.getByPlaceholderText('Search components... (e.g. FAQ, calculator, pricing)')).toBeTruthy();
             });
-            const searchInput = screen.getByPlaceholderText('Search blocks...');
+            const searchInput = screen.getByPlaceholderText('Search components... (e.g. FAQ, calculator, pricing)');
             await user.type(searchInput, 'pricing');
             await waitFor(() => {
-                expect(screen.getByText('PricingTable')).toBeTruthy();
-                // FAQ should be filtered out
+                expect(screen.getAllByText('PricingTable').length).toBeGreaterThan(0);
+                // FAQ individual block description should be filtered out of the palette
+                // (Note: FAQ quick-add button outside the modal still shows 'FAQ' text but not the description)
+                const paletteModal = screen.getByText('Add Component').closest('div[class*="max-h"]');
+                expect(paletteModal).toBeTruthy();
+                // The FAQ description should not appear anywhere when searched for 'pricing'
                 expect(screen.queryByText('Expandable question and answer list')).toBeNull();
             });
         });
@@ -283,9 +287,9 @@ describe('VisualConfigurator DOM tests', () => {
             // Start with 3 blocks
             const _initialFooters = screen.getAllByText('Footer');
 
-            fireEvent.click(screen.getByText('+ Add Block'));
+            fireEvent.click(screen.getByText('+ Browse All Components'));
             await waitFor(() => {
-                expect(screen.getByText('Add Block')).toBeTruthy();
+                expect(screen.getByText('Add Component')).toBeTruthy();
             });
 
             // Click the DataTable block in palette
@@ -294,7 +298,7 @@ describe('VisualConfigurator DOM tests', () => {
 
             await waitFor(() => {
                 // Palette should close
-                expect(screen.queryByText('Add Block')).toBeNull();
+                expect(screen.queryByText('Add Component')).toBeNull();
                 // DataTable should appear in block list
                 expect(screen.getAllByText('DataTable').length).toBeGreaterThan(0);
             });
@@ -366,9 +370,9 @@ describe('VisualConfigurator DOM tests', () => {
 
     describe('field schemas coverage', () => {
         it('all 31 block types have field schemas', () => {
-            // Click + Add Block to open palette and verify all types are available
+            // Click + Browse All Components to open palette and verify all types are available
             renderConfigurator();
-            fireEvent.click(screen.getByText('+ Add Block'));
+            fireEvent.click(screen.getByText('+ Browse All Components'));
             const allBlockTypes = [
                 'Header', 'Footer', 'Sidebar', 'Hero', 'ArticleBody', 'FAQ',
                 'StepByStep', 'Checklist', 'AuthorBio', 'ComparisonTable', 'VsCard',
