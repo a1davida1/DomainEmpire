@@ -8,51 +8,13 @@ import {
     getConfiguratorBridgeScript,
     type RenderContext,
 } from '@/lib/deploy/blocks/assembler';
+import { deriveAllowedParentOrigin } from '@/lib/deploy/allowed-parent-origin';
 import type { BlockEnvelope } from '@/lib/deploy/blocks/schemas';
 // Side-effect: register interactive block renderers
 import '@/lib/deploy/blocks/renderers-interactive';
 import { generateV2GlobalStyles } from '@/lib/deploy/themes';
 import { extractSiteTitle } from '@/lib/deploy/templates/shared';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function deriveAllowedParentOrigin(request: NextRequest): string {
-    const configured = process.env.ALLOWED_PARENT_ORIGIN?.trim();
-    let configuredOrigin: string | null = null;
-    if (configured) {
-        try {
-            configuredOrigin = new URL(configured).origin;
-        } catch {
-            configuredOrigin = null;
-        }
-    }
-
-    const allowedOrigins = new Set([request.nextUrl.origin]);
-    if (configuredOrigin) {
-        allowedOrigins.add(configuredOrigin);
-    }
-
-    const originHeader = request.headers.get('origin');
-    const refererHeader = request.headers.get('referer');
-
-    let refererOrigin: string | null = null;
-    if (refererHeader) {
-        try {
-            refererOrigin = new URL(refererHeader).origin;
-        } catch {
-            refererOrigin = null;
-        }
-    }
-
-    const candidates = [originHeader, refererOrigin, request.nextUrl.origin, configuredOrigin];
-
-    for (const candidate of candidates) {
-        if (candidate && allowedOrigins.has(candidate)) {
-            return candidate;
-        }
-    }
-
-    return '';
-}
 
 // extractSiteTitle imported from '@/lib/deploy/templates/shared'
 
@@ -236,7 +198,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     const previewUrl = `/api/pages/${id}/preview?format=html&buildId=${previewBuildId}`;
 
     try {
-        const [build] = await db.insert(previewBuilds).values({
+        const buildRows = await db.insert(previewBuilds).values({
             id: previewBuildId,
             domainId: pageDef.domainId,
             previewUrl,
@@ -254,6 +216,11 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
                 generatedAt: new Date().toISOString(),
             },
         }).returning();
+        const build = buildRows[0];
+
+        if (!build) {
+            return NextResponse.json({ error: 'Insert returned no row' }, { status: 500 });
+        }
 
         return NextResponse.json({
             success: true,

@@ -152,3 +152,32 @@ export function getWorkerHealth() {
     };
 }
 
+/**
+ * Restart the worker if it died (crash limit exhausted).
+ * Safe to call repeatedly — no-ops if the worker is already running.
+ * Resets the crash counter so the worker gets a fresh set of retries.
+ */
+export async function restartWorkerIfDead(): Promise<boolean> {
+    if (!shouldBootServerWorker()) return false;
+
+    const state = globalThis.__domainEmpireWorkerRuntime;
+    if (!state) {
+        // Never started — do a full bootstrap
+        await ensureServerWorkerStarted();
+        return true;
+    }
+
+    if (state.started || state.shuttingDown) {
+        return false;
+    }
+
+    // Worker died. Reset crash counter and restart.
+    console.log(
+        `[WorkerBootstrap] Restarting dead worker (previous crashes: ${state.crashCount}).`,
+    );
+    state.crashCount = 0;
+    state.lastCrashAt = 0;
+    await ensureServerWorkerStarted();
+    return true;
+}
+

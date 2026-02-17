@@ -90,13 +90,18 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'recurringInterval is required when recurring is true' }, { status: 400 });
         }
 
-        const [expense] = await db.insert(expenses).values({
+        const rows = await db.insert(expenses).values({
             ...parsed.data,
             amount: parsed.data.amount.toString(),
             domainId: parsed.data.domainId || null,
             recurringInterval: parsed.data.recurringInterval || null,
             expenseDate: new Date(parsed.data.expenseDate),
         }).returning();
+        const expense = rows[0];
+
+        if (!expense) {
+            return NextResponse.json({ error: 'Insert returned no row' }, { status: 500 });
+        }
 
         return NextResponse.json(expense, { status: 201 });
     } catch (error) {

@@ -78,7 +78,7 @@ export function AffiliateManager({ domainId, initialAffiliates }: AffiliateManag
             <CardContent className="space-y-6">
                 <div className="space-y-4">
                     {affiliates.map((aff, i) => (
-                        <div key={`${aff.provider}-${aff.programId}`} className="flex items-start gap-4 p-4 border rounded-lg bg-muted/20">
+                        <div key={`${aff.provider}-${aff.programId || i}`} className="flex items-start gap-4 p-4 border rounded-lg bg-muted/20">
                             <div className="grid gap-4 flex-1 md:grid-cols-2">
                                 <div>
                                     <Label className="text-xs text-muted-foreground">Provider</Label>

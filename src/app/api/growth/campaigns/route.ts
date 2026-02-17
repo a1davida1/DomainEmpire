@@ -150,7 +150,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'domainResearchId not found' }, { status: 404 });
         }
 
-        const [campaign] = await db.insert(promotionCampaigns).values({
+        const campaignRows = await db.insert(promotionCampaigns).values({
             domainResearchId: payload.domainResearchId,
             channels: payload.channels,
             budget: payload.budget ?? 0,
@@ -161,6 +161,11 @@ export async function POST(request: NextRequest) {
                 createdAt: new Date().toISOString(),
             },
         }).returning();
+        const campaign = campaignRows[0];
+
+        if (!campaign) {
+            return NextResponse.json({ error: 'Insert returned no row' }, { status: 500 });
+        }
 
         return NextResponse.json({
             success: true,

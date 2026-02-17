@@ -46,16 +46,19 @@ export default function RevisionsPage() {
     const [expandedRev, setExpandedRev] = useState<number | null>(null);
 
     useEffect(() => {
-        let cancelled = false;
-        fetch(`/api/articles/${articleId}/revisions`)
+        const controller = new AbortController();
+        fetch(`/api/articles/${articleId}/revisions`, { signal: controller.signal })
             .then(r => {
                 if (!r.ok) throw new Error(`Failed to load revisions: ${r.statusText}`);
                 return r.json();
             })
-            .then(data => { if (!cancelled) setRevisions(data); })
-            .catch(err => console.error('Failed to load revisions:', err))
-            .finally(() => { if (!cancelled) setLoading(false); });
-        return () => { cancelled = true; };
+            .then(data => { if (!controller.signal.aborted) setRevisions(data); })
+            .catch(err => {
+                if (err instanceof DOMException && err.name === 'AbortError') return;
+                console.error('Failed to load revisions:', err);
+            })
+            .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+        return () => controller.abort();
     }, [articleId]);
 
     async function loadDiff(revisionNumber: number) {

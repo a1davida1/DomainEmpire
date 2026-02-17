@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { getQueueHealth, purgeOldJobs } from '@/lib/ai/worker';
 import { getContentQueueBackendHealth } from '@/lib/queue/content-queue';
+import { getWorkerHealth, restartWorkerIfDead } from '@/lib/ai/worker-bootstrap';
 
 // GET /api/queue/health - Get detailed queue health metrics
 export async function GET(request: NextRequest) {
@@ -14,9 +15,20 @@ export async function GET(request: NextRequest) {
             getContentQueueBackendHealth(),
         ]);
 
+        // Watchdog: if the worker is dead and there are pending jobs, restart it
+        const workerState = getWorkerHealth();
+        let workerRestarted = false;
+        if (!workerState.running && !workerState.shuttingDown && health.pending > 0) {
+            workerRestarted = await restartWorkerIfDead();
+            if (workerRestarted) {
+                console.log('[QueueHealth] Watchdog restarted dead worker.');
+            }
+        }
+
         const response = NextResponse.json({
             ...health,
             backend,
+            workerRestarted,
         });
         // Cache for 30s since this is a health check
         response.headers.set('Cache-Control', 'private, max-age=30');

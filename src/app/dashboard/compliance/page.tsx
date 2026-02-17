@@ -68,33 +68,33 @@ export default function CompliancePage() {
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        let cancelled = false;
+        const controller = new AbortController();
         const loadData = async () => {
             try {
                 const [metricsRes, trendRes] = await Promise.all([
-                    fetch('/api/compliance/metrics'),
-                    fetch('/api/compliance/trend?days=90'),
+                    fetch('/api/compliance/metrics', { signal: controller.signal }),
+                    fetch('/api/compliance/trend?days=90', { signal: controller.signal }),
                 ]);
 
-                if (cancelled) return;
                 if (!metricsRes.ok) throw new Error(`Failed to load metrics: ${metricsRes.statusText}`);
                 if (!trendRes.ok) throw new Error(`Failed to load trend: ${trendRes.statusText}`);
 
                 const metricsData = await metricsRes.json();
                 const trendData = await trendRes.json();
 
+                if (controller.signal.aborted) return;
                 setMetrics(metricsData);
                 setTrend(trendData);
             } catch (err: unknown) {
-                if (cancelled) return;
+                if (err instanceof DOMException && err.name === 'AbortError') return;
                 console.error('Failed to load compliance data:', err);
                 setError(err instanceof Error ? err.message : 'Failed to load compliance metrics');
             } finally {
-                if (!cancelled) setLoading(false);
+                if (!controller.signal.aborted) setLoading(false);
             }
         };
         loadData();
-        return () => { cancelled = true; };
+        return () => controller.abort();
     }, []);
 
     async function takeSnapshot() {

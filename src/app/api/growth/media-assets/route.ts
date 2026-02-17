@@ -210,9 +210,14 @@ export async function POST(request: NextRequest) {
             });
         }
 
-        const [asset] = await db.insert(mediaAssets)
+        const rows = await db.insert(mediaAssets)
             .values(insertValues)
             .returning();
+        const asset = rows[0];
+
+        if (!asset) {
+            return NextResponse.json({ error: 'Insert returned no row' }, { status: 500 });
+        }
 
         return NextResponse.json({
             created: true,

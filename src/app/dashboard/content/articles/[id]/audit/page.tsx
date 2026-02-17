@@ -38,16 +38,19 @@ export default function AuditLogPage() {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        let cancelled = false;
-        fetch(`/api/articles/${articleId}/events`)
+        const controller = new AbortController();
+        fetch(`/api/articles/${articleId}/events`, { signal: controller.signal })
             .then(r => {
                 if (!r.ok) throw new Error(`Failed to load audit events: ${r.statusText}`);
                 return r.json();
             })
-            .then(data => { if (!cancelled) setEvents(data); })
-            .catch(err => console.error('Failed to load audit events:', err))
-            .finally(() => { if (!cancelled) setLoading(false); });
-        return () => { cancelled = true; };
+            .then(data => { if (!controller.signal.aborted) setEvents(data); })
+            .catch(err => {
+                if (err instanceof DOMException && err.name === 'AbortError') return;
+                console.error('Failed to load audit events:', err);
+            })
+            .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+        return () => controller.abort();
     }, [articleId]);
 
     if (loading) {

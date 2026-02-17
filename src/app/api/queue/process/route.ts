@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { runWorkerOnce, getQueueStats, getQueueHealth } from '@/lib/ai/worker';
 import { getContentQueueBackendHealth } from '@/lib/queue/content-queue';
+import { restartWorkerIfDead } from '@/lib/ai/worker-bootstrap';
 
 function parseMaxJobs(value: unknown): number {
     const parsed = Number.parseInt(String(value ?? ''), 10);
@@ -26,6 +27,9 @@ export async function POST(request: NextRequest) {
     if (authError) return authError;
 
     try {
+        // Watchdog: restart the continuous worker if it died
+        await restartWorkerIfDead();
+
         const body = await request.json().catch(() => ({}));
         const maxJobs = parseMaxJobs(body.maxJobs);
         const jobTypes = parseJobTypes(body.jobTypes);

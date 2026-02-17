@@ -194,7 +194,7 @@ export async function POST(request: NextRequest) {
         }
 
         const impact = deriveImpact(payload.entryType, payload.impact);
-        const [entry] = await db.insert(domainFinanceLedgerEntries)
+        const entryRows = await db.insert(domainFinanceLedgerEntries)
             .values({
                 domainId: payload.domainId,
                 entryDate: new Date(payload.entryDate),
@@ -211,6 +211,11 @@ export async function POST(request: NextRequest) {
                 updatedAt: new Date(),
             })
             .returning();
+        const entry = entryRows[0];
+
+        if (!entry) {
+            return NextResponse.json({ error: 'Insert returned no row' }, { status: 500 });
+        }
 
         if (payload.entryType === 'revenue' && payload.amount > 0) {
             try {

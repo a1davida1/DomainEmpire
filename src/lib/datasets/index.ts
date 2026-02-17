@@ -51,7 +51,7 @@ export async function createDataset(input: {
     const storedData = input.data ?? null;
     const dataHash = (storedData === null) ? null : hashData(storedData);
 
-    const [created] = await db.insert(datasets).values({
+    const rows = await db.insert(datasets).values({
         name: input.name,
         sourceUrl: input.sourceUrl,
         sourceTitle: input.sourceTitle,
@@ -65,6 +65,11 @@ export async function createDataset(input: {
         domainId: input.domainId,
         retrievedAt: new Date(),
     }).returning();
+    const created = rows[0];
+
+    if (!created) {
+        throw new Error('Dataset insert returned no row');
+    }
 
     return created;
 }

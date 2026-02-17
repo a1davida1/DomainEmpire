@@ -201,7 +201,7 @@ The following list maps the requested content surface to current implementation 
 | Case studies and scenarios | Partially implemented (content types can express scenarios) | Substantiation workflow, typical-outcome safeguards, scenario ID registry tied to evidence docs |
 | Reviews and testing | Partially implemented (`review` type, reviewer roles, QA templates) | Test protocol versioning, raw notes attachments, reviewer expertise display + audit binding |
 | Lead-gen landing pages | Implemented (`lead_capture` type + capture route) | Compliance gates for high-risk verticals, stronger claim linting, disclosure placement verification snapshots |
-| Lead forms | Partially implemented (capture APIs + subscriber attribution) | Subscriber metadata anonymization, retention archival policy, consent text version pinning at submit time, policy audit export |
+| Lead forms (Phase 0 privacy baseline complete) | Partially implemented (capture APIs + subscriber attribution) | Phase 0 complete for metadata anonymization + retention archival policy; remaining: consent text version pinning at submit time, policy audit export |
 | Newsletters | Partially implemented (subscriber system exists) | Campaign send engine, preference center, unsubscribe/compliance reporting and FTC promo labeling pipeline |
 | Micro-SaaS product pages | Partially implemented (template framework can render) | Release readiness checklist, uptime/incident surfaced metadata, functional claim verifier |
 | Pricing and checkout | Partially implemented (billing primitives exist) | Transparent terms version capture, experiment holdout logging, cancellation flow audit hooks |
@@ -945,9 +945,9 @@ Week 5:
 
 ---
 
-## Subscriber PII and Data Privacy (Cross-Phase)
+## Subscriber PII and Data Privacy (Cross-Phase — Phase 0 baseline complete)
 
-The `subscribers` table stores PII (email, name, phone, ip_address, user_agent, referrer, form_data). The following must be implemented across phases:
+The `subscribers` table stores and processes subscriber metadata. Phase 0 baseline privacy controls are complete; the following cross-phase controls remain required for sustained production governance:
 
 ### Data Retention Policy
 - **Tracking fields** (ip_address, user_agent, referrer): retain for 90 days maximum, then irreversibly null/truncate via automated `purge_subscriber_tracking` queue job (runs daily).
@@ -970,7 +970,7 @@ The `subscribers` table stores PII (email, name, phone, ip_address, user_agent, 
 
 ### Documentation
 - Update privacy policy to reflect collection, retention, and deletion procedures for subscribers.
-- Must be completed by Phase 0 for existing subscriber data; enforcement gates apply from Phase 3 onward when growth campaigns generate new leads at scale.
+- Phase 0 baseline documentation requirements are complete; enforce ongoing updates before/alongside Phase 3 growth scale milestones.
 
 ---
 

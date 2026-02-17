@@ -40,12 +40,17 @@ export async function POST(request: NextRequest) {
         }
     }
 
-    const [template] = await db.insert(qaChecklistTemplates).values({
+    const rows = await db.insert(qaChecklistTemplates).values({
         name,
         contentType: contentType || null,
         ymylLevel: ymylLevel || 'none',
         items,
     }).returning();
+    const template = rows[0];
+
+    if (!template) {
+        return NextResponse.json({ error: 'Insert returned no row' }, { status: 500 });
+    }
 
     return NextResponse.json(template, { status: 201 });
 }

@@ -292,8 +292,8 @@ export default function ImportDomainsPage() {
                             <div>
                                 <p className="mb-2 text-sm font-medium text-destructive">Errors:</p>
                                 <div className="max-h-40 overflow-y-auto rounded-md border p-2">
-                                    {result.errors.map((err) => (
-                                        <div key={`${err.domain}-${err.error}`} className="flex justify-between py-1 text-sm">
+                                    {result.errors.map((err, idx) => (
+                                        <div key={`${err.domain}-${err.error}-${idx}`} className="flex justify-between py-1 text-sm">
                                             <span className="font-mono">{err.domain}</span>
                                             <span className="text-muted-foreground">{err.error}</span>
                                         </div>

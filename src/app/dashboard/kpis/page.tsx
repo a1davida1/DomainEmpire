@@ -78,34 +78,33 @@ export default function KpiDashboardPage() {
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        let cancelled = false;
+        const controller = new AbortController();
         const loadData = async () => {
             try {
                 const [complianceRes, revenueRes, costsRes] = await Promise.all([
-                    fetch('/api/compliance/metrics'),
-                    fetch('/api/analytics/revenue'),
-                    fetch('/api/analytics/costs'),
+                    fetch('/api/compliance/metrics', { signal: controller.signal }),
+                    fetch('/api/analytics/revenue', { signal: controller.signal }),
+                    fetch('/api/analytics/costs', { signal: controller.signal }),
                 ]);
-
-                if (cancelled) return;
 
                 if (!complianceRes.ok) throw new Error(`Compliance metrics failed: ${complianceRes.statusText}`);
                 if (!revenueRes.ok) throw new Error(`Revenue data failed: ${revenueRes.statusText}`);
                 if (!costsRes.ok) throw new Error(`Cost data failed: ${costsRes.statusText}`);
 
+                if (controller.signal.aborted) return;
                 setCompliance(await complianceRes.json());
                 setRevenue(await revenueRes.json());
                 setCosts(await costsRes.json());
             } catch (err: unknown) {
-                if (cancelled) return;
+                if (err instanceof DOMException && err.name === 'AbortError') return;
                 console.error('Failed to load KPI data:', err);
                 setError(err instanceof Error ? err.message : 'Failed to load dashboard data');
             } finally {
-                if (!cancelled) setLoading(false);
+                if (!controller.signal.aborted) setLoading(false);
             }
         };
         loadData();
-        return () => { cancelled = true; };
+        return () => controller.abort();
     }, []);
 
     if (loading) {
