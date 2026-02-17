@@ -74,7 +74,6 @@ function releaseLease(owner: string): void {
 }
 
 export function QueueBackgroundProcessor() {
-    const pathname = usePathname();
     const runningRef = useRef(false);
     const tabIdRef = useRef<string | null>(null);
 
@@ -187,7 +186,7 @@ export function QueueBackgroundProcessor() {
                 releaseLease(tabId);
             }
         };
-    }, [pathname]);
+    }, []);
 
     if (INLINE_WORKER_ENABLED) {
         return null;
