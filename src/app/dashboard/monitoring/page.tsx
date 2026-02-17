@@ -26,6 +26,10 @@ const SEVERITY_COLORS: Record<string, string> = {
 
 type MonitoringAlert = typeof notifications.$inferSelect;
 
+function isSafeInternalActionUrl(value: string | null): value is string {
+    return typeof value === 'string' && value.startsWith('/') && !value.startsWith('//');
+}
+
 async function getMonitoringAlerts(): Promise<{ data: MonitoringAlert[] | null; error: string | null }> {
     try {
         const data = await db
@@ -170,8 +174,9 @@ export default async function MonitoringPage() {
                                         </span>
                                     </>
                                 );
-                                return alert.actionUrl ? (
-                                    <Link key={alert.id} href={alert.actionUrl} className={rowClass}>
+                                const safeActionUrl = isSafeInternalActionUrl(alert.actionUrl) ? alert.actionUrl : null;
+                                return safeActionUrl ? (
+                                    <Link key={alert.id} href={safeActionUrl} className={rowClass}>
                                         {inner}
                                     </Link>
                                 ) : (

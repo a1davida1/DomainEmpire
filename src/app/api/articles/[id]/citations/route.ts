@@ -80,11 +80,11 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
         }
 
         const updates: Record<string, unknown> = {};
-        if (body.claimText !== undefined) updates.claimText = body.claimText;
-        if (body.sourceUrl !== undefined) updates.sourceUrl = body.sourceUrl;
-        if (body.sourceTitle !== undefined) updates.sourceTitle = body.sourceTitle;
-        if (body.quotedSnippet !== undefined) updates.quotedSnippet = body.quotedSnippet;
-        if (body.notes !== undefined) updates.notes = body.notes;
+        if (typeof body.claimText === 'string') updates.claimText = body.claimText;
+        if (typeof body.sourceUrl === 'string') updates.sourceUrl = body.sourceUrl;
+        if (typeof body.sourceTitle === 'string') updates.sourceTitle = body.sourceTitle;
+        if (typeof body.quotedSnippet === 'string') updates.quotedSnippet = body.quotedSnippet;
+        if (typeof body.notes === 'string') updates.notes = body.notes;
 
         await updateCitation(citationId, updates);
         return NextResponse.json({ success: true });

@@ -26,6 +26,14 @@ interface CreateNotificationOptions {
     metadata?: Record<string, unknown>;
 }
 
+export function sanitizeNotificationActionUrl(actionUrl?: string): string | null {
+    if (typeof actionUrl !== 'string') return null;
+    const trimmed = actionUrl.trim();
+    if (!trimmed.startsWith('/')) return null;
+    if (trimmed.startsWith('//')) return null;
+    return trimmed;
+}
+
 /**
  * Create a new notification.
  */
@@ -39,6 +47,7 @@ export async function createNotification(options: CreateNotificationOptions): Pr
         sendEmail = false,
         metadata = {},
     } = options;
+    const safeActionUrl = sanitizeNotificationActionUrl(actionUrl);
 
     // Deduplicate: skip if same type+title+domainId exists unread in last 24h
     const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -65,7 +74,7 @@ export async function createNotification(options: CreateNotificationOptions): Pr
         title,
         message,
         domainId: domainId ?? null,
-        actionUrl,
+        actionUrl: safeActionUrl,
         emailSent: false,
         metadata: {
             ...metadata,

@@ -13,6 +13,14 @@ import {
     sanitizeArticleHtml,
 } from '../templates/shared';
 
+// Google Fonts URLs for each theme
+const THEME_FONT_URLS: Record<string, string> = {
+    clean: 'https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap',
+    editorial: 'https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,400;0,700;0,900;1,400&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap',
+    bold: 'https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&family=Inter:wght@400;500;600;700&display=swap',
+    minimal: '', // uses system fonts
+};
+
 // ============================================================
 // Render Context — passed to every block renderer
 // ============================================================
@@ -164,6 +172,13 @@ export function assemblePageFromBlocks(
         ? `${escapeHtml(title)} | ${escapeHtml(ctx.siteTitle)}`
         : escapeHtml(title);
 
+    const fontUrl = THEME_FONT_URLS[ctx.theme] ?? THEME_FONT_URLS.clean;
+    const fontLinks = fontUrl
+        ? `<link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="${escapeAttr(fontUrl)}">`
+        : '';
+
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -172,6 +187,7 @@ export function assemblePageFromBlocks(
   <meta name="description" content="${escapeAttr(description)}">
   <meta name="robots" content="index, follow">
   <title>${fullTitle}</title>
+  ${fontLinks}
   <link rel="stylesheet" href="${escapeAttr(cssHref)}">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   ${ctx.headScripts}

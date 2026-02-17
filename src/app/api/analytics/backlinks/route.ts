@@ -48,8 +48,13 @@ export async function POST(request: NextRequest) {
 
     let domainId: string | undefined;
     try {
-        const body = await request.json();
-        domainId = body?.domainId;
+        let body: Record<string, unknown>;
+        try {
+            body = await request.json();
+        } catch {
+            return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+        }
+        domainId = body?.domainId as string | undefined;
         if (!domainId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(domainId)) {
             return NextResponse.json({ error: 'Valid domainId is required' }, { status: 400 });
         }

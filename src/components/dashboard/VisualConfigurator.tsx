@@ -114,6 +114,141 @@ const VARIANT_OPTIONS: Record<string, string[]> = {
     CTABanner: ['bar', 'card', 'banner'],
 };
 
+// ============================================================
+// Default Block Content — starter content so new blocks render immediately
+// ============================================================
+
+const DEFAULT_BLOCK_CONTENT: Record<string, { config?: Record<string, unknown>; content?: Record<string, unknown> }> = {
+    Header: {
+        config: { sticky: true },
+        content: { siteName: 'My Site', navLinks: [{ label: 'Home', href: '/' }, { label: 'About', href: '/about' }, { label: 'Contact', href: '/contact' }] },
+    },
+    Footer: {
+        config: { showDisclaimer: true },
+        content: { siteName: 'My Site', copyrightYear: new Date().getFullYear(), disclaimerText: 'All content is for informational purposes only.', columns: [{ title: 'Company', links: [{ label: 'About', href: '/about' }, { label: 'Contact', href: '/contact' }] }, { title: 'Legal', links: [{ label: 'Privacy', href: '/privacy' }, { label: 'Terms', href: '/terms' }] }] },
+    },
+    Sidebar: {
+        config: { position: 'right', sticky: true },
+        content: { sections: [{ title: 'Quick Links', html: '<ul><li><a href="/">Home</a></li><li><a href="/about">About</a></li></ul>' }] },
+    },
+    Hero: {
+        content: { heading: 'Welcome to Our Site', subheading: 'Expert guides and resources to help you make informed decisions.', badge: 'Updated 2026', ctaText: 'Get Started', ctaUrl: '#' },
+    },
+    ArticleBody: {
+        content: { title: 'Article Title', markdown: '<p>Start writing your article content here. This block supports full HTML including headings, paragraphs, lists, images, and more.</p><h2>Getting Started</h2><p>Replace this placeholder with your actual content.</p>' },
+    },
+    FAQ: {
+        config: { openFirst: true, emitJsonLd: true },
+        content: { items: [{ question: 'What is this about?', answer: 'This is a frequently asked question section. Replace these with your actual FAQs.' }, { question: 'How does it work?', answer: 'Users can click on any question to expand the answer. The first item can be set to open by default.' }, { question: 'Can I add more questions?', answer: 'Yes! Click the + Add button in the FAQ items editor to add as many questions as you need.' }] },
+    },
+    StepByStep: {
+        config: { showProgress: true, interactive: true },
+        content: { steps: [{ heading: 'Step 1: Research', body: 'Start by gathering information about your topic.' }, { heading: 'Step 2: Plan', body: 'Create an outline of what you want to accomplish.' }, { heading: 'Step 3: Execute', body: 'Follow your plan and track your progress.' }] },
+    },
+    Checklist: {
+        config: { showProgress: true, interactive: true },
+        content: { steps: [{ heading: 'Review requirements', body: 'Make sure you understand all the prerequisites.' }, { heading: 'Gather materials', body: 'Collect everything you need before starting.' }, { heading: 'Complete the process', body: 'Follow each step carefully to completion.' }] },
+    },
+    AuthorBio: {
+        content: { name: 'Jane Smith', title: 'Senior Editor', bio: 'Jane has over 10 years of experience writing about this topic. She holds a degree in journalism and is passionate about helping readers make informed decisions.' },
+    },
+    ComparisonTable: {
+        config: { sortable: true },
+        content: { columns: ['Feature', 'Option A', 'Option B', 'Option C'], rows: [['Price', '$29/mo', '$49/mo', '$99/mo'], ['Users', '1', '5', 'Unlimited'], ['Storage', '10 GB', '50 GB', '500 GB'], ['Support', 'Email', 'Priority', '24/7 Phone']] },
+    },
+    VsCard: {
+        content: { leftTitle: 'Option A', rightTitle: 'Option B', leftPoints: ['Lower cost', 'Easy setup', 'Basic features'], rightPoints: ['More features', 'Better support', 'Higher performance'], verdict: 'Option B is better for most users who need advanced features.' },
+    },
+    RankingList: {
+        content: { title: 'Top Picks', items: [{ rank: 1, name: 'Best Overall', description: 'The top choice for most people.', score: '9.5/10' }, { rank: 2, name: 'Runner Up', description: 'A close second with great value.', score: '9.0/10' }, { rank: 3, name: 'Budget Pick', description: 'Best option if cost is your priority.', score: '8.5/10' }] },
+    },
+    ProsConsCard: {
+        content: { title: 'Product Review', pros: ['Easy to use', 'Great customer support', 'Affordable pricing'], cons: ['Limited customization', 'No mobile app yet'] },
+    },
+    LeadForm: {
+        config: { requireConsent: true },
+        content: { headline: 'Get Your Free Quote', description: 'Fill out the form below and we\'ll get back to you within 24 hours.', fields: [{ label: 'Full Name', type: 'text', required: true }, { label: 'Email', type: 'email', required: true }, { label: 'Phone', type: 'tel', required: false }], submitText: 'Get My Quote', consentText: 'I agree to the privacy policy and terms of service.' },
+    },
+    CTABanner: {
+        content: { text: 'Ready to get started? Join thousands of satisfied customers today.', buttonText: 'Start Free Trial', buttonUrl: '#', secondaryText: 'No credit card required' },
+    },
+    PricingTable: {
+        content: { plans: [{ name: 'Starter', price: '$9/mo', features: ['1 User', '5 GB Storage', 'Email Support'], ctaText: 'Get Started', ctaUrl: '#' }, { name: 'Pro', price: '$29/mo', features: ['5 Users', '50 GB Storage', 'Priority Support', 'API Access'], ctaText: 'Go Pro', ctaUrl: '#', featured: true }, { name: 'Enterprise', price: '$99/mo', features: ['Unlimited Users', '500 GB Storage', '24/7 Phone Support', 'Custom Integrations'], ctaText: 'Contact Sales', ctaUrl: '#' }] },
+    },
+    ScrollCTA: {
+        config: { triggerPercent: 40, variant: 'bar', dismissible: true },
+        content: { text: 'Looking for the best deal?', buttonText: 'Compare Prices', buttonUrl: '#' },
+    },
+    QuoteCalculator: {
+        content: { title: 'Cost Calculator', fields: [{ label: 'Square Footage', type: 'number', min: 100, max: 10000 }, { label: 'Quality Level', type: 'select', options: ['Basic', 'Standard', 'Premium'] }], methodology: 'Estimates based on current market rates and regional averages.' },
+    },
+    CostBreakdown: {
+        content: { title: 'Cost Breakdown', ranges: [{ label: 'Basic Package', low: 500, average: 750, high: 1200 }, { label: 'Standard Package', low: 1000, average: 1500, high: 2500 }, { label: 'Premium Package', low: 2000, average: 3500, high: 6000 }] },
+    },
+    StatGrid: {
+        content: { stats: [{ value: '10K+', label: 'Happy Customers' }, { value: '99.9%', label: 'Uptime' }, { value: '24/7', label: 'Support' }, { value: '50+', label: 'Countries' }] },
+    },
+    DataTable: {
+        content: { columns: ['Name', 'Category', 'Rating', 'Price'], rows: [['Product A', 'Electronics', '4.8', '$299'], ['Product B', 'Software', '4.5', '$49/mo'], ['Product C', 'Services', '4.9', 'Custom']] },
+    },
+    TestimonialGrid: {
+        content: { testimonials: [{ name: 'John D.', role: 'Small Business Owner', quote: 'This completely changed how we operate. Highly recommended!', rating: 5 }, { name: 'Sarah M.', role: 'Marketing Director', quote: 'The best tool we\'ve used. Easy to set up and the results speak for themselves.', rating: 5 }, { name: 'Mike R.', role: 'Freelancer', quote: 'Great value for money. I use it every day.', rating: 4 }] },
+    },
+    TrustBadges: {
+        content: { badges: [{ label: 'Verified Reviews', description: '4.8/5 from 2,000+ reviews' }, { label: 'Money-Back Guarantee', description: '30-day full refund' }, { label: 'Secure & Private', description: '256-bit SSL encryption' }, { label: 'Expert Support', description: 'Dedicated help team' }] },
+    },
+    CitationBlock: {
+        content: { sources: [{ title: 'Industry Report 2026', url: 'https://example.com', author: 'Research Institute', date: '2026' }, { title: 'Official Guidelines', url: 'https://example.com', author: 'Regulatory Body', date: '2025' }] },
+    },
+    LastUpdated: {
+        content: { date: new Date().toISOString().split('T')[0], reviewedBy: 'Editorial Team' },
+    },
+    MedicalDisclaimer: {
+        config: { showDoctorCta: true },
+        content: { disclaimerText: 'This content is for informational purposes only and is not a substitute for professional medical advice, diagnosis, or treatment.' },
+    },
+    PdfDownload: {
+        content: { title: 'Download Our Free Guide', description: 'Get the complete guide as a PDF.', fileName: 'guide.pdf', fileUrl: '#' },
+    },
+    EmbedWidget: {
+        content: { title: 'External Resource', embedUrl: '', embedType: 'iframe', height: '400px' },
+    },
+    Wizard: {
+        config: { mode: 'wizard' },
+        content: { title: 'Find Your Perfect Match', steps: [{ title: 'Your Needs', description: 'Tell us what you\'re looking for', fields: [{ label: 'Budget', type: 'select', options: ['Under $500', '$500-$1000', '$1000+'] }] }, { title: 'Preferences', description: 'Customize your results', fields: [{ label: 'Priority', type: 'select', options: ['Quality', 'Price', 'Speed'] }] }] },
+    },
+    GeoContent: {
+        content: { regions: [{ id: 'us', label: 'United States', content: 'Content tailored for US visitors.' }, { id: 'uk', label: 'United Kingdom', content: 'Content tailored for UK visitors.' }], fallback: 'General content for all visitors.' },
+    },
+    InteractiveMap: {
+        content: { title: 'Service Areas', regions: [{ id: 'northeast', label: 'Northeast', states: ['NY', 'NJ', 'CT'] }] },
+    },
+};
+
+// ============================================================
+// Section Templates — multi-block presets for common page sections
+// ============================================================
+
+interface SectionTemplate {
+    name: string;
+    description: string;
+    icon: string;
+    blocks: Array<{ type: string; variant?: string }>;
+}
+
+const SECTION_TEMPLATES: SectionTemplate[] = [
+    { name: 'FAQ Section', description: 'Expandable Q&A with schema markup', icon: '\u2753', blocks: [{ type: 'FAQ' }] },
+    { name: 'Cost Calculator', description: 'Interactive calculator with methodology', icon: '\u{1F4B0}', blocks: [{ type: 'QuoteCalculator' }, { type: 'CostBreakdown' }] },
+    { name: 'Lead Generation', description: 'CTA banner + lead capture form', icon: '\u{1F3AF}', blocks: [{ type: 'CTABanner', variant: 'banner' }, { type: 'LeadForm' }] },
+    { name: 'Trust & Social Proof', description: 'Testimonials + trust badges + stats', icon: '\u{2B50}', blocks: [{ type: 'StatGrid' }, { type: 'TestimonialGrid' }, { type: 'TrustBadges' }] },
+    { name: 'Product Comparison', description: 'Comparison table with verdict', icon: '\u{2696}\u{FE0F}', blocks: [{ type: 'ComparisonTable' }, { type: 'ProsConsCard' }] },
+    { name: 'Pricing Page', description: 'Pricing tiers with CTA', icon: '\u{1F4B3}', blocks: [{ type: 'Hero', variant: 'centered' }, { type: 'PricingTable' }, { type: 'FAQ' }] },
+    { name: 'How-To Guide', description: 'Step-by-step with checklist', icon: '\u{1F4CB}', blocks: [{ type: 'StepByStep' }, { type: 'Checklist' }] },
+    { name: 'Medical/Health', description: 'Disclaimer + author bio + citations', icon: '\u{1FA7A}', blocks: [{ type: 'MedicalDisclaimer' }, { type: 'AuthorBio' }, { type: 'CitationBlock' }] },
+    { name: 'Interactive Decision', description: 'Multi-step wizard flow', icon: '\u{1F9ED}', blocks: [{ type: 'Wizard' }] },
+    { name: 'Article Footer', description: 'Author + last updated + sources', icon: '\u{1F4CC}', blocks: [{ type: 'AuthorBio' }, { type: 'LastUpdated' }, { type: 'CitationBlock' }] },
+];
+
 type ViewportSize = 'desktop' | 'tablet' | 'mobile';
 
 const VIEWPORT_WIDTHS: Record<ViewportSize, string> = {
@@ -715,13 +850,14 @@ export function VisualConfigurator({
         setPaletteSearch('');
     }
 
-    function addBlock(type: string) {
+    function addBlock(type: string, variantOverride?: string) {
+        const defaults = DEFAULT_BLOCK_CONTENT[type];
         const newBlock: Block = {
             id: generateBlockId(),
             type,
-            variant: VARIANT_OPTIONS[type]?.[0],
-            config: {},
-            content: {},
+            variant: variantOverride || VARIANT_OPTIONS[type]?.[0],
+            config: defaults?.config ? { ...defaults.config } : {},
+            content: defaults?.content ? JSON.parse(JSON.stringify(defaults.content)) : {},
         };
         const idx = insertIndex ?? blocks.length;
         const updated = [...blocks];
@@ -730,6 +866,26 @@ export function VisualConfigurator({
         setShowPalette(false);
         setInsertIndex(null);
         setSelectedBlockId(newBlock.id);
+    }
+
+    function addSectionTemplate(template: SectionTemplate) {
+        const idx = insertIndex ?? blocks.length;
+        const newBlocks = template.blocks.map(b => {
+            const defaults = DEFAULT_BLOCK_CONTENT[b.type];
+            return {
+                id: generateBlockId(),
+                type: b.type,
+                variant: b.variant || VARIANT_OPTIONS[b.type]?.[0],
+                config: defaults?.config ? { ...defaults.config } : {},
+                content: defaults?.content ? JSON.parse(JSON.stringify(defaults.content)) : {},
+            };
+        });
+        const updated = [...blocks];
+        updated.splice(idx, 0, ...newBlocks);
+        updateBlocks(updated);
+        setShowPalette(false);
+        setInsertIndex(null);
+        if (newBlocks.length > 0) setSelectedBlockId(newBlocks[0].id);
     }
 
     function updateBlockField(blockId: string, field: 'variant' | 'config' | 'content', value: unknown) {
@@ -945,14 +1101,36 @@ export function VisualConfigurator({
                             onDragOver={(e) => handleDragOver(e, blocks.length)}
                             onDrop={() => handleDrop(blocks.length)}
                         />
-                        <Button
-                            size="sm"
-                            variant="outline"
-                            className="w-full mt-1 h-7 text-xs"
-                            onClick={() => openPalette(blocks.length)}
-                        >
-                            + Add Block
-                        </Button>
+                        {/* Quick-add popular components */}
+                        <div className="mt-2 space-y-1.5">
+                            <div className="flex flex-wrap gap-1">
+                                {[
+                                    { type: 'FAQ', icon: '\u2753' },
+                                    { type: 'CTABanner', icon: '\u{1F3AF}' },
+                                    { type: 'LeadForm', icon: '\u{1F4E7}' },
+                                    { type: 'StatGrid', icon: '\u{1F4CA}' },
+                                    { type: 'PricingTable', icon: '\u{1F4B3}' },
+                                    { type: 'ComparisonTable', icon: '\u{2696}\u{FE0F}' },
+                                ].map(({ type, icon }) => (
+                                    <button
+                                        key={type}
+                                        className="flex items-center gap-1 rounded-md border bg-muted/30 px-2 py-1 text-[10px] font-medium hover:bg-muted hover:border-foreground/20 transition-colors"
+                                        onClick={() => { setInsertIndex(blocks.length); addBlock(type); }}
+                                        title={`Add ${type}`}
+                                    >
+                                        <span>{icon}</span> {type}
+                                    </button>
+                                ))}
+                            </div>
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                className="w-full h-8 text-xs font-medium"
+                                onClick={() => openPalette(blocks.length)}
+                            >
+                                + Browse All Components
+                            </Button>
+                        </div>
                     </div>
                 </div>
 
@@ -1307,27 +1485,74 @@ export function VisualConfigurator({
 
             {/* ====== Block Palette Modal ====== */}
             {showPalette && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-                    <div className="max-h-[80vh] w-full max-w-xl overflow-auto rounded-xl border bg-background p-5 shadow-xl">
-                        <div className="mb-3 flex items-center justify-between">
-                            <h3 className="text-base font-semibold">Add Block</h3>
-                            <Button size="sm" variant="ghost" onClick={() => { setShowPalette(false); setInsertIndex(null); }}>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={(e) => { if (e.target === e.currentTarget) { setShowPalette(false); setInsertIndex(null); } }}>
+                    <div className="max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-xl border bg-background shadow-2xl flex flex-col">
+                        {/* Modal header */}
+                        <div className="flex items-center justify-between border-b px-5 py-3">
+                            <div>
+                                <h3 className="text-base font-semibold">Add Component</h3>
+                                <p className="text-xs text-muted-foreground">Choose a section template or individual block</p>
+                            </div>
+                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => { setShowPalette(false); setInsertIndex(null); }}>
                                 {'\u2715'}
                             </Button>
                         </div>
 
                         {/* Search */}
-                        <input
-                            type="text"
-                            className="mb-3 w-full rounded-md border bg-background px-3 py-1.5 text-sm"
-                            placeholder="Search blocks..."
-                            value={paletteSearch}
-                            onChange={(e) => setPaletteSearch(e.target.value)}
-                            autoFocus
-                            title="Search blocks"
-                        />
+                        <div className="border-b px-5 py-2">
+                            <input
+                                type="text"
+                                className="w-full rounded-md border bg-background px-3 py-1.5 text-sm"
+                                placeholder="Search components... (e.g. FAQ, calculator, pricing)"
+                                value={paletteSearch}
+                                onChange={(e) => setPaletteSearch(e.target.value)}
+                                autoFocus
+                                title="Search components"
+                            />
+                        </div>
 
-                        <div className="space-y-4">
+                        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
+                            {/* === Section Templates === */}
+                            {(() => {
+                                const filteredTemplates = SECTION_TEMPLATES.filter(t =>
+                                    !paletteSearch ||
+                                    t.name.toLowerCase().includes(paletteSearch.toLowerCase()) ||
+                                    t.description.toLowerCase().includes(paletteSearch.toLowerCase()) ||
+                                    t.blocks.some(b => b.type.toLowerCase().includes(paletteSearch.toLowerCase()))
+                                );
+                                if (filteredTemplates.length === 0) return null;
+                                return (
+                                    <div>
+                                        <h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                                            <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-blue-100 dark:bg-blue-950 text-blue-600 text-[10px]">{'\u26A1'}</span>
+                                            Quick Add Sections
+                                        </h4>
+                                        <p className="mb-3 text-[11px] text-muted-foreground">Pre-built multi-block sections with starter content. One click to add.</p>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            {filteredTemplates.map(template => (
+                                                <button
+                                                    key={template.name}
+                                                    className="group flex items-start gap-3 rounded-lg border-2 border-transparent bg-gradient-to-br from-muted/40 to-muted/80 px-3 py-2.5 text-left transition-all hover:border-blue-400 hover:shadow-md"
+                                                    onClick={() => addSectionTemplate(template)}
+                                                >
+                                                    <span className="text-lg mt-0.5 flex-shrink-0">{template.icon}</span>
+                                                    <div className="min-w-0">
+                                                        <span className="text-sm font-semibold block">{template.name}</span>
+                                                        <span className="text-[10px] text-muted-foreground leading-tight block">{template.description}</span>
+                                                        <span className="mt-1 flex flex-wrap gap-1">
+                                                            {template.blocks.map((b, i) => (
+                                                                <Badge key={i} variant="secondary" className="text-[9px] h-4 px-1.5">{b.type}</Badge>
+                                                            ))}
+                                                        </span>
+                                                    </div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                );
+                            })()}
+
+                            {/* === Individual Blocks by Category === */}
                             {Object.entries(BLOCK_CATEGORIES).map(([category, types]) => {
                                 const filtered = types.filter(t =>
                                     !paletteSearch || t.toLowerCase().includes(paletteSearch.toLowerCase()) ||
@@ -1336,22 +1561,38 @@ export function VisualConfigurator({
                                 if (filtered.length === 0) return null;
                                 return (
                                     <div key={category}>
-                                        <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                        <h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
                                             {CATEGORY_ICONS[category] || ''} {category}
                                         </h4>
                                         <div className="grid grid-cols-2 gap-1.5">
-                                            {filtered.map(type => (
-                                                <button
-                                                    key={type}
-                                                    className="flex flex-col items-start rounded-lg border bg-muted/30 px-3 py-2 text-left transition-colors hover:bg-muted hover:border-foreground/20"
-                                                    onClick={() => addBlock(type)}
-                                                >
-                                                    <span className="text-sm font-medium">{type}</span>
-                                                    <span className="text-[10px] text-muted-foreground leading-tight">
-                                                        {BLOCK_DESCRIPTIONS[type] || ''}
-                                                    </span>
-                                                </button>
-                                            ))}
+                                            {filtered.map(type => {
+                                                const hasDefaults = !!DEFAULT_BLOCK_CONTENT[type];
+                                                const variants = VARIANT_OPTIONS[type];
+                                                return (
+                                                    <button
+                                                        key={type}
+                                                        className="group flex flex-col items-start rounded-lg border bg-muted/30 px-3 py-2.5 text-left transition-all hover:bg-muted hover:border-foreground/20 hover:shadow-sm"
+                                                        onClick={() => addBlock(type)}
+                                                    >
+                                                        <div className="flex items-center gap-1.5 w-full">
+                                                            <span className="text-sm font-medium">{type}</span>
+                                                            {hasDefaults && (
+                                                                <span className="ml-auto text-[9px] font-medium text-green-600 bg-green-100 dark:bg-green-950 px-1.5 py-0.5 rounded-full">ready</span>
+                                                            )}
+                                                        </div>
+                                                        <span className="text-[10px] text-muted-foreground leading-tight mt-0.5">
+                                                            {BLOCK_DESCRIPTIONS[type] || ''}
+                                                        </span>
+                                                        {variants && (
+                                                            <span className="mt-1 flex flex-wrap gap-0.5">
+                                                                {variants.map(v => (
+                                                                    <span key={v} className="text-[9px] text-muted-foreground bg-muted rounded px-1">{v}</span>
+                                                                ))}
+                                                            </span>
+                                                        )}
+                                                    </button>
+                                                );
+                                            })}
                                         </div>
                                     </div>
                                 );

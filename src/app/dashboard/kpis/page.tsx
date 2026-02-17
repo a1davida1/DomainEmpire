@@ -115,8 +115,7 @@ export default function KpiDashboardPage() {
                 if (!revenueRes.ok) throw new Error(`Revenue data failed: ${revenueRes.statusText}`);
                 if (!costsRes.ok) throw new Error(`Cost data failed: ${costsRes.statusText}`);
 
-                if (controller.signal.aborted) return;
-                setCompliance(await complianceRes.json());
+                const complianceData: ComplianceMetrics = await complianceRes.json();
 
                 // Revenue API returns nested shape: { summary, bySource, topDomains }
                 const revRaw: RevenueApiResponse = await revenueRes.json();
@@ -125,26 +124,36 @@ export default function KpiDashboardPage() {
                 const leadRev = revRaw.bySource?.find(s => s.source === 'leadgen')?.totalRevenue ?? 0;
                 const domainCount = revRaw.topDomains?.length ?? 0;
                 const totalRev = revRaw.summary?.totalRevenue ?? 0;
-                setRevenue({
+                const nextRevenue: RevenueData = {
                     totalRevenue: totalRev,
                     adRevenue: adRev,
                     affiliateRevenue: affRev,
                     leadGenRevenue: leadRev,
                     domainCount,
                     avgRevenuePerDomain: domainCount > 0 ? totalRev / domainCount : 0,
-                });
+                };
 
                 // Costs API returns nested shape: { summary, costsByStage, queueCosts, articleCosts }
                 const costRaw: CostsApiResponse = await costsRes.json();
-                const aiApiCosts = costRaw.summary?.totalCost ?? 0;
-                const deployStage = costRaw.costsByStage?.find(s => s.stage === 'deploy');
-                const hostingCosts = deployStage?.totalCost ?? 0;
-                setCosts({
-                    totalCosts: aiApiCosts,
+                const hostingCosts = costRaw.costsByStage
+                    ?.filter((stage) => stage.stage === 'deploy')
+                    .reduce((sum, stage) => sum + (stage.totalCost || 0), 0) ?? 0;
+                const aiApiCosts = costRaw.costsByStage
+                    ?.filter((stage) => stage.stage !== 'deploy')
+                    .reduce((sum, stage) => sum + (stage.totalCost || 0), 0) ?? 0;
+                const domainCosts = 0; // domain registration costs not tracked in this API
+                const nextCosts: CostData = {
+                    totalCosts: aiApiCosts + hostingCosts + domainCosts,
                     aiApiCosts,
-                    domainCosts: 0, // domain registration costs not tracked in this API
+                    domainCosts,
                     hostingCosts,
-                });
+                };
+
+                if (controller.signal.aborted) return;
+
+                setCompliance(complianceData);
+                setRevenue(nextRevenue);
+                setCosts(nextCosts);
             } catch (err: unknown) {
                 if (err instanceof DOMException && err.name === 'AbortError') return;
                 console.error('Failed to load KPI data:', err);

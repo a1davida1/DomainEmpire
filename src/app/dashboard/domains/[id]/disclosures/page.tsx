@@ -50,19 +50,26 @@ export default function DisclosuresPage() {
     const doSave = useCallback(async (cfg: Config) => {
         setSaving(true);
         setSaved(false);
-        const res = await fetch(`/api/domains/${domainId}/disclosures`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(cfg),
-        });
-        setSaving(false);
-        if (!res.ok) {
-            console.error('Disclosures save failed:', res.status);
-            return;
+        try {
+            const res = await fetch(`/api/domains/${domainId}/disclosures`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(cfg),
+            });
+
+            if (!res.ok) {
+                console.error('Disclosures save failed:', res.status);
+                return;
+            }
+
+            setSaved(true);
+            setDirty(false);
+            setTimeout(() => setSaved(false), 3000);
+        } catch (error) {
+            console.error('Disclosures save failed:', error);
+        } finally {
+            setSaving(false);
         }
-        setSaved(true);
-        setDirty(false);
-        setTimeout(() => setSaved(false), 3000);
     }, [domainId]);
 
     // Auto-save after 2s of inactivity

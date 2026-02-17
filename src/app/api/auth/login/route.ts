@@ -32,8 +32,22 @@ export async function POST(request: NextRequest) {
         } catch {
             return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
         }
-        const email = typeof body.email === 'string' ? body.email : '';
-        const password = typeof body.password === 'string' ? body.password : '';
+        if (typeof body.email !== 'string') {
+            return NextResponse.json(
+                { error: 'Email must be a string' },
+                { status: 400 }
+            );
+        }
+
+        if (typeof body.password !== 'string') {
+            return NextResponse.json(
+                { error: 'Password must be a string' },
+                { status: 400 }
+            );
+        }
+
+        const email = body.email;
+        const password = body.password;
 
         if (!password) {
             return NextResponse.json(

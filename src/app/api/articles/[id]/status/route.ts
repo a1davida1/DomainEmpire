@@ -199,8 +199,6 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
             updates.publishedBy = user.id;
         }
 
-        await db.update(articles).set(updates).where(eq(articles.id, params.id));
-
         // Map status transition to event type
         const eventTypeMap: Record<string, string> = {
             review: 'submitted_for_review',

@@ -160,7 +160,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Unable to resolve entityId' }, { status: 400 });
         }
 
-        const [task] = await db.insert(reviewTasks).values({
+        const taskRows = await db.insert(reviewTasks).values({
             taskType: payload.taskType,
             entityId,
             domainId: payload.domainId ?? null,
@@ -177,6 +177,11 @@ export async function POST(request: NextRequest) {
             reviewNotes: payload.reviewNotes ?? null,
             createdBy: user.id,
         }).returning();
+        const task = taskRows[0];
+
+        if (!task) {
+            return NextResponse.json({ error: 'Failed to create review task' }, { status: 500 });
+        }
 
         return NextResponse.json({ success: true, task }, { status: 201 });
     } catch (error) {

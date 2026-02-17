@@ -44,8 +44,13 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         return NextResponse.json({ success: true, eventType: 'expert_signed', idempotent: true });
     }
 
-    const body = await request.json().catch(() => ({}));
-    const attestation = body.attestation || 'Content reviewed and attested as factually accurate';
+    let body: Record<string, unknown>;
+    try {
+        body = await request.json();
+    } catch {
+        body = {};
+    }
+    const attestation = (typeof body.attestation === 'string' ? body.attestation : '') || 'Content reviewed and attested as factually accurate';
 
     try {
         await db.transaction(async (tx) => {

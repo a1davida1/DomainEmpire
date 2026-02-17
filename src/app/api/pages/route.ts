@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
 
         if (existing.length > 0) {
             return NextResponse.json(
-                { error: `Page definition already exists for route "${route}" on this domain`, existingId: existing[0].id },
+                { error: `Page definition already exists for route "${routeValue}" on this domain`, existingId: existing[0].id },
                 { status: 409 },
             );
         }

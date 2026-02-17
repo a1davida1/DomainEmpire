@@ -83,6 +83,7 @@ export default function CompliancePage() {
                 const trendData = await trendRes.json();
 
                 if (controller.signal.aborted) return;
+
                 setMetrics(metricsData);
                 setTrend(trendData);
             } catch (err: unknown) {

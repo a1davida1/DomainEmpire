@@ -180,8 +180,35 @@ export const skins: Record<string, SkinTokens> = {
 };
 
 /**
- * Generate CSS custom properties from a skin's color tokens.
+ * Lighten a hex color by mixing with white.
  */
+function lighten(hex: string, amount: number): string {
+    const h = hex.replace('#', '');
+    if (h.length !== 6) return hex;
+    const r = parseInt(h.slice(0, 2), 16);
+    const g = parseInt(h.slice(2, 4), 16);
+    const b = parseInt(h.slice(4, 6), 16);
+    const lr = Math.round(r + (255 - r) * amount);
+    const lg = Math.round(g + (255 - g) * amount);
+    const lb = Math.round(b + (255 - b) * amount);
+    return `#${lr.toString(16).padStart(2, '0')}${lg.toString(16).padStart(2, '0')}${lb.toString(16).padStart(2, '0')}`;
+}
+
+/**
+ * Darken a hex color by mixing with black.
+ */
+function darken(hex: string, amount: number): string {
+    const h = hex.replace('#', '');
+    if (h.length !== 6) return hex;
+    const r = parseInt(h.slice(0, 2), 16);
+    const g = parseInt(h.slice(2, 4), 16);
+    const b = parseInt(h.slice(4, 6), 16);
+    const dr = Math.round(r * (1 - amount));
+    const dg = Math.round(g * (1 - amount));
+    const db = Math.round(b * (1 - amount));
+    return `#${dr.toString(16).padStart(2, '0')}${dg.toString(16).padStart(2, '0')}${db.toString(16).padStart(2, '0')}`;
+}
+
 export function generateSkinCSS(skinName: string): string {
     const skin = skins[skinName] ?? skins.slate;
     return `:root{
@@ -193,11 +220,18 @@ export function generateSkinCSS(skinName: string): string {
   --color-text:${skin.text};
   --color-text-muted:${skin.textMuted};
   --color-accent:${skin.accent};
+  --color-accent-hover:${darken(skin.accent, 0.15)};
   --color-border:${skin.border};
   --color-border-strong:${skin.borderStrong};
   --color-success:${skin.success};
+  --color-success-light:${lighten(skin.success, 0.88)};
+  --color-success-hover:${darken(skin.success, 0.15)};
   --color-warning:${skin.warning};
+  --color-warning-light:${lighten(skin.warning, 0.88)};
+  --color-warning-hover:${darken(skin.warning, 0.15)};
   --color-error:${skin.error};
+  --color-error-light:${lighten(skin.error, 0.88)};
+  --color-error-hover:${darken(skin.error, 0.15)};
   --color-hero-bg:${skin.heroBg};
   --color-hero-text:${skin.heroText};
   --color-header-border:${skin.headerBorder};

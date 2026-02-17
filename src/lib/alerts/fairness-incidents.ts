@@ -6,6 +6,7 @@ import {
     type FairnessPlaybookBinding,
     type FairnessSignalCode,
 } from '@/lib/growth/fairness-playbooks';
+import { sanitizeNotificationActionUrl } from '@/lib/notifications';
 
 type NotificationSeverity = 'info' | 'warning' | 'critical';
 
@@ -164,6 +165,7 @@ async function upsertIncidentTicket(input: {
 }> {
     const ticketSeverity = toNotificationSeverity(input.playbook.severity);
     const nowIso = input.now.toISOString();
+    const safeRunbookUrl = sanitizeNotificationActionUrl(input.playbook.runbookUrl);
 
     return db.transaction(async (tx) => {
         const loadExisting = async () => {
@@ -188,7 +190,7 @@ async function upsertIncidentTicket(input: {
                     severity: ticketSeverity,
                     title: `Incident ${input.playbook.playbookId}: ${input.playbook.title}`,
                     message: input.summary,
-                    actionUrl: input.playbook.runbookUrl,
+                    actionUrl: safeRunbookUrl,
                     isRead: false,
                     emailSent: false,
                     fingerprint: input.incidentKey,
@@ -253,7 +255,7 @@ async function upsertIncidentTicket(input: {
                 severity: nextSeverity,
                 title: `Incident ${input.playbook.playbookId}: ${input.playbook.title}`,
                 message: input.summary,
-                actionUrl: input.playbook.runbookUrl,
+                actionUrl: safeRunbookUrl,
                 isRead: false,
                 metadata: {
                     ...existingMetadata,

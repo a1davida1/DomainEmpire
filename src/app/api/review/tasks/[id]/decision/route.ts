@@ -24,7 +24,12 @@ export async function POST(
     const { id } = await params;
 
     try {
-        const body = await request.json();
+        let body: unknown;
+        try {
+            body = await request.json();
+        } catch {
+            return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+        }
         const parsed = decisionSchema.safeParse(body);
         if (!parsed.success) {
             return NextResponse.json(

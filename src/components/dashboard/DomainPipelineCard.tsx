@@ -216,11 +216,11 @@ export function DomainPipelineCard({ state }: { state: PipelineState }) {
 
                 {/* Action Buttons */}
                 <div className="flex flex-wrap gap-2">
-                    <Link href={`/dashboard/domains/${state.domainId}/pages`}>
-                        <Button size="sm" variant="outline">
+                    <Button asChild size="sm" variant="outline">
+                        <Link href={`/dashboard/domains/${state.domainId}/pages`}>
                             Page Configurator
-                        </Button>
-                    </Link>
+                        </Link>
+                    </Button>
                     {!state.isClassified && (
                         <Tooltip>
                             <TooltipTrigger asChild>

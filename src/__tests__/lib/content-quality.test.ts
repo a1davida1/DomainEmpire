@@ -9,9 +9,9 @@ describe('content-quality helpers', () => {
         expect(plain).toContain('This is bold text');
     });
 
-    it('flags very short content as low quality', () => {
+    it('keeps overall good status for very short content while word count score is low', () => {
         const quality = analyzeContentQuality('Too short.');
-        expect(quality.metrics.wordCount).toBeLessThan(900);
+        expect(quality.metrics.wordCount).toBe(2);
         expect(quality.status).toBe('good');
         expect(quality.metrics.wordCountScore).toBe(30);
     });

@@ -28,12 +28,17 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
             return NextResponse.json({ error: 'Dataset not found' }, { status: 404 });
         }
 
-        const body = await request.json().catch(() => null);
+        let body: Record<string, unknown> | null;
+        try {
+            body = await request.json();
+        } catch {
+            return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+        }
         if (!body || typeof body.data !== 'object' || body.data === null || Array.isArray(body.data)) {
             return NextResponse.json({ error: 'Invalid body', message: 'data field is required and must be an object' }, { status: 400 });
         }
 
-        const { data } = body;
+        const data = body.data as Record<string, unknown>;
 
         // Secondary size check on actual data (byte-accurate)
         const serialized = JSON.stringify(data);

@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
     Globe, DollarSign, FileText, Cpu, TrendingUp, AlertTriangle,
-    Plus, Rocket, Activity, Clock, Mail, Megaphone, PlayCircle
+    Plus, Rocket, Activity, Clock, Mail, Megaphone, PlayCircle, LayoutTemplate
 } from 'lucide-react';
 import Link from 'next/link';
 import { DashboardRefresh } from '@/components/dashboard/DashboardRefresh';
@@ -325,6 +325,9 @@ export default async function DashboardPage() {
                 </Link>
                 <Link href="/dashboard/integrations" className="inline-flex items-center gap-1.5 rounded-md border bg-card px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors">
                     <Globe className="h-3 w-3" /> Integrations
+                </Link>
+                <Link href="/dashboard/site-builder" className="inline-flex items-center gap-1.5 rounded-md border bg-card px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors">
+                    <LayoutTemplate className="h-3 w-3" /> Site Builder
                 </Link>
             </div>
 

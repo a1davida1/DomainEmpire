@@ -25,14 +25,18 @@ export async function POST(request: NextRequest) {
         }
 
         // Batch mode
-        if (body.batch) {
+        if (body.batch === true) {
+            const rawLimit = typeof body.limit === 'number' && Number.isFinite(body.limit)
+                ? Math.trunc(body.limit)
+                : 50;
+            const limit = Math.max(1, Math.min(rawLimit, 200));
             const result = await batchSeedPageDefinitions({
                 publish: typeof body.publish === 'boolean' ? body.publish : false,
                 theme: typeof body.theme === 'string' ? body.theme : undefined,
                 skin: typeof body.skin === 'string' ? body.skin : undefined,
                 seedArticlePages: typeof body.seedArticlePages === 'boolean' ? body.seedArticlePages : true,
                 filterTemplate: typeof body.filterTemplate === 'string' ? body.filterTemplate : undefined,
-                limit: Math.min(typeof body.limit === 'number' ? body.limit : 50, 200),
+                limit,
             });
 
             return NextResponse.json(result);

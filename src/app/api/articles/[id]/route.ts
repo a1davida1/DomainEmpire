@@ -133,16 +133,21 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
             );
         }
 
+        const resolvedContent = content ?? existing.contentMarkdown ?? null;
+        const resolvedTargetKeyword = targetKeyword ?? existing.targetKeyword ?? null;
+        const resolvedMetaDescription = metaDescription ?? existing.metaDescription ?? null;
+        const resolvedContentType = contentType ?? existing.contentType ?? null;
+
         // Update article
         const updateData: Record<string, unknown> = {
             title,
             slug,
-            contentMarkdown: content,
-            targetKeyword,
-            metaDescription,
+            contentMarkdown: resolvedContent,
+            targetKeyword: resolvedTargetKeyword,
+            metaDescription: resolvedMetaDescription,
             updatedAt: new Date(),
         };
-        if (contentType !== undefined) updateData.contentType = contentType;
+        updateData.contentType = resolvedContentType;
 
         const jsonbError = validateJsonbFields(body, updateData);
         if (jsonbError) return jsonbError;
@@ -157,8 +162,8 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
                 tx,
                 articleId: id,
                 title,
-                contentMarkdown: content ?? null,
-                metaDescription: metaDescription ?? null,
+                contentMarkdown: resolvedContent,
+                metaDescription: resolvedMetaDescription,
                 changeType: 'manual_edit',
                 changeSummary: typeof body.changeSummary === 'string' ? body.changeSummary : 'Manual edit via dashboard',
                 createdById: user.id || null,

@@ -19,8 +19,10 @@ config({ path: path.resolve(__dirname, '../.env.local') });
 
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import { eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
+import { randomUUID } from 'crypto';
 import * as schema from '../src/lib/db/schema';
+import { HOMEPAGE_PRESETS } from '../src/lib/deploy/blocks/presets';
 
 function parseFlagValue(args: string[], flag: string, fallback: string): string {
     const idx = args.indexOf(flag);
@@ -33,6 +35,14 @@ function parseFlagValue(args: string[], flag: string, fallback: string): string 
     return val;
 }
 
+function parsePositiveInteger(raw: string, flag: string): number {
+    const parsed = Number(raw);
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+        throw new Error(`Invalid ${flag} value "${raw}". Expected a positive integer.`);
+    }
+    return parsed;
+}
+
 interface DomainSummary {
     domain: string;
     domainId: string;
@@ -40,7 +50,19 @@ interface DomainSummary {
     pagesDeleted: number;
     keywordsReset: number;
     articlesSeeded: number;
+    homepageSeeded: boolean;
     error?: string;
+}
+
+function generateBlockId(): string {
+    return `blk_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
+}
+
+function extractSiteTitle(domain: string): string {
+    return domain
+        .replace(/\.(com|net|org|io|co|app|dev|info|biz|us|uk|ca|au)$/i, '')
+        .replace(/[-.]/g, ' ')
+        .replace(/\b\w/g, c => c.toUpperCase());
 }
 
 async function main() {
@@ -49,9 +71,9 @@ async function main() {
     const filterDomain = args.includes('--domain')
         ? parseFlagValue(args, '--domain', '')
         : '';
-    const articlesPerDomain = parseInt(
+    const articlesPerDomain = parsePositiveInteger(
         parseFlagValue(args, '--articles-per-domain', '5'),
-        10,
+        '--articles-per-domain',
     );
 
     console.log('=== Regenerate All Sites ===');
@@ -78,6 +100,8 @@ async function main() {
                 domain: schema.domains.domain,
                 niche: schema.domains.niche,
                 subNiche: schema.domains.subNiche,
+                siteTemplate: schema.domains.siteTemplate,
+                skin: schema.domains.skin,
                 isClassified: sql<boolean>`${schema.domains.niche} IS NOT NULL`,
             })
             .from(schema.domains)
@@ -99,6 +123,7 @@ async function main() {
         let totalPagesDeleted = 0;
         let totalKeywordsReset = 0;
         let totalSeeded = 0;
+        let totalHomepages = 0;
         let totalFailed = 0;
 
         for (const domain of allDomains) {
@@ -109,30 +134,31 @@ async function main() {
                 pagesDeleted: 0,
                 keywordsReset: 0,
                 articlesSeeded: 0,
+                homepageSeeded: false,
             };
 
             try {
                 // Count what we'll delete
-                const [articleCount] = await db
+                const articleCountRows = await db
                     .select({ count: sql<number>`count(*)::int` })
                     .from(schema.articles)
                     .where(eq(schema.articles.domainId, domain.id));
 
-                const [pageCount] = await db
+                const pageCountRows = await db
                     .select({ count: sql<number>`count(*)::int` })
                     .from(schema.pageDefinitions)
                     .where(eq(schema.pageDefinitions.domainId, domain.id));
 
-                const [kwAssignedCount] = await db
+                const kwAssignedCountRows = await db
                     .select({ count: sql<number>`count(*)::int` })
                     .from(schema.keywords)
                     .where(
                         sql`${schema.keywords.domainId} = ${domain.id} AND ${schema.keywords.articleId} IS NOT NULL`,
                     );
 
-                summary.articlesDeleted = articleCount.count;
-                summary.pagesDeleted = pageCount.count;
-                summary.keywordsReset = kwAssignedCount.count;
+                summary.articlesDeleted = articleCountRows[0]?.count ?? 0;
+                summary.pagesDeleted = pageCountRows[0]?.count ?? 0;
+                summary.keywordsReset = kwAssignedCountRows[0]?.count ?? 0;
 
                 if (execute) {
                     await db.transaction(async (tx) => {
@@ -151,7 +177,10 @@ async function main() {
                         await tx
                             .update(schema.keywords)
                             .set({ status: 'queued', articleId: null })
-                            .where(eq(schema.keywords.domainId, domain.id));
+                            .where(and(
+                                eq(schema.keywords.domainId, domain.id),
+                                eq(schema.keywords.status, 'assigned'),
+                            ));
 
                         // Cancel any pending/processing queue jobs for this domain
                         await tx
@@ -162,8 +191,26 @@ async function main() {
                             );
                     });
 
-                    // Now re-seed: call the seed API endpoint logic directly
-                    // We need to create articles from available keywords and queue generation
+                    // Seed v2 homepage page definition with block presets
+                    const siteTemplate = domain.siteTemplate || 'authority';
+                    const skinName = domain.skin || 'slate';
+                    const presetBlocks = HOMEPAGE_PRESETS[siteTemplate] ?? HOMEPAGE_PRESETS.authority;
+                    const blocks = presetBlocks.map(b => ({ ...b, id: generateBlockId() }));
+
+                    await db.insert(schema.pageDefinitions).values({
+                        domainId: domain.id,
+                        route: '/',
+                        title: extractSiteTitle(domain.domain),
+                        metaDescription: `Expert guides about ${domain.niche || 'various topics'}`,
+                        theme: 'clean',
+                        skin: skinName,
+                        blocks,
+                        isPublished: true,
+                        version: 1,
+                    });
+                    summary.homepageSeeded = true;
+
+                    // Now re-seed: create articles from available keywords and queue generation
                     if (domain.isClassified) {
                         const availableKeywords = await db
                             .select()
@@ -237,6 +284,7 @@ async function main() {
                 totalPagesDeleted += summary.pagesDeleted;
                 totalKeywordsReset += summary.keywordsReset;
                 totalSeeded += summary.articlesSeeded;
+                if (summary.homepageSeeded) totalHomepages++;
                 results.push(summary);
             } catch (err) {
                 summary.error = err instanceof Error ? err.message : String(err);
@@ -251,7 +299,7 @@ async function main() {
             const status = r.error ? '✗ ERROR' : '✓ OK';
             const detail = r.error
                 ? r.error
-                : `deleted ${r.articlesDeleted} articles, ${r.pagesDeleted} pages | reset ${r.keywordsReset} keywords | seeded ${r.articlesSeeded} articles`;
+                : `deleted ${r.articlesDeleted} articles, ${r.pagesDeleted} pages | reset ${r.keywordsReset} keywords | seeded ${r.articlesSeeded} articles | homepage: ${r.homepageSeeded ? '✓' : '—'}`;
             console.log(`  ${status}  ${r.domain} — ${detail}`);
         }
 
@@ -261,13 +309,16 @@ async function main() {
         console.log(`  Pages deleted:      ${totalPagesDeleted}`);
         console.log(`  Keywords reset:     ${totalKeywordsReset}`);
         console.log(`  Articles seeded:    ${totalSeeded}`);
+        console.log(`  Homepages seeded:   ${totalHomepages}`);
         console.log(`  Failed:             ${totalFailed}`);
 
         if (!execute) {
             console.log('\n⚠  DRY RUN — no changes were made. Use --execute to apply.');
         } else {
-            console.log('\n✅ Done. Run the worker to process queued generation jobs:');
+            console.log('\n✅ Done. v2 homepage page definitions created. Run the worker to generate articles:');
             console.log('   npm run worker');
+            console.log('\nAfter articles are published, seed article page definitions via:');
+            console.log('   curl -X POST http://localhost:3000/api/pages/seed -d \'{"batch":true,"publish":true}\'');
         }
     } finally {
         await client.end();

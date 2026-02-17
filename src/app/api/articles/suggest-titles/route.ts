@@ -24,7 +24,8 @@ export async function POST(request: NextRequest) {
         } catch {
             return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
         }
-        const { topic, keyword } = body;
+        const topic = typeof body.topic === 'string' ? body.topic : '';
+        const keyword = typeof body.keyword === 'string' ? body.keyword : '';
 
         if (!topic && !keyword) {
             return NextResponse.json({ error: 'Topic or keyword required' }, { status: 400 });

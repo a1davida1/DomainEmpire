@@ -40,7 +40,19 @@ export async function POST(request: NextRequest) {
         const name = typeof body.name === 'string' ? body.name : '';
         const password = typeof body.password === 'string' ? body.password : '';
         const role = typeof body.role === 'string' ? body.role : '';
-        const expertise = Array.isArray(body.expertise) ? body.expertise as string[] : [];
+        let expertise: string[] = [];
+        if (Array.isArray(body.expertise)) {
+            const hasInvalidExpertise = body.expertise.some((item) => typeof item !== 'string');
+            if (hasInvalidExpertise) {
+                return NextResponse.json(
+                    { error: 'expertise must be an array of strings' },
+                    { status: 400 }
+                );
+            }
+            expertise = body.expertise
+                .map((item) => item.trim())
+                .filter((item) => item.length > 0);
+        }
         const credentials = typeof body.credentials === 'string' ? body.credentials : undefined;
 
         if (!email || !name || !password) {

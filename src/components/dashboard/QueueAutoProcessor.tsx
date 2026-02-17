@@ -73,14 +73,17 @@ export function QueueAutoProcessor({ defaultMaxJobs = 10 }: { defaultMaxJobs?: n
                 const staleLocks = typeof body.staleLocksCleaned === 'number' ? body.staleLocksCleaned : 0;
                 const transientRetriesQueued = typeof body.transientRetriesQueued === 'number' ? body.transientRetriesQueued : 0;
 
+                if (cancelled) return;
                 setLastResult(`processed ${processed}, failed ${failed}, stale locks ${staleLocks}, transient retries ${transientRetriesQueued}`);
                 setError(null);
                 if (processed > 0 || failed > 0 || staleLocks > 0 || transientRetriesQueued > 0) {
                     router.refresh();
                 }
             } catch (runError) {
+                if (cancelled) return;
                 setError(runError instanceof Error ? runError.message : 'Auto-processing failed');
             } finally {
+                if (cancelled) return;
                 setLastRunAt(new Date().toLocaleTimeString());
                 setRunning(false);
                 if (!cancelled) {

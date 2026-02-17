@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { VisualConfigurator } from '@/components/dashboard/VisualConfigurator';
@@ -26,6 +26,31 @@ interface Props {
     initialPages: PageDef[];
 }
 
+type SortOption = 'updated-desc' | 'updated-asc' | 'route-asc' | 'route-desc' | 'blocks-desc';
+
+function formatDateLabel(value: string | null): string {
+    if (!value) return '—';
+    const parsed = new Date(value);
+    if (!Number.isFinite(parsed.getTime())) return '—';
+    return parsed.toLocaleString();
+}
+
+function mapPage(p: Record<string, unknown>): PageDef {
+    return {
+        id: p.id as string,
+        route: p.route as string,
+        title: (p.title as string | null) ?? null,
+        theme: (p.theme as string) || 'clean',
+        skin: (p.skin as string) || 'slate',
+        isPublished: Boolean(p.isPublished),
+        status: (p.status as string) || 'draft',
+        version: Number(p.version || 1),
+        blockCount: Array.isArray(p.blocks) ? (p.blocks as unknown[]).length : 0,
+        createdAt: (p.createdAt as string | null) ?? null,
+        updatedAt: (p.updatedAt as string | null) ?? null,
+    };
+}
+
 export function DomainPagesClient({ domainId, domainName, siteTemplate, initialPages }: Props) {
     const [pages, setPages] = useState<PageDef[]>(initialPages);
     const [loading, setLoading] = useState<string | null>(null);
@@ -36,6 +61,73 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, initialP
     const [editingBlocks, setEditingBlocks] = useState<Record<string, unknown>[] | null>(null);
     const [editingTheme, setEditingTheme] = useState('clean');
     const [editingSkin, setEditingSkin] = useState('slate');
+    const [query, setQuery] = useState('');
+    const [statusFilter, setStatusFilter] = useState('all');
+    const [sortBy, setSortBy] = useState<SortOption>('updated-desc');
+    const [selectedIds, setSelectedIds] = useState<string[]>([]);
+    const [showCreateForm, setShowCreateForm] = useState(false);
+    const [newRoute, setNewRoute] = useState('/landing');
+    const [newTitle, setNewTitle] = useState('');
+    const [newTheme, setNewTheme] = useState('clean');
+    const [newSkin, setNewSkin] = useState('slate');
+    const [newPreset, setNewPreset] = useState<'article' | 'homepage'>('article');
+
+    const pageStats = useMemo(() => {
+        const published = pages.filter(p => p.status === 'published').length;
+        const review = pages.filter(p => p.status === 'review').length;
+        const approved = pages.filter(p => p.status === 'approved').length;
+        const draft = pages.filter(p => p.status === 'draft').length;
+        const totalBlocks = pages.reduce((sum, p) => sum + p.blockCount, 0);
+        return { published, review, approved, draft, totalBlocks };
+    }, [pages]);
+
+    const filteredPages = useMemo(() => {
+        const normalizedQuery = query.trim().toLowerCase();
+        let next = pages.filter((page) => {
+            if (statusFilter !== 'all' && page.status !== statusFilter) return false;
+            if (!normalizedQuery) return true;
+            return page.route.toLowerCase().includes(normalizedQuery)
+                || (page.title || '').toLowerCase().includes(normalizedQuery)
+                || page.theme.toLowerCase().includes(normalizedQuery)
+                || page.skin.toLowerCase().includes(normalizedQuery);
+        });
+
+        next = [...next].sort((a, b) => {
+            switch (sortBy) {
+                case 'updated-asc':
+                    return new Date(a.updatedAt || 0).getTime() - new Date(b.updatedAt || 0).getTime();
+                case 'route-asc':
+                    return a.route.localeCompare(b.route);
+                case 'route-desc':
+                    return b.route.localeCompare(a.route);
+                case 'blocks-desc':
+                    return b.blockCount - a.blockCount;
+                case 'updated-desc':
+                default:
+                    return new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime();
+            }
+        });
+
+        return next;
+    }, [pages, query, statusFilter, sortBy]);
+
+    const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+
+    const allFilteredSelected = filteredPages.length > 0 && filteredPages.every((p) => selectedSet.has(p.id));
+
+    async function refreshPages() {
+        try {
+            const res = await fetch(`/api/pages?domainId=${domainId}`);
+            const data = await res.json();
+            if (!Array.isArray(data.pages)) return;
+            const mapped = data.pages.map((p: Record<string, unknown>) => mapPage(p));
+            setPages(mapped);
+            const validIds = new Set(mapped.map((page: PageDef) => page.id));
+            setSelectedIds((prev) => prev.filter((id) => validIds.has(id)));
+        } catch {
+            // Silently fail refresh; user can hard refresh
+        }
+    }
 
     async function handleSeed() {
         setLoading('seed');
@@ -60,6 +152,177 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, initialP
             await refreshPages();
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Seed failed');
+        } finally {
+            setLoading(null);
+        }
+    }
+
+    async function handleCreatePage() {
+        setLoading('create');
+        setError(null);
+        setSuccess(null);
+        try {
+            const normalizedRoute = newRoute.trim();
+            if (!normalizedRoute.startsWith('/')) {
+                setError('Route must start with /');
+                return;
+            }
+
+            const preset = newPreset === 'homepage'
+                ? `homepage:${siteTemplate}`
+                : 'article:article';
+
+            const res = await fetch('/api/pages', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    domainId,
+                    route: normalizedRoute,
+                    title: newTitle.trim() || null,
+                    theme: newTheme,
+                    skin: newSkin,
+                    preset,
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                setError(data.error || 'Failed to create page');
+                return;
+            }
+            setSuccess(`Created page ${normalizedRoute}`);
+            setShowCreateForm(false);
+            setNewTitle('');
+            await refreshPages();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Create page failed');
+        } finally {
+            setLoading(null);
+        }
+    }
+
+    async function handleDuplicate(pageId: string) {
+        setLoading(`dup-${pageId}`);
+        setError(null);
+        setSuccess(null);
+        try {
+            const sourceRes = await fetch(`/api/pages/${pageId}`);
+            const source = await sourceRes.json();
+            if (!sourceRes.ok) {
+                setError(source.error || 'Failed to load source page');
+                return;
+            }
+
+            const sourceRoute = typeof source.route === 'string' ? source.route : '/page';
+            const duplicatedRoute = `${sourceRoute}-copy-${Date.now().toString().slice(-4)}`;
+            const createRes = await fetch('/api/pages', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    domainId,
+                    route: duplicatedRoute,
+                    title: typeof source.title === 'string' ? `${source.title} (Copy)` : 'Copied page',
+                    theme: typeof source.theme === 'string' ? source.theme : 'clean',
+                    skin: typeof source.skin === 'string' ? source.skin : 'slate',
+                    blocks: Array.isArray(source.blocks) ? source.blocks : [],
+                }),
+            });
+            const created = await createRes.json();
+            if (!createRes.ok) {
+                setError(created.error || 'Failed to duplicate page');
+                return;
+            }
+
+            setSuccess(`Duplicated ${sourceRoute} to ${duplicatedRoute}`);
+            await refreshPages();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Duplicate failed');
+        } finally {
+            setLoading(null);
+        }
+    }
+
+    async function handleCreateSnapshot(pageId: string) {
+        setLoading(`snap-${pageId}`);
+        setError(null);
+        setSuccess(null);
+        try {
+            const res = await fetch(`/api/pages/${pageId}/preview`, { method: 'POST' });
+            const data = await res.json();
+            if (!res.ok) {
+                setError(data.error || 'Failed to create preview snapshot');
+                return;
+            }
+            const previewPath = data.previewBuild?.previewUrl;
+            if (typeof previewPath === 'string') {
+                const previewUrl = `${window.location.origin}${previewPath}`;
+                await navigator.clipboard.writeText(previewUrl);
+                setSuccess('Snapshot created and preview URL copied');
+            } else {
+                setSuccess('Snapshot created');
+            }
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Snapshot creation failed');
+        } finally {
+            setLoading(null);
+        }
+    }
+
+    function toggleSelected(pageId: string) {
+        setSelectedIds((prev) => prev.includes(pageId) ? prev.filter((id) => id !== pageId) : [...prev, pageId]);
+    }
+
+    function toggleSelectAllFiltered() {
+        if (allFilteredSelected) {
+            setSelectedIds((prev) => prev.filter((id) => !filteredPages.some((p) => p.id === id)));
+            return;
+        }
+        setSelectedIds((prev) => {
+            const next = new Set(prev);
+            for (const page of filteredPages) next.add(page.id);
+            return [...next];
+        });
+    }
+
+    async function handleBulkStatus(newStatus: string) {
+        if (selectedIds.length === 0) return;
+        setLoading(`bulk-${newStatus}`);
+        setError(null);
+        setSuccess(null);
+        try {
+            const results = await Promise.all(selectedIds.map(async (pageId) => {
+                const res = await fetch(`/api/pages/${pageId}/status`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status: newStatus }),
+                });
+                return res.ok;
+            }));
+            const okCount = results.filter(Boolean).length;
+            setSuccess(`Updated ${okCount}/${selectedIds.length} selected pages to ${newStatus}`);
+            setSelectedIds([]);
+            await refreshPages();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Bulk status update failed');
+        } finally {
+            setLoading(null);
+        }
+    }
+
+    async function handleBulkGenerate() {
+        if (selectedIds.length === 0) return;
+        setLoading('bulk-generate');
+        setError(null);
+        setSuccess(null);
+        try {
+            const results = await Promise.all(selectedIds.map(async (pageId) => {
+                const res = await fetch(`/api/pages/${pageId}/generate`, { method: 'POST' });
+                return res.ok;
+            }));
+            const okCount = results.filter(Boolean).length;
+            setSuccess(`Triggered generation for ${okCount}/${selectedIds.length} selected pages`);
+            await refreshPages();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Bulk generate failed');
         } finally {
             setLoading(null);
         }
@@ -173,30 +436,6 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, initialP
         }
     }
 
-    async function refreshPages() {
-        try {
-            const res = await fetch(`/api/pages?domainId=${domainId}`);
-            const data = await res.json();
-            if (data.pages) {
-                setPages(data.pages.map((p: Record<string, unknown>) => ({
-                    id: p.id,
-                    route: p.route,
-                    title: p.title,
-                    theme: p.theme,
-                    skin: p.skin,
-                    isPublished: p.isPublished,
-                    status: (p.status as string) || 'draft',
-                    version: p.version,
-                    blockCount: Array.isArray(p.blocks) ? (p.blocks as unknown[]).length : 0,
-                    createdAt: p.createdAt,
-                    updatedAt: p.updatedAt,
-                })));
-            }
-        } catch {
-            // Silently fail refresh — user can reload
-        }
-    }
-
     // If editing a page, show the Visual Configurator
     if (editingPageId && editingBlocks) {
         return (
@@ -245,6 +484,91 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, initialP
                 </div>
             )}
 
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                <div className="rounded border p-2 text-xs"><span className="text-muted-foreground">Total</span><div className="text-lg font-semibold">{pages.length}</div></div>
+                <div className="rounded border p-2 text-xs"><span className="text-muted-foreground">Published</span><div className="text-lg font-semibold text-green-600">{pageStats.published}</div></div>
+                <div className="rounded border p-2 text-xs"><span className="text-muted-foreground">Review</span><div className="text-lg font-semibold text-amber-600">{pageStats.review}</div></div>
+                <div className="rounded border p-2 text-xs"><span className="text-muted-foreground">Draft</span><div className="text-lg font-semibold">{pageStats.draft}</div></div>
+                <div className="rounded border p-2 text-xs"><span className="text-muted-foreground">Blocks</span><div className="text-lg font-semibold">{pageStats.totalBlocks}</div></div>
+            </div>
+
+            <div className="rounded-lg border p-3">
+                <div className="grid gap-2 md:grid-cols-4">
+                    <input
+                        className="rounded border bg-background px-2 py-1 text-sm"
+                        aria-label="Search pages"
+                        placeholder="Search route/title/theme/skin"
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                    />
+                    <select
+                        className="rounded border bg-background px-2 py-1 text-sm"
+                        aria-label="Filter pages by status"
+                        value={statusFilter}
+                        onChange={(e) => setStatusFilter(e.target.value)}
+                    >
+                        <option value="all">All statuses</option>
+                        <option value="draft">Draft</option>
+                        <option value="review">Review</option>
+                        <option value="approved">Approved</option>
+                        <option value="published">Published</option>
+                    </select>
+                    <select
+                        className="rounded border bg-background px-2 py-1 text-sm"
+                        aria-label="Sort pages"
+                        value={sortBy}
+                        onChange={(e) => setSortBy(e.target.value as SortOption)}
+                    >
+                        <option value="updated-desc">Last updated (newest)</option>
+                        <option value="updated-asc">Last updated (oldest)</option>
+                        <option value="route-asc">Route A-Z</option>
+                        <option value="route-desc">Route Z-A</option>
+                        <option value="blocks-desc">Most blocks</option>
+                    </select>
+                    <Button variant="outline" size="sm" onClick={() => setShowCreateForm((v) => !v)}>
+                        {showCreateForm ? 'Hide Create Form' : 'Create New Page'}
+                    </Button>
+                </div>
+
+                {showCreateForm && (
+                    <div className="mt-3 grid gap-2 md:grid-cols-6">
+                        <input
+                            className="rounded border bg-background px-2 py-1 text-sm md:col-span-2"
+                            aria-label="New page route"
+                            placeholder="Route (e.g. /pricing)"
+                            value={newRoute}
+                            onChange={(e) => setNewRoute(e.target.value)}
+                        />
+                        <input
+                            className="rounded border bg-background px-2 py-1 text-sm md:col-span-2"
+                            aria-label="New page title"
+                            placeholder="Title (optional)"
+                            value={newTitle}
+                            onChange={(e) => setNewTitle(e.target.value)}
+                        />
+                        <select aria-label="New page theme" className="rounded border bg-background px-2 py-1 text-sm" value={newTheme} onChange={(e) => setNewTheme(e.target.value)}>
+                            <option value="clean">clean</option>
+                            <option value="editorial">editorial</option>
+                            <option value="bold">bold</option>
+                            <option value="minimal">minimal</option>
+                        </select>
+                        <select aria-label="New page skin" className="rounded border bg-background px-2 py-1 text-sm" value={newSkin} onChange={(e) => setNewSkin(e.target.value)}>
+                            <option value="slate">slate</option>
+                            <option value="ocean">ocean</option>
+                            <option value="forest">forest</option>
+                            <option value="ember">ember</option>
+                            <option value="midnight">midnight</option>
+                            <option value="coral">coral</option>
+                        </select>
+                        <select aria-label="New page preset" className="rounded border bg-background px-2 py-1 text-sm" value={newPreset} onChange={(e) => setNewPreset(e.target.value as 'article' | 'homepage')}>
+                            <option value="article">Article preset</option>
+                            <option value="homepage">Homepage preset</option>
+                        </select>
+                        <Button size="sm" onClick={handleCreatePage} disabled={!!loading}>Create Page</Button>
+                    </div>
+                )}
+            </div>
+
             {pages.length === 0 ? (
                 <div className="rounded-lg border-2 border-dashed p-8 text-center">
                     <h3 className="text-lg font-semibold">No v2 page definitions yet</h3>
@@ -263,9 +587,21 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, initialP
                 <>
                     <div className="flex items-center justify-between">
                         <p className="text-sm text-muted-foreground">
-                            {pages.length} page definition{pages.length !== 1 ? 's' : ''} — template: <code className="rounded bg-muted px-1">{siteTemplate}</code>
+                            Showing {filteredPages.length} of {pages.length} page definition{pages.length !== 1 ? 's' : ''} — template: <code className="rounded bg-muted px-1">{siteTemplate}</code>
                         </p>
                         <div className="flex items-center gap-2">
+                            <Button variant="outline" size="sm" onClick={toggleSelectAllFiltered} disabled={filteredPages.length === 0}>
+                                {allFilteredSelected ? 'Unselect Visible' : 'Select Visible'}
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={handleBulkGenerate} disabled={selectedIds.length === 0 || !!loading}>
+                                Generate Selected ({selectedIds.length})
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => handleBulkStatus('review')} disabled={selectedIds.length === 0 || !!loading}>
+                                Submit Selected
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => handleBulkStatus('published')} disabled={selectedIds.length === 0 || !!loading}>
+                                Publish Selected
+                            </Button>
                             <Button
                                 variant="outline"
                                 size="sm"
@@ -281,10 +617,16 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, initialP
                     </div>
 
                     <div className="divide-y rounded-lg border">
-                        {pages.map(page => (
+                        {filteredPages.map(page => (
                             <div key={page.id} className="flex items-center justify-between gap-4 p-4">
                                 <div className="min-w-0 flex-1">
                                     <div className="flex items-center gap-2">
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedSet.has(page.id)}
+                                            onChange={() => toggleSelected(page.id)}
+                                            aria-label={`Select ${page.route}`}
+                                        />
                                         <span className="font-mono text-sm font-medium">{page.route}</span>
                                         {page.status === 'published' ? (
                                             <Badge variant="default" className="bg-green-600">Published</Badge>
@@ -302,6 +644,7 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, initialP
                                         <span>{page.blockCount} blocks</span>
                                         <span>theme: {page.theme}</span>
                                         <span>skin: {page.skin}</span>
+                                        <span>updated: {formatDateLabel(page.updatedAt)}</span>
                                     </div>
                                 </div>
 
@@ -317,10 +660,26 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, initialP
                                     <Button
                                         variant="outline"
                                         size="sm"
+                                        onClick={() => handleCreateSnapshot(page.id)}
+                                        disabled={!!loading}
+                                    >
+                                        {loading === `snap-${page.id}` ? '...' : 'Snapshot'}
+                                    </Button>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
                                         onClick={() => openBlockEditor(page.id)}
                                         disabled={!!loading}
                                     >
                                         Edit Blocks
+                                    </Button>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleDuplicate(page.id)}
+                                        disabled={!!loading}
+                                    >
+                                        {loading === `dup-${page.id}` ? '...' : 'Duplicate'}
                                     </Button>
                                     <Button
                                         variant="outline"
@@ -372,6 +731,9 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, initialP
                                 </div>
                             </div>
                         ))}
+                        {filteredPages.length === 0 && (
+                            <div className="p-8 text-center text-sm text-muted-foreground">No pages match current filters.</div>
+                        )}
                     </div>
                 </>
             )}

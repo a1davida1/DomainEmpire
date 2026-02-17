@@ -82,12 +82,14 @@ export async function GET(request: NextRequest) {
     }
 
     try {
+        const parsedHistory = Number.parseInt(request.nextUrl.searchParams.get('historyLimit') || '10', 10);
         const historyLimit = Math.max(1, Math.min(
-            Number.parseInt(request.nextUrl.searchParams.get('historyLimit') || '10', 10) || 10,
+            Number.isFinite(parsedHistory) ? parsedHistory : 10,
             50,
         ));
+        const parsedRequest = Number.parseInt(request.nextUrl.searchParams.get('requestLimit') || '25', 10);
         const requestLimit = Math.max(1, Math.min(
-            Number.parseInt(request.nextUrl.searchParams.get('requestLimit') || '25', 10) || 25,
+            Number.isFinite(parsedRequest) ? parsedRequest : 25,
             100,
         ));
         const requestStatuses = parseRequestedStatuses(
