@@ -2,12 +2,14 @@ import Link from 'next/link';
 import { db } from '@/lib/db';
 import { articles, contentQueue, domainResearch, domains } from '@/lib/db/schema';
 import { and, desc, eq, inArray, isNotNull, or, sql } from 'drizzle-orm';
-import { getQueueHealth, retryFailedJobs, runWorkerOnce } from '@/lib/ai/worker';
+import { getQueueHealth, retryFailedJobs } from '@/lib/ai/worker';
 import { getContentQueueBackendHealth, requeueContentJobIds } from '@/lib/queue/content-queue';
 import { revalidatePath } from 'next/cache';
 import { QueueAutoProcessor } from '@/components/dashboard/QueueAutoProcessor';
 import { QueueBulkSelectionTools } from '@/components/dashboard/QueueBulkSelectionTools';
 import { QueueSelectAllCheckbox } from '@/components/dashboard/QueueSelectAllCheckbox';
+import { ProcessNowButton } from '@/components/dashboard/ProcessNowButton';
+import { QueueHealthPoller } from '@/components/dashboard/QueueHealthPoller';
 import { getOperationsSettings } from '@/lib/settings/operations';
 
 export const dynamic = 'force-dynamic';
@@ -185,15 +187,6 @@ async function recoverStaleLocksAction() {
         }
     }
 
-    revalidatePath('/dashboard/queue');
-}
-
-async function processNowAction(formData: FormData) {
-    'use server';
-    const rawMaxJobs = formData.get('maxJobs');
-    const parsed = Number.parseInt(String(rawMaxJobs ?? PROCESS_NOW_DEFAULT), 10);
-    const maxJobs = Number.isFinite(parsed) ? Math.max(1, Math.min(parsed, 200)) : PROCESS_NOW_DEFAULT;
-    await runWorkerOnce({ maxJobs });
     revalidatePath('/dashboard/queue');
 }
 
@@ -760,20 +753,7 @@ export default async function QueuePage({
                     </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                    <form action={processNowAction} className="flex items-center gap-2">
-                        <input
-                            type="number"
-                            name="maxJobs"
-                            aria-label="Max jobs to process"
-                            min={1}
-                            max={200}
-                            defaultValue={String(PROCESS_NOW_DEFAULT)}
-                            className="w-20 rounded border px-2 py-2 text-sm"
-                        />
-                        <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
-                            Process Now
-                        </button>
-                    </form>
+                    <ProcessNowButton defaultMaxJobs={PROCESS_NOW_DEFAULT} />
                     {health.failed > 0 && (
                         <form action={retryFailedAction}>
                             <button type="submit" className="px-4 py-2 bg-yellow-600 text-white rounded-lg text-sm hover:bg-yellow-700">
@@ -897,6 +877,10 @@ export default async function QueuePage({
             </div>
 
             {/* Health metrics */}
+            <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold">Queue Health</h2>
+                <QueueHealthPoller />
+            </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <StatCard label="Pending" value={health.pending} color="yellow" />
                 <StatCard label="Processing" value={health.processing} color="blue" />

@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
+import { AiDetectionCard } from '@/components/dashboard/AiDetectionCard';
 import { ArrowLeft, ExternalLink, History, ScrollText, ClipboardCheck, Quote, AlertTriangle, Eye } from 'lucide-react';
 import Link from 'next/link';
 import { formatNumber } from '@/lib/format-utils';
@@ -138,6 +139,13 @@ export default async function ArticlePage({ params }: PageProps) {
                             </Link>
                         </CardContent>
                     </Card>
+
+                    <AiDetectionCard
+                        articleId={id}
+                        initialScore={article.aiDetectionScore ?? null}
+                        initialResult={article.aiDetectionResult as { verdict?: 'pass' | 'marginal' | 'fail'; burstiness?: number; sentenceCount?: number; highProbSentences?: Array<{ sentence: string; prob: number }> } | null}
+                        initialCheckedAt={article.aiDetectionCheckedAt ?? null}
+                    />
 
                     <InterlinkManager articleId={id} />
 

@@ -6,8 +6,9 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, CheckCircle2, XCircle, AlertTriangle, ArrowLeft, ShieldAlert } from 'lucide-react';
+import { Loader2, CheckCircle2, XCircle, AlertTriangle, ArrowLeft, ShieldAlert, ShieldCheck, ShieldX, ChevronDown, ChevronUp } from 'lucide-react';
 import Link from 'next/link';
+import { cn } from '@/lib/utils';
 
 type ChecklistItem = {
     id: string;
@@ -32,6 +33,13 @@ type QaData = {
     } | null;
 };
 
+type AiDetectionResultData = {
+    verdict?: 'pass' | 'marginal' | 'fail';
+    burstiness?: number;
+    sentenceCount?: number;
+    highProbSentences?: Array<{ sentence: string; prob: number }>;
+};
+
 type ArticleInfo = {
     id: string;
     title: string;
@@ -39,6 +47,9 @@ type ArticleInfo = {
     ymylLevel: string;
     domainId: string;
     contentType: string;
+    aiDetectionScore: number | null;
+    aiDetectionResult: AiDetectionResultData | null;
+    aiDetectionCheckedAt: string | null;
 };
 
 type UserInfo = {
@@ -117,6 +128,7 @@ export default function ArticleReviewPage() {
     const [fallbackPathTested, setFallbackPathTested] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [actionError, setActionError] = useState('');
+    const [aiSentencesExpanded, setAiSentencesExpanded] = useState(false);
 
     useEffect(() => {
         const fetchData = async () => {
@@ -143,6 +155,9 @@ export default function ArticleReviewPage() {
                     ymylLevel: articleResponse.ymylLevel || 'none',
                     domainId: articleResponse.domainId,
                     contentType: articleResponse.contentType || 'article',
+                    aiDetectionScore: articleResponse.aiDetectionScore ?? null,
+                    aiDetectionResult: articleResponse.aiDetectionResult ?? null,
+                    aiDetectionCheckedAt: articleResponse.aiDetectionCheckedAt ?? null,
                 });
                 if (meResponse) {
                     setUserInfo({ role: meResponse.role, name: meResponse.name });
@@ -446,6 +461,114 @@ export default function ArticleReviewPage() {
                     Back to queue
                 </Link>
             </div>
+
+            {/* AI Detection Results */}
+            {articleInfo && articleInfo.aiDetectionScore != null && articleInfo.aiDetectionResult && (() => {
+                const aiVerdict = articleInfo.aiDetectionResult.verdict || (articleInfo.aiDetectionScore < 0.30 ? 'pass' : articleInfo.aiDetectionScore < 0.50 ? 'marginal' : 'fail');
+                const aiConfig = {
+                    pass: {
+                        label: 'Human-like',
+                        borderBg: 'border-green-200 bg-green-50/50 dark:border-green-900 dark:bg-green-950/20',
+                        headerBg: 'border-green-200 bg-green-100/50 dark:border-green-900 dark:bg-green-950/40',
+                        badge: 'bg-green-500/10 text-green-600 border-green-200 dark:text-green-400 dark:border-green-800',
+                        bar: 'bg-green-500',
+                        Icon: ShieldCheck,
+                    },
+                    marginal: {
+                        label: 'Marginal',
+                        borderBg: 'border-yellow-200 bg-yellow-50/50 dark:border-yellow-900 dark:bg-yellow-950/20',
+                        headerBg: 'border-yellow-200 bg-yellow-100/50 dark:border-yellow-900 dark:bg-yellow-950/40',
+                        badge: 'bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-950 dark:text-yellow-300 dark:border-yellow-800',
+                        bar: 'bg-yellow-500',
+                        Icon: ShieldAlert,
+                    },
+                    fail: {
+                        label: 'AI-detected',
+                        borderBg: 'border-red-200 bg-red-50/50 dark:border-red-900 dark:bg-red-950/20',
+                        headerBg: 'border-red-200 bg-red-100/50 dark:border-red-900 dark:bg-red-950/40',
+                        badge: 'bg-red-500/10 text-red-600 border-red-200 dark:text-red-400 dark:border-red-800',
+                        bar: 'bg-red-500',
+                        Icon: ShieldX,
+                    },
+                } as const;
+                const cfg = aiConfig[aiVerdict];
+                const VerdictIcon = cfg.Icon;
+
+                return (
+                    <div className={cn('rounded-xl border overflow-hidden', cfg.borderBg)}>
+                        <div className={cn('border-b px-5 py-3 flex items-center justify-between', cfg.headerBg)}>
+                            <h2 className="text-base font-semibold flex items-center gap-2">
+                                <VerdictIcon className="h-4 w-4" />
+                                AI Detection
+                            </h2>
+                            <Badge variant="outline" className={cn('text-xs', cfg.badge)}>
+                                {cfg.label}
+                            </Badge>
+                        </div>
+                        <div className="px-5 py-4 space-y-3">
+                            <div className="flex items-center gap-6 text-sm">
+                                <div>
+                                    <span className="text-muted-foreground">Score:</span>{' '}
+                                    <span className="font-bold tabular-nums">{articleInfo.aiDetectionScore.toFixed(3)}</span>
+                                </div>
+                                {articleInfo.aiDetectionResult.burstiness != null && (
+                                    <div>
+                                        <span className="text-muted-foreground">Burstiness:</span>{' '}
+                                        <span className="font-bold tabular-nums">{articleInfo.aiDetectionResult.burstiness.toFixed(1)}</span>
+                                    </div>
+                                )}
+                                {articleInfo.aiDetectionResult.sentenceCount != null && (
+                                    <div>
+                                        <span className="text-muted-foreground">Sentences:</span>{' '}
+                                        <span className="font-bold tabular-nums">{articleInfo.aiDetectionResult.sentenceCount}</span>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Score bar */}
+                            <div className="h-2 w-full rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                                <div
+                                    className={cn('h-full rounded-full transition-all', cfg.bar)}
+                                    style={{ width: `${Math.round(articleInfo.aiDetectionScore * 100)}%` }}
+                                />
+                            </div>
+
+                            {/* Flagged sentences */}
+                            {articleInfo.aiDetectionResult.highProbSentences && articleInfo.aiDetectionResult.highProbSentences.length > 0 && (
+                                <div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setAiSentencesExpanded(!aiSentencesExpanded)}
+                                        className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                                    >
+                                        {aiSentencesExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                                        {articleInfo.aiDetectionResult.highProbSentences.length} flagged sentence{articleInfo.aiDetectionResult.highProbSentences.length !== 1 ? 's' : ''}
+                                    </button>
+                                    {aiSentencesExpanded && (
+                                        <div className="mt-2 space-y-1.5">
+                                            {articleInfo.aiDetectionResult.highProbSentences.map((s, i) => (
+                                                <div key={i} className="flex items-start gap-2 text-xs p-2 rounded border bg-white/50 dark:bg-black/20">
+                                                    <Badge variant="outline" className="shrink-0 text-[10px] bg-red-500/10 text-red-600 dark:text-red-400 tabular-nums">
+                                                        {(s.prob * 100).toFixed(0)}%
+                                                    </Badge>
+                                                    <span className="text-muted-foreground leading-relaxed">{s.sentence}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Checked timestamp */}
+                            {articleInfo.aiDetectionCheckedAt && (
+                                <p className="text-xs text-muted-foreground">
+                                    Checked: {formatQaTimestamp(articleInfo.aiDetectionCheckedAt)}
+                                </p>
+                            )}
+                        </div>
+                    </div>
+                );
+            })()}
 
             {/* QA Checklist */}
             <div className="rounded-xl border bg-card overflow-hidden">

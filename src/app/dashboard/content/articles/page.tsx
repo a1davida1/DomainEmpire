@@ -11,6 +11,7 @@ import {
     TableRow,
 } from '@/components/ui/table';
 import { Card, CardContent } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
 import { Search, Filter, Edit, ExternalLink, FileText, ChevronLeft, ChevronRight } from 'lucide-react';
 import { db, articles } from '@/lib/db';
 import { desc, like, or, eq, and, isNull, inArray, sql, type SQL } from 'drizzle-orm';
@@ -318,6 +319,7 @@ export default async function ArticlesPage(props: Readonly<PageProps>) {
                                 <TableHead>Type</TableHead>
                                 <TableHead>Domain</TableHead>
                                 <TableHead>Status</TableHead>
+                                <TableHead>AI Score</TableHead>
                                 <TableHead>Words</TableHead>
                                 <TableHead>Created</TableHead>
                                 <TableHead className="text-right">Actions</TableHead>
@@ -326,7 +328,7 @@ export default async function ArticlesPage(props: Readonly<PageProps>) {
                         <TableBody>
                             {allArticles.length === 0 ? (
                                 <TableRow>
-                                    <TableCell colSpan={7} className="h-24 text-center">
+                                    <TableCell colSpan={8} className="h-24 text-center">
                                         No content found for this filter.
                                     </TableCell>
                                 </TableRow>
@@ -351,6 +353,26 @@ export default async function ArticlesPage(props: Readonly<PageProps>) {
                                             <Badge variant="secondary" className="capitalize">
                                                 {article.status}
                                             </Badge>
+                                        </TableCell>
+                                        <TableCell>
+                                            {article.aiDetectionScore != null ? (
+                                                <span className={cn(
+                                                    'inline-flex items-center gap-1.5 text-sm font-medium tabular-nums',
+                                                    article.aiDetectionScore < 0.30 && 'text-green-600 dark:text-green-400',
+                                                    article.aiDetectionScore >= 0.30 && article.aiDetectionScore < 0.50 && 'text-yellow-600 dark:text-yellow-400',
+                                                    article.aiDetectionScore >= 0.50 && 'text-red-600 dark:text-red-400',
+                                                )}>
+                                                    <span className={cn(
+                                                        'h-2 w-2 rounded-full',
+                                                        article.aiDetectionScore < 0.30 && 'bg-green-500',
+                                                        article.aiDetectionScore >= 0.30 && article.aiDetectionScore < 0.50 && 'bg-yellow-500',
+                                                        article.aiDetectionScore >= 0.50 && 'bg-red-500',
+                                                    )} />
+                                                    {article.aiDetectionScore.toFixed(2)}
+                                                </span>
+                                            ) : (
+                                                <span className="text-muted-foreground">-</span>
+                                            )}
                                         </TableCell>
                                         <TableCell>{formatNumber(article.wordCount)}</TableCell>
                                         <TableCell>{formatDate(article.createdAt)}</TableCell>

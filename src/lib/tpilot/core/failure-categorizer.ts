@@ -70,7 +70,7 @@ interface FailurePattern {
 
 export const FAILURE_PATTERNS: FailurePattern[] = [
   {
-    pattern: /429|rate.?limit|too.?many.?requests|retry.?after/i,
+    pattern: /\b429\b|status[:\s]+429|rate.?limit|too.?many.?requests|retry.?after/i,
     category: 'rate_limit',
     confidence: 'high',
     humanReadable: 'Rate limit exceeded',
@@ -88,7 +88,7 @@ export const FAILURE_PATTERNS: FailurePattern[] = [
     priority: 95,
   },
   {
-    pattern: /401|unauthorized|invalid.?token|token.?expired|oauth|forbidden.*token/i,
+    pattern: /\b401\b|status[:\s]+401|unauthorized|invalid.?token|token.?expired|oauth|forbidden.*token/i,
     category: 'auth_expired',
     confidence: 'high',
     humanReadable: 'Authentication expired or invalid',
@@ -124,7 +124,7 @@ export const FAILURE_PATTERNS: FailurePattern[] = [
     priority: 82,
   },
   {
-    pattern: /econnrefused|econnreset|enotfound|dns|network|socket hang up|503|502|504/i,
+    pattern: /econnrefused|econnreset|enotfound|dns|network|socket hang up|\b503\b|\b502\b|\b504\b/i,
     category: 'network_error',
     confidence: 'high',
     humanReadable: 'Network or upstream service error',

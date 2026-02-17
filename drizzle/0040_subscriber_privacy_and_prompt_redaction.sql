@@ -39,10 +39,19 @@ ALTER TABLE "subscribers"
   ADD COLUMN IF NOT EXISTS "ip_hash" text;
 --> statement-breakpoint
 ALTER TABLE "subscribers"
+  ADD COLUMN IF NOT EXISTS "user_agent_hash" text;
+--> statement-breakpoint
+ALTER TABLE "subscribers"
   ADD COLUMN IF NOT EXISTS "user_agent_fingerprint" text;
 --> statement-breakpoint
 ALTER TABLE "subscribers"
   ADD COLUMN IF NOT EXISTS "referrer_fingerprint" text;
+--> statement-breakpoint
+ALTER TABLE "subscribers"
+  ADD COLUMN IF NOT EXISTS "retention_expires_at" timestamp;
+--> statement-breakpoint
+ALTER TABLE "subscribers"
+  ADD COLUMN IF NOT EXISTS "retention_policy_version" text NOT NULL DEFAULT 'subscriber-v1';
 --> statement-breakpoint
 
 CREATE INDEX IF NOT EXISTS "subscriber_email_hash_idx"
@@ -50,3 +59,75 @@ CREATE INDEX IF NOT EXISTS "subscriber_email_hash_idx"
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "subscriber_ip_hash_idx"
   ON "subscribers" USING btree ("ip_hash");
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "subscriber_user_agent_hash_idx"
+  ON "subscribers" USING btree ("user_agent_hash");
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "subscriber_retention_expires_idx"
+  ON "subscribers" USING btree ("retention_expires_at");
+--> statement-breakpoint
+
+-- Ensure no legacy raw subscriber metadata remains persisted.
+ALTER TABLE "subscribers"
+  DROP COLUMN IF EXISTS "ip_address";
+--> statement-breakpoint
+ALTER TABLE "subscribers"
+  DROP COLUMN IF EXISTS "user_agent";
+--> statement-breakpoint
+
+-- Sensitive table hardening: enforce backend-only RLS posture.
+ALTER TABLE "users" ENABLE ROW LEVEL SECURITY;
+--> statement-breakpoint
+ALTER TABLE "sessions" ENABLE ROW LEVEL SECURITY;
+--> statement-breakpoint
+ALTER TABLE "subscribers" ENABLE ROW LEVEL SECURITY;
+--> statement-breakpoint
+ALTER TABLE "growth_channel_credentials" ENABLE ROW LEVEL SECURITY;
+--> statement-breakpoint
+
+DO $$ BEGIN
+  CREATE POLICY "users_backend_access" ON "users"
+    AS PERMISSIVE
+    FOR ALL
+    TO current_role
+    USING (true)
+    WITH CHECK (true);
+EXCEPTION
+  WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+
+DO $$ BEGIN
+  CREATE POLICY "sessions_backend_access" ON "sessions"
+    AS PERMISSIVE
+    FOR ALL
+    TO current_role
+    USING (true)
+    WITH CHECK (true);
+EXCEPTION
+  WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+
+DO $$ BEGIN
+  CREATE POLICY "subscribers_backend_access" ON "subscribers"
+    AS PERMISSIVE
+    FOR ALL
+    TO current_role
+    USING (true)
+    WITH CHECK (true);
+EXCEPTION
+  WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+
+DO $$ BEGIN
+  CREATE POLICY "growth_channel_credentials_backend_access" ON "growth_channel_credentials"
+    AS PERMISSIVE
+    FOR ALL
+    TO current_role
+    USING (true)
+    WITH CHECK (true);
+EXCEPTION
+  WHEN duplicate_object THEN null;
+END $$;

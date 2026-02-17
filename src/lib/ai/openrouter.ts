@@ -447,12 +447,15 @@ export class OpenRouterClient {
     }
 }
 
-// Singleton instance
+// Singleton instance - re-creates if API key changes (e.g. after env refresh)
 let clientInstance: OpenRouterClient | null = null;
+let clientApiKeySnapshot: string | undefined;
 
 export function getAIClient(): OpenRouterClient {
-    if (!clientInstance) {
-        clientInstance = new OpenRouterClient();
+    const currentKey = process.env.OPENROUTER_API_KEY;
+    if (!clientInstance || currentKey !== clientApiKeySnapshot) {
+        clientInstance = new OpenRouterClient(currentKey);
+        clientApiKeySnapshot = currentKey;
     }
     return clientInstance;
 }

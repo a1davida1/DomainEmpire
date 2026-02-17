@@ -122,20 +122,9 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {
-        "subscribers_backend_access": {
-          "name": "subscribers_backend_access",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "current_role"
-          ],
-          "using": "(true)",
-          "withCheck": "(true)"
-        }
-      },
+      "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": true
+      "isRLSEnabled": false
     },
     "public.acquisition_events": {
       "name": "acquisition_events",
@@ -5470,9 +5459,20 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {},
+      "policies": {
+        "growth_channel_credentials_backend_access": {
+          "name": "growth_channel_credentials_backend_access",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "current_role"
+          ],
+          "using": "(true)",
+          "withCheck": "(true)"
+        }
+      },
       "checkConstraints": {},
-      "isRLSEnabled": false
+      "isRLSEnabled": true
     },
     "public.growth_credential_drill_runs": {
       "name": "growth_credential_drill_runs",
@@ -10218,9 +10218,20 @@
           ]
         }
       },
-      "policies": {},
+      "policies": {
+        "sessions_backend_access": {
+          "name": "sessions_backend_access",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "current_role"
+          ],
+          "using": "(true)",
+          "withCheck": "(true)"
+        }
+      },
       "checkConstraints": {},
-      "isRLSEnabled": false
+      "isRLSEnabled": true
     },
     "public.site_templates": {
       "name": "site_templates",
@@ -10663,9 +10674,20 @@
           ]
         }
       },
-      "policies": {},
+      "policies": {
+        "subscribers_backend_access": {
+          "name": "subscribers_backend_access",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "current_role"
+          ],
+          "using": "(true)",
+          "withCheck": "(true)"
+        }
+      },
       "checkConstraints": {},
-      "isRLSEnabled": false
+      "isRLSEnabled": true
     },
     "public.users": {
       "name": "users",
@@ -10802,9 +10824,20 @@
           ]
         }
       },
-      "policies": {},
+      "policies": {
+        "users_backend_access": {
+          "name": "users_backend_access",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "current_role"
+          ],
+          "using": "(true)",
+          "withCheck": "(true)"
+        }
+      },
       "checkConstraints": {},
-      "isRLSEnabled": false
+      "isRLSEnabled": true
     }
   },
   "enums": {},

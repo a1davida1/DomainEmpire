@@ -92,7 +92,7 @@ import { archiveStaleSubscribers } from '@/lib/subscribers';
 
 const LOCK_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 const JOB_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes max per job
-const BATCH_SIZE = 5;
+const BATCH_SIZE = Number.parseInt(process.env.WORKER_BATCH_SIZE || '10', 10) || 10;
 const POLL_INTERVAL_MS = 5000;
 const STALE_LOCK_CHECK_INTERVAL = 60_000; // Check for stale locks every 60s
 const SCHEDULER_CHECK_INTERVAL = 60 * 60 * 1000; // Run scheduler every hour
