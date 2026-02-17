@@ -96,6 +96,9 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
         await db.update(pageDefinitions).set(updates).where(eq(pageDefinitions.id, id));
 
         const updated = await db.select().from(pageDefinitions).where(eq(pageDefinitions.id, id)).limit(1);
+        if (updated.length === 0) {
+            return NextResponse.json({ error: 'Page not found after update' }, { status: 404 });
+        }
         return NextResponse.json(updated[0]);
     } catch (error) {
         console.error('[api/pages] Update failed:', error);

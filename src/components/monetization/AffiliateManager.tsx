@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Trash2, Save } from 'lucide-react';
+import { Plus, Trash2, Save, CheckCircle2 } from 'lucide-react';
 
 interface AffiliateProgram {
     provider: string;
@@ -23,6 +23,7 @@ interface AffiliateManagerProps {
 export function AffiliateManager({ domainId, initialAffiliates }: AffiliateManagerProps) {
     const [affiliates, setAffiliates] = useState<AffiliateProgram[]>(initialAffiliates);
     const [loading, setLoading] = useState(false);
+    const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
     const [newAffiliate, setNewAffiliate] = useState<AffiliateProgram>({
         provider: '',
         programId: '',
@@ -49,23 +50,20 @@ export function AffiliateManager({ domainId, initialAffiliates }: AffiliateManag
 
     const handleSave = async () => {
         setLoading(true);
+        setSaveStatus('idle');
         try {
             const res = await fetch('/api/monetization/affiliates', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ domainId, affiliates }),
             });
-            // The API I wrote expects { domainId, affiliate } where affiliate seems to be singular or array based on my previous code?
-            // Checking... the API does: const updatedAffiliates = [...currentAffiliates, affiliate];
-            // Oh wait, my API implementation was for ADDING a single affiliate.
-            // I should update the API to handle replacing the whole list or handle singular adds correctly.
-            // Let's assume for now I'll fix the API to accept the full list to be safer for "Manager" style UI.
 
             if (!res.ok) throw new Error('Failed to save');
-
-            // Success feedback (could add toast here)
+            setSaveStatus('saved');
+            setTimeout(() => setSaveStatus('idle'), 3000);
         } catch (error) {
             console.error(error);
+            setSaveStatus('error');
         } finally {
             setLoading(false);
         }
@@ -80,7 +78,7 @@ export function AffiliateManager({ domainId, initialAffiliates }: AffiliateManag
             <CardContent className="space-y-6">
                 <div className="space-y-4">
                     {affiliates.map((aff, i) => (
-                        <div key={i} className="flex items-start gap-4 p-4 border rounded-lg bg-muted/20">
+                        <div key={`${aff.provider}-${aff.programId}`} className="flex items-start gap-4 p-4 border rounded-lg bg-muted/20">
                             <div className="grid gap-4 flex-1 md:grid-cols-2">
                                 <div>
                                     <Label className="text-xs text-muted-foreground">Provider</Label>
@@ -130,9 +128,12 @@ export function AffiliateManager({ domainId, initialAffiliates }: AffiliateManag
 
                 <div className="flex justify-end pt-4">
                     <Button onClick={handleSave} disabled={loading}>
-                        {loading ? 'Saving...' : 'Save Changes'}
-                        <Save className="ml-2 h-4 w-4" />
+                        {loading ? 'Saving...' : saveStatus === 'saved' ? 'Saved!' : 'Save Changes'}
+                        {saveStatus === 'saved' ? <CheckCircle2 className="ml-2 h-4 w-4 text-green-500" /> : <Save className="ml-2 h-4 w-4" />}
                     </Button>
+                    {saveStatus === 'error' && (
+                        <span className="text-sm text-destructive">Failed to save. Please try again.</span>
+                    )}
                 </div>
             </CardContent>
         </Card>

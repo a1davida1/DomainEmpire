@@ -40,7 +40,7 @@ export async function createUser(opts: {
 }): Promise<string> {
     const passwordHash = await hashPassword(opts.password);
 
-    const [user] = await db.insert(users).values({
+    const inserted = await db.insert(users).values({
         email: opts.email.toLowerCase().trim(),
         name: opts.name.trim(),
         passwordHash,
@@ -49,7 +49,10 @@ export async function createUser(opts: {
         credentials: opts.credentials || null,
     }).returning({ id: users.id });
 
-    return user.id;
+    if (inserted.length === 0) {
+        throw new Error('User insert returned no rows');
+    }
+    return inserted[0].id;
 }
 
 export async function getUserById(userId: string): Promise<AuthUser | null> {

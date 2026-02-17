@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
         createdAt: users.createdAt,
     }).from(users).orderBy(desc(users.createdAt));
 
-    return NextResponse.json(allUsers);
+    return NextResponse.json({ users: allUsers });
 }
 
 // POST /api/users — create a new user (admin only)

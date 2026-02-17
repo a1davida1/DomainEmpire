@@ -113,7 +113,8 @@ export function getClientIp(request: Request): string {
     if (trustProxy) {
         const forwarded = request.headers.get('x-forwarded-for');
         if (forwarded) {
-            return forwarded.split(',')[0].trim();
+            const ip = forwarded.split(',')[0]?.trim();
+            if (ip) return ip;
         }
         const realIp = request.headers.get('x-real-ip');
         if (realIp) {

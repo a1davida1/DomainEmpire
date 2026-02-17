@@ -201,7 +201,7 @@ The following list maps the requested content surface to current implementation 
 | Case studies and scenarios | Partially implemented (content types can express scenarios) | Substantiation workflow, typical-outcome safeguards, scenario ID registry tied to evidence docs |
 | Reviews and testing | Partially implemented (`review` type, reviewer roles, QA templates) | Test protocol versioning, raw notes attachments, reviewer expertise display + audit binding |
 | Lead-gen landing pages | Implemented (`lead_capture` type + capture route) | Compliance gates for high-risk verticals, stronger claim linting, disclosure placement verification snapshots |
-| Lead forms | Implemented (capture APIs + subscriber attribution + pseudonymized subscriber metadata + retention archival policy) | Consent text version pinning at submit time, policy audit export |
+| Lead forms | Partially implemented (capture APIs + subscriber attribution) | Subscriber metadata anonymization, retention archival policy, consent text version pinning at submit time, policy audit export |
 | Newsletters | Partially implemented (subscriber system exists) | Campaign send engine, preference center, unsubscribe/compliance reporting and FTC promo labeling pipeline |
 | Micro-SaaS product pages | Partially implemented (template framework can render) | Release readiness checklist, uptime/incident surfaced metadata, functional claim verifier |
 | Pricing and checkout | Partially implemented (billing primitives exist) | Transparent terms version capture, experiment holdout logging, cancellation flow audit hooks |

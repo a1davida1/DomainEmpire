@@ -5460,15 +5460,35 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {
-        "growth_channel_credentials_backend_access": {
-          "name": "growth_channel_credentials_backend_access",
+        "growth_channel_credentials_backend_select": {
+          "name": "growth_channel_credentials_backend_select",
           "as": "PERMISSIVE",
-          "for": "ALL",
+          "for": "SELECT",
           "to": [
-            "current_role"
+            "postgres"
           ],
-          "using": "(true)",
-          "withCheck": "(true)"
+          "using": "(current_user = 'postgres'::name)",
+          "withCheck": "(current_user = 'postgres'::name)"
+        },
+        "growth_channel_credentials_backend_insert": {
+          "name": "growth_channel_credentials_backend_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "postgres"
+          ],
+          "using": "(current_user = 'postgres'::name)",
+          "withCheck": "(current_user = 'postgres'::name)"
+        },
+        "growth_channel_credentials_backend_update": {
+          "name": "growth_channel_credentials_backend_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "postgres"
+          ],
+          "using": "(current_user = 'postgres'::name)",
+          "withCheck": "(current_user = 'postgres'::name)"
         }
       },
       "checkConstraints": {},
@@ -10224,7 +10244,7 @@
           "as": "PERMISSIVE",
           "for": "ALL",
           "to": [
-            "current_role"
+            "postgres"
           ],
           "using": "(true)",
           "withCheck": "(true)"
@@ -10680,7 +10700,7 @@
           "as": "PERMISSIVE",
           "for": "ALL",
           "to": [
-            "current_role"
+            "postgres"
           ],
           "using": "(true)",
           "withCheck": "(true)"
@@ -10830,7 +10850,7 @@
           "as": "PERMISSIVE",
           "for": "ALL",
           "to": [
-            "current_role"
+            "postgres"
           ],
           "using": "(true)",
           "withCheck": "(true)"

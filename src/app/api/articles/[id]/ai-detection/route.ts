@@ -7,6 +7,8 @@ import { checkAIDetection, isAIDetectionEnabled } from '@/lib/ai/ai-detection';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MIN_WORD_COUNT = 50;
+const CSRF_HEADER = 'x-requested-with';
+const CSRF_VALUE = 'xmlhttprequest';
 
 // GET /api/articles/[id]/ai-detection — Return current AI detection data
 export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
@@ -51,6 +53,16 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     const params = await props.params;
     const authError = await requireAuth(request);
     if (authError) return authError;
+
+    // Keep route-level CSRF guard as defense-in-depth for this sensitive mutating endpoint.
+    // Dashboard clients should call via apiFetch(), which sets this header automatically.
+    const csrfHeader = request.headers.get(CSRF_HEADER);
+    if (csrfHeader?.toLowerCase() !== CSRF_VALUE) {
+        return NextResponse.json(
+            { error: 'CSRF validation failed. Use apiFetch() or add X-Requested-With header.' },
+            { status: 403 },
+        );
+    }
 
     const ip = getClientIp(request) || 'unknown';
     const limit = aiLimiter(ip);

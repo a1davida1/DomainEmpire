@@ -167,7 +167,9 @@ export function AiDetectionCard({ articleId, initialScore, initialResult, initia
                         {/* Checked timestamp */}
                         <div className="flex justify-between text-sm">
                             <span className="text-muted-foreground">Checked</span>
-                            <span className="text-xs text-muted-foreground">{formatDate(checkedAt)}</span>
+                            <span className="text-xs text-muted-foreground">
+                                {checkedAt ? formatDate(checkedAt) : '—'}
+                            </span>
                         </div>
 
                         {/* Re-check button */}

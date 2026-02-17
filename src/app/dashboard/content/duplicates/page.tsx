@@ -34,12 +34,14 @@ export default function DuplicatesPage() {
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        fetch('/api/domains?status=active')
+        let cancelled = false;
+        fetch('/api/domains?status=active&limit=500')
             .then(res => res.json())
             .then(data => {
-                if (data.domains) setDomains(data.domains);
+                if (!cancelled && data.domains) setDomains(data.domains);
             })
             .catch(err => console.error('Failed to load domains', err));
+        return () => { cancelled = true; };
     }, []);
 
     const checkDuplicates = async () => {

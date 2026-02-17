@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { apiFetch } from '@/lib/api-fetch';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -84,10 +85,9 @@ export default function NewArticlePage() {
                     .filter(Boolean),
             };
 
-            const res = await fetch('/api/articles', {
+            const res = await apiFetch('/api/articles', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
+                body,
             });
 
             const result = await res.json().catch(() => ({}));

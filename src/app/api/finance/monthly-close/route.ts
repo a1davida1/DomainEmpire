@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
     if (authError) return authError;
 
     const user = getRequestUser(request);
-    if (!user.id) {
+    if (!user?.id) {
         return NextResponse.json({ error: 'Unable to identify user' }, { status: 401 });
     }
 

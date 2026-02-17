@@ -20,7 +20,12 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
         }
 
         const updates: Record<string, unknown> = { updatedAt: new Date() };
-        if (name !== undefined) updates.name = name.trim();
+        if (name !== undefined) {
+            if (typeof name !== 'string') {
+                return NextResponse.json({ error: 'Name must be a string' }, { status: 400 });
+            }
+            updates.name = name.trim();
+        }
         if (role !== undefined) {
             const validRoles = ['admin', 'editor', 'reviewer', 'expert'];
             if (!validRoles.includes(role)) {

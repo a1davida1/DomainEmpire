@@ -29,9 +29,12 @@ ALTER TABLE "subscribers" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "growth_channel_credentials" ENABLE ROW LEVEL SECURITY;
 --> statement-breakpoint
 
+-- Explicitly pin RLS backend policies to the backend/admin role instead of
+-- migration-time current_role to avoid policy drift across environments.
+
 DO $$ BEGIN
   CREATE POLICY "users_backend_access" ON "users"
-    AS PERMISSIVE FOR ALL TO current_role
+    AS PERMISSIVE FOR ALL TO postgres
     USING (true) WITH CHECK (true);
 EXCEPTION WHEN duplicate_object THEN null;
 END $$;
@@ -39,7 +42,7 @@ END $$;
 
 DO $$ BEGIN
   CREATE POLICY "sessions_backend_access" ON "sessions"
-    AS PERMISSIVE FOR ALL TO current_role
+    AS PERMISSIVE FOR ALL TO postgres
     USING (true) WITH CHECK (true);
 EXCEPTION WHEN duplicate_object THEN null;
 END $$;
@@ -47,15 +50,35 @@ END $$;
 
 DO $$ BEGIN
   CREATE POLICY "subscribers_backend_access" ON "subscribers"
-    AS PERMISSIVE FOR ALL TO current_role
+    AS PERMISSIVE FOR ALL TO postgres
     USING (true) WITH CHECK (true);
 EXCEPTION WHEN duplicate_object THEN null;
 END $$;
 --> statement-breakpoint
 
+DROP POLICY IF EXISTS "growth_channel_credentials_backend_access" ON "growth_channel_credentials";
+--> statement-breakpoint
+
 DO $$ BEGIN
-  CREATE POLICY "growth_channel_credentials_backend_access" ON "growth_channel_credentials"
-    AS PERMISSIVE FOR ALL TO current_role
-    USING (true) WITH CHECK (true);
+  CREATE POLICY "growth_channel_credentials_backend_select" ON "growth_channel_credentials"
+    AS PERMISSIVE FOR SELECT TO postgres
+    USING (current_user = 'postgres'::name);
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+
+DO $$ BEGIN
+  CREATE POLICY "growth_channel_credentials_backend_insert" ON "growth_channel_credentials"
+    AS PERMISSIVE FOR INSERT TO postgres
+    WITH CHECK (current_user = 'postgres'::name);
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+
+DO $$ BEGIN
+  CREATE POLICY "growth_channel_credentials_backend_update" ON "growth_channel_credentials"
+    AS PERMISSIVE FOR UPDATE TO postgres
+    USING (current_user = 'postgres'::name)
+    WITH CHECK (current_user = 'postgres'::name);
 EXCEPTION WHEN duplicate_object THEN null;
 END $$;

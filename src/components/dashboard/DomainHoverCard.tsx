@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
@@ -28,6 +28,12 @@ export function DomainHoverCard({
 }: DomainHoverCardProps) {
     const [show, setShow] = useState(false);
     const timeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    useEffect(() => {
+        return () => {
+            if (timeout.current) clearTimeout(timeout.current);
+        };
+    }, []);
 
     function enter() {
         if (timeout.current) clearTimeout(timeout.current);

@@ -13,7 +13,7 @@ type ProcessResult = {
 
 export function ProcessNowButton({ defaultMaxJobs = 25 }: { defaultMaxJobs?: number }) {
     const router = useRouter();
-    const [maxJobs, setMaxJobs] = useState(defaultMaxJobs);
+    const [maxJobs, setMaxJobs] = useState<number | ''>(defaultMaxJobs);
     const [running, setRunning] = useState(false);
     const [result, setResult] = useState<ProcessResult | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -27,7 +27,7 @@ export function ProcessNowButton({ defaultMaxJobs = 25 }: { defaultMaxJobs?: num
             const res = await fetch('/api/queue/process', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ maxJobs }),
+                body: JSON.stringify({ maxJobs: maxJobs === '' ? undefined : maxJobs }),
             });
 
             const body = (await res.json().catch(() => ({}))) as ProcessResult;
@@ -51,6 +51,10 @@ export function ProcessNowButton({ defaultMaxJobs = 25 }: { defaultMaxJobs?: num
                 type="number"
                 value={maxJobs}
                 onChange={(e) => {
+                    if (e.target.value === '') {
+                        setMaxJobs('');
+                        return;
+                    }
                     const parsed = Number.parseInt(e.target.value, 10);
                     if (Number.isFinite(parsed)) setMaxJobs(Math.max(1, Math.min(parsed, 200)));
                 }}

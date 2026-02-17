@@ -50,7 +50,8 @@ export default function UsersPage() {
         try {
             const res = await fetch('/api/users');
             if (res.ok) {
-                setUsers(await res.json());
+                const data = await res.json();
+                setUsers(data.users ?? data);
             }
         } catch (err) {
             console.error('[Users] Failed to load users:', err);

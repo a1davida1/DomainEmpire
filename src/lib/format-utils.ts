@@ -11,12 +11,12 @@ export function formatDate(date: Date | string | null | undefined): string {
 }
 
 export function formatNumber(num: number | null | undefined): string {
-    if (num === null || num === undefined) return '-';
+    if (num === null || num === undefined || !Number.isFinite(num)) return '-';
     return new Intl.NumberFormat('en-US').format(num);
 }
 
 export function formatCurrency(num: number | null | undefined): string {
-    if (num === null || num === undefined) return '-';
+    if (num === null || num === undefined || !Number.isFinite(num)) return '-';
     return new Intl.NumberFormat('en-US', {
         style: 'currency',
         currency: 'USD',

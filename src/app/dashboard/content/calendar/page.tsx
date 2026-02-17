@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
@@ -44,30 +44,31 @@ export default function CalendarPage() {
     const [error, setError] = useState<string | null>(null);
     const [selectedDay, setSelectedDay] = useState<number | null>(null);
 
-    const fetchData = useCallback(async () => {
+    useEffect(() => {
+        const controller = new AbortController();
         setLoading(true);
         setError(null);
         const start = `${year}-${String(month + 1).padStart(2, '0')}-01`;
         const endDate = new Date(year, month + 1, 0);
         const end = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}`;
-        try {
-            const res = await fetch(`/api/content/calendar?start=${start}&end=${end}`);
-            if (res.ok) {
-                setData(await res.json());
-            } else {
-                setError('Failed to load calendar data');
+        fetch(`/api/content/calendar?start=${start}&end=${end}`, { signal: controller.signal })
+            .then(async (res) => {
+                if (res.ok) {
+                    setData(await res.json());
+                } else {
+                    setError('Failed to load calendar data');
+                    setData(null);
+                }
+            })
+            .catch((e) => {
+                if (e instanceof DOMException && e.name === 'AbortError') return;
+                console.error('Calendar fetch failed:', e);
+                setError('Could not connect to server');
                 setData(null);
-            }
-        } catch (e) {
-            console.error('Calendar fetch failed:', e);
-            setError('Could not connect to server');
-            setData(null);
-        } finally {
-            setLoading(false);
-        }
+            })
+            .finally(() => setLoading(false));
+        return () => controller.abort();
     }, [year, month]);
-
-    useEffect(() => { fetchData(); }, [fetchData]);
 
     function prevMonth() {
         if (month === 0) { setYear(y => y - 1); setMonth(11); }
@@ -184,9 +185,9 @@ export default function CalendarPage() {
                                             </span>
                                             {dayArticles.length > 0 && (
                                                 <div className="mt-1 flex gap-0.5 flex-wrap">
-                                                    {dayArticles.slice(0, 3).map((a, idx) => (
+                                                    {dayArticles.slice(0, 3).map((a) => (
                                                         <div
-                                                            key={idx}
+                                                            key={a.id}
                                                             className={`w-2 h-2 rounded-full ${STATUS_COLORS[a.status] || 'bg-gray-300'}`}
                                                             title={`${a.title} (${a.status})`}
                                                         />
