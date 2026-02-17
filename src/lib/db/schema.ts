@@ -1,4 +1,4 @@
-import { pgTable, text, integer, real, boolean, timestamp, jsonb, uuid, index, uniqueIndex, unique, check, numeric, type AnyPgColumn } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, bigint, real, boolean, timestamp, jsonb, uuid, index, uniqueIndex, unique, check, numeric, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 export { sql };
 
@@ -113,7 +113,7 @@ export const domains = pgTable('domains', {
     tierIdx: index('domain_tier_idx').on(t.tier),
     bucketIdx: index('domain_bucket_idx').on(t.bucket), // Note: This references operational bucket
     verticalIdx: index('domain_vertical_idx').on(t.vertical),
-}));
+});
 
 // ===========================================
 // PAGE DEFINITIONS: Block-based page composition for Template System v2
@@ -137,7 +137,7 @@ export const pageDefinitions = pgTable('page_definitions', {
     status: text('status').notNull().default('draft'),
     reviewRequestedAt: timestamp('review_requested_at'),
     lastReviewedAt: timestamp('last_reviewed_at'),
-    lastReviewedBy: uuid('last_reviewed_by').references(() => users.id),
+    lastReviewedBy: uuid('last_reviewed_by').references(() => users.id, { onDelete: 'set null' }),
     version: integer('version').notNull().default(1),
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow(),
@@ -167,11 +167,12 @@ export const pageVariants = pgTable('page_variants', {
         config?: Record<string, unknown>;
     }>>().notNull().default([]),
     isActive: boolean('is_active').notNull().default(true),
-    impressions: integer('impressions').notNull().default(0),
-    conversions: integer('conversions').notNull().default(0),
+    impressions: bigint('impressions', { mode: 'number' }).notNull().default(0),
+    conversions: bigint('conversions', { mode: 'number' }).notNull().default(0),
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow(),
 }, (t) => ({
+    weightCheck: check('ab_page_variants_weight_check', sql`${t.weight} > 0`),
     pageVariantUnq: uniqueIndex('page_variant_page_key_uidx').on(t.pageId, t.variantKey),
     pageIdx: index('page_variant_page_idx').on(t.pageId),
     activeIdx: index('page_variant_active_idx').on(t.isActive),
@@ -1290,7 +1291,7 @@ export const apiCallLogs = pgTable('api_call_logs', {
     promptVersion: text('prompt_version').notNull().default('legacy.v1'),
     routingVersion: text('routing_version').notNull().default('legacy'),
     promptHash: text('prompt_hash'),
-    promptBody: text('prompt_body'),
+    promptBodyRedacted: text('prompt_body_redacted'),
     fallbackUsed: boolean('fallback_used').notNull().default(false),
     inputTokens: integer('input_tokens').notNull(),
     outputTokens: integer('output_tokens').notNull(),
@@ -1559,7 +1560,7 @@ export const contentRevisions = pgTable('content_revisions', {
 export const reviewEvents = pgTable('review_events', {
     id: uuid('id').primaryKey().defaultRandom(),
     articleId: uuid('article_id').references(() => articles.id, { onDelete: 'cascade' }),
-    pageDefinitionId: uuid('page_definition_id').references(() => pageDefinitions.id, { onDelete: 'cascade' }),
+    pageDefinitionId: uuid('page_definition_id').references(() => pageDefinitions.id, { onDelete: 'set null' }),
     revisionId: uuid('revision_id').references(() => contentRevisions.id),
     actorId: uuid('actor_id').notNull().references(() => users.id),
     actorRole: text('actor_role').notNull(),
@@ -1873,8 +1874,11 @@ export const subscribers = pgTable('subscribers', {
 
     // Contact info
     email: text('email').notNull(),
+    emailHash: text('email_hash').notNull(),
     name: text('name'),
+    // Legacy plaintext phone column retained for compatibility; new writes should keep this null.
     phone: text('phone'),
+    phoneHash: text('phone_hash'),
 
     // Source tracking
     source: text('source', {
@@ -1889,7 +1893,7 @@ export const subscribers = pgTable('subscribers', {
 
     // Status
     status: text('status', {
-        enum: ['active', 'unsubscribed', 'bounced']
+        enum: ['active', 'unsubscribed', 'bounced', 'archived']
     }).notNull().default('active'),
 
     // Value tracking
@@ -1897,17 +1901,23 @@ export const subscribers = pgTable('subscribers', {
     convertedAt: timestamp('converted_at'),
 
     // Metadata
+    // Legacy plaintext columns retained for compatibility; new writes should keep these null.
     ipAddress: text('ip_address'),
+    ipHash: text('ip_hash'),
     userAgent: text('user_agent'),
+    userAgentFingerprint: text('user_agent_fingerprint'),
     referrer: text('referrer'),
+    referrerFingerprint: text('referrer_fingerprint'),
 
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow(),
 }, (t) => ({
     domainIdx: index('subscriber_domain_idx').on(t.domainId),
     emailIdx: index('subscriber_email_idx').on(t.email),
+    emailHashIdx: index('subscriber_email_hash_idx').on(t.emailHash),
     sourceIdx: index('subscriber_source_idx').on(t.source),
     statusIdx: index('subscriber_status_idx').on(t.status),
+    ipHashIdx: index('subscriber_ip_hash_idx').on(t.ipHash),
     sourceCampaignIdx: index('subscriber_source_campaign_idx').on(t.sourceCampaignId),
     sourceClickIdx: index('subscriber_source_click_idx').on(t.sourceClickId),
     domainEmailUnq: unique('subscriber_domain_email_unq').on(t.domainId, t.email),
@@ -2009,6 +2019,36 @@ export const domainsRelations = relations(domains, ({ many, one }) => ({
     redirectTarget: one(domains, {
         fields: [domains.redirectTargetId],
         references: [domains.id],
+    }),
+}));
+
+export const pageDefinitionsRelations = relations(pageDefinitions, ({ one, many }) => ({
+    domain: one(domains, {
+        fields: [pageDefinitions.domainId],
+        references: [domains.id],
+    }),
+    lastReviewedByUser: one(users, {
+        fields: [pageDefinitions.lastReviewedBy],
+        references: [users.id],
+    }),
+    variants: many(pageVariants),
+}));
+
+export const pageVariantsRelations = relations(pageVariants, ({ one }) => ({
+    page: one(pageDefinitions, {
+        fields: [pageVariants.pageId],
+        references: [pageDefinitions.id],
+    }),
+}));
+
+export const blockTemplatesRelations = relations(blockTemplates, ({ one }) => ({
+    sourceDomain: one(domains, {
+        fields: [blockTemplates.sourceDomainId],
+        references: [domains.id],
+    }),
+    creator: one(users, {
+        fields: [blockTemplates.createdBy],
+        references: [users.id],
     }),
 }));
 

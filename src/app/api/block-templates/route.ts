@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthUser } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { blockTemplates } from '@/lib/db/schema';
-import { eq, or, ilike, sql } from 'drizzle-orm';
+import { eq, and, or, ilike, sql } from 'drizzle-orm';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -35,11 +35,11 @@ export async function GET(request: NextRequest) {
         conditions.push(sql`${tag} = ANY(${blockTemplates.tags})`);
     }
     if (search) {
-        const escaped = search.replace(/%/g, '\\%').replace(/_/g, '\\_');
+        const escapedSearch = search.replace(/([\\%_])/g, '\\$1');
         conditions.push(
             or(
-                ilike(blockTemplates.name, `%${escaped}%`),
-                ilike(blockTemplates.description, `%${escaped}%`),
+                ilike(blockTemplates.name, `%${escapedSearch}%`),
+                ilike(blockTemplates.description, `%${escapedSearch}%`),
             )!,
         );
     }
@@ -64,9 +64,15 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const body = await request.json();
-    const name = (body.name || '').trim();
-    const blockType = (body.blockType || '').trim();
+    let body: Record<string, unknown>;
+    try {
+        body = await request.json();
+    } catch {
+        return NextResponse.json({ error: 'Malformed JSON body' }, { status: 400 });
+    }
+
+    const name = typeof body.name === 'string' ? body.name.trim() : '';
+    const blockType = typeof body.blockType === 'string' ? body.blockType.trim() : '';
 
     if (!name) {
         return NextResponse.json({ error: 'name is required' }, { status: 400 });
@@ -81,14 +87,14 @@ export async function POST(request: NextRequest) {
 
     const [created] = await db.insert(blockTemplates).values({
         name,
-        description: body.description || null,
+        description: typeof body.description === 'string' ? body.description : null,
         blockType,
-        variant: body.variant || null,
-        config: body.config || {},
-        content: body.content || {},
+        variant: typeof body.variant === 'string' ? body.variant : null,
+        config: typeof body.config === 'object' && body.config !== null ? body.config as Record<string, unknown> : {},
+        content: typeof body.content === 'object' && body.content !== null ? body.content as Record<string, unknown> : {},
         tags: Array.isArray(body.tags) ? body.tags.filter((t: unknown) => typeof t === 'string') : [],
-        sourceDomainId: body.sourceDomainId && UUID_RE.test(body.sourceDomainId) ? body.sourceDomainId : null,
-        sourceBlockId: body.sourceBlockId || null,
+        sourceDomainId: typeof body.sourceDomainId === 'string' && UUID_RE.test(body.sourceDomainId) ? body.sourceDomainId : null,
+        sourceBlockId: typeof body.sourceBlockId === 'string' && UUID_RE.test(body.sourceBlockId) ? body.sourceBlockId : null,
         isGlobal: body.isGlobal === true,
         createdBy: user.id,
     }).returning();
@@ -106,23 +112,29 @@ export async function DELETE(request: NextRequest) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const body = await request.json();
-    const templateId = body.templateId;
+    let body: Record<string, unknown>;
+    try {
+        body = await request.json();
+    } catch {
+        return NextResponse.json({ error: 'Malformed JSON body' }, { status: 400 });
+    }
+
+    const templateId = typeof body.templateId === 'string' ? body.templateId : '';
     if (!templateId || !UUID_RE.test(templateId)) {
         return NextResponse.json({ error: 'templateId is required' }, { status: 400 });
     }
 
-    const existing = await db.select({ id: blockTemplates.id, createdBy: blockTemplates.createdBy })
-        .from(blockTemplates).where(eq(blockTemplates.id, templateId)).limit(1);
-    if (existing.length === 0) {
+    const ownershipCondition = user.role === 'admin'
+        ? eq(blockTemplates.id, templateId)
+        : and(eq(blockTemplates.id, templateId), eq(blockTemplates.createdBy, user.id));
+
+    const deleted = await db.delete(blockTemplates)
+        .where(ownershipCondition)
+        .returning({ id: blockTemplates.id });
+
+    if (deleted.length === 0) {
         return NextResponse.json({ error: 'Template not found' }, { status: 404 });
     }
-    if (existing[0].createdBy !== user.id && user.role !== 'admin') {
-        return NextResponse.json({ error: 'Only the creator or an admin can delete this template' }, { status: 403 });
-    }
-
-    await db.delete(blockTemplates)
-        .where(eq(blockTemplates.id, templateId));
 
     return NextResponse.json({ success: true, deleted: templateId });
 }

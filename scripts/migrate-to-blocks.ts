@@ -93,14 +93,32 @@ function extractSiteTitle(domain: string): string {
     return sld.replaceAll('-', ' ').replaceAll(/\b\w/g, c => c.toUpperCase());
 }
 
+function parseFlagValue(args: string[], flagName: string): string | null {
+    const flagIndex = args.indexOf(flagName);
+    if (flagIndex < 0) return null;
+
+    const value = args[flagIndex + 1];
+    if (!value || value.startsWith('--')) {
+        throw new Error(`Missing value for ${flagName}`);
+    }
+
+    return value;
+}
+
 async function main() {
     const args = process.argv.slice(2);
     const execute = args.includes('--execute');
     const publish = args.includes('--publish');
-    const domainFlag = args.indexOf('--domain');
-    const templateFlag = args.indexOf('--template');
-    const filterDomain = domainFlag >= 0 ? args[domainFlag + 1] : null;
-    const filterTemplate = templateFlag >= 0 ? args[templateFlag + 1] : null;
+
+    let filterDomain: string | null = null;
+    let filterTemplate: string | null = null;
+    try {
+        filterDomain = parseFlagValue(args, '--domain');
+        filterTemplate = parseFlagValue(args, '--template');
+    } catch (err) {
+        console.error(err instanceof Error ? err.message : String(err));
+        process.exit(1);
+    }
 
     console.log('=== v1 → v2 Block Migration ===');
     console.log(`Mode: ${execute ? 'EXECUTE' : 'DRY RUN'}`);
@@ -211,7 +229,7 @@ async function main() {
 
                 for (const article of articles) {
                     const slug = article.slug || '';
-                    if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) continue;
+                    if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(slug)) continue;
                     const contentType = article.contentType || 'article';
                     const blocks = getArticlePagePreset(contentType);
                     articlePages.push({
@@ -227,38 +245,40 @@ async function main() {
                 result.homepageCreated = true;
 
                 if (execute) {
-                    // Insert homepage
-                    await db.insert(schema.pageDefinitions).values({
-                        domainId: domain.id,
-                        route: '/',
-                        title: extractSiteTitle(domain.domain),
-                        metaDescription: `Expert guides about ${domain.niche || 'various topics'}`,
-                        theme: v2Theme,
-                        skin: v2Skin,
-                        blocks: homepageBlocks,
-                        isPublished: publish,
-                        version: 1,
-                    });
-
-                    // Insert article pages
-                    for (const ap of articlePages) {
-                        await db.insert(schema.pageDefinitions).values({
+                    await db.transaction(async (tx) => {
+                        // Insert homepage
+                        await tx.insert(schema.pageDefinitions).values({
                             domainId: domain.id,
-                            route: ap.route,
-                            title: ap.title,
-                            metaDescription: ap.metaDescription,
+                            route: '/',
+                            title: extractSiteTitle(domain.domain),
+                            metaDescription: `Expert guides about ${domain.niche || 'various topics'}`,
                             theme: v2Theme,
                             skin: v2Skin,
-                            blocks: ap.blocks,
+                            blocks: homepageBlocks,
                             isPublished: publish,
                             version: 1,
                         });
-                    }
 
-                    // Update domain skin column
-                    await db.update(schema.domains).set({
-                        skin: v2Skin,
-                    }).where(eq(schema.domains.id, domain.id));
+                        // Insert article pages
+                        for (const ap of articlePages) {
+                            await tx.insert(schema.pageDefinitions).values({
+                                domainId: domain.id,
+                                route: ap.route,
+                                title: ap.title,
+                                metaDescription: ap.metaDescription,
+                                theme: v2Theme,
+                                skin: v2Skin,
+                                blocks: ap.blocks,
+                                isPublished: publish,
+                                version: 1,
+                            });
+                        }
+
+                        // Update domain skin column
+                        await tx.update(schema.domains).set({
+                            skin: v2Skin,
+                        }).where(eq(schema.domains.id, domain.id));
+                    });
                 }
 
                 totalCreated++;

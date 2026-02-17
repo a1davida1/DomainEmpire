@@ -6,6 +6,9 @@ import Link from 'next/link';
 import { db, subscribers, domains } from '@/lib/db';
 import { eq, count, desc } from 'drizzle-orm';
 import { getSubscriberStats } from '@/lib/subscribers';
+import { DataLoadError } from '@/components/dashboard/DataLoadError';
+import { getAuthUser } from '@/lib/auth';
+import { redirect } from 'next/navigation';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,9 +18,10 @@ async function getDomainOptions() {
             .select({ id: domains.id, domain: domains.domain })
             .from(domains)
             .orderBy(domains.domain);
-        return result;
-    } catch {
-        return [];
+        return { data: result, error: null };
+    } catch (err) {
+        console.error('[Subscribers] Failed to load domain options:', err);
+        return { data: [], error: err instanceof Error ? err.message : 'Failed to load domains' };
     }
 }
 
@@ -47,9 +51,10 @@ async function getRecentSubscribers(domainId?: string, page = 1) {
                 .offset(offset),
             db.select({ count: count() }).from(subscribers).where(where),
         ]);
-        return { rows, total: totalResult[0]?.count ?? 0 };
-    } catch {
-        return { rows: [], total: 0 };
+        return { rows, total: totalResult[0]?.count ?? 0, error: null as string | null };
+    } catch (err) {
+        console.error('[Subscribers] Failed to load subscribers:', err);
+        return { rows: [], total: 0, error: err instanceof Error ? err.message : 'Failed to load subscribers' };
     }
 }
 
@@ -66,21 +71,34 @@ export default async function SubscribersPage({
 }: {
     searchParams: Promise<{ domainId?: string; page?: string }>;
 }) {
+    const user = await getAuthUser();
+    if (!user || user.role !== 'admin') {
+        redirect('/dashboard');
+    }
+
     const params = await searchParams;
     const domainId = params.domainId;
     const rawPage = parseInt(params.page || '1', 10);
     const page = Number.isFinite(rawPage) ? Math.max(1, rawPage) : 1;
 
-    const [domainOptions, stats, { rows, total }] = await Promise.all([
+    const [domainOptionsResult, stats, subscribersResult] = await Promise.all([
         getDomainOptions(),
         getSubscriberStats(domainId),
         getRecentSubscribers(domainId, page),
     ]);
+    const domainOptions = domainOptionsResult.data;
+    const { rows, total, error: subscribersError } = subscribersResult;
 
     const totalPages = Math.ceil(total / 50);
 
     return (
         <div className="space-y-6">
+            {(domainOptionsResult.error || subscribersError) && (
+                <DataLoadError
+                    message="Failed to load subscriber data"
+                    detail={domainOptionsResult.error || subscribersError || undefined}
+                />
+            )}
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div>

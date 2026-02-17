@@ -74,7 +74,7 @@ const MODEL_ROUTING_REGISTRY: Record<AIModelTask, RoutingProfile> = {
     aiReview: { fallbackTasks: ['humanization', 'seoOptimize'], promptVersion: 'ai-review.v1' },
     research: { fallbackTasks: ['seoOptimize'], promptVersion: 'research.v1' },
     blockContent: { fallbackTasks: ['draftGeneration', 'humanization'], promptVersion: 'block-content.v1' },
-    vision: { fallbackTasks: ['seoOptimize'], promptVersion: 'vision.v1' },
+    vision: { fallbackTasks: [], promptVersion: 'vision.v1' },
 };
 
 // Pricing per 1K tokens (approximate, check OpenRouter for current)
@@ -254,15 +254,16 @@ export class OpenRouterClient {
 
                         const data: OpenRouterResponse = await response.json();
                         const durationMs = Date.now() - startTime;
+                        const resolvedModel = data.model || model;
                         const cost = this.calculateCost(
-                            model,
+                            resolvedModel,
                             data.usage.prompt_tokens,
                             data.usage.completion_tokens,
                         );
 
                         return {
                             content: data.choices[0]?.message?.content || '',
-                            model: data.model,
+                            model: resolvedModel,
                             inputTokens: data.usage.prompt_tokens,
                             outputTokens: data.usage.completion_tokens,
                             cost,
@@ -382,15 +383,16 @@ export class OpenRouterClient {
 
                         const data: OpenRouterResponse = await res.json();
                         const durationMs = Date.now() - startTime;
+                        const resolvedModel = data.model || model;
                         const cost = this.calculateCost(
-                            model,
+                            resolvedModel,
                             data.usage.prompt_tokens,
                             data.usage.completion_tokens,
                         );
 
                         return {
                             content: data.choices[0]?.message?.content || '',
-                            model: data.model,
+                            model: resolvedModel,
                             inputTokens: data.usage.prompt_tokens,
                             outputTokens: data.usage.completion_tokens,
                             cost,

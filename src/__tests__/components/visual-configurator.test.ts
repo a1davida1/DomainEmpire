@@ -1,4 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { getConfiguratorBridgeScript } from '../../lib/deploy/blocks/assembler';
+import { MAX_HISTORY } from '../../components/dashboard/VisualConfigurator';
+
+const EXPECTED_THEMES = ['clean', 'editorial', 'bold', 'minimal'] as const;
+const EXPECTED_SKINS = ['slate', 'ocean', 'forest', 'ember', 'midnight', 'coral'] as const;
 
 // ============================================================
 // Unit tests for Visual Configurator logic (non-React)
@@ -20,8 +25,8 @@ describe('Visual Configurator', () => {
 
         it('cache breaker changes on each call', () => {
             const t1 = Date.now();
-            const t2 = Date.now() + 1;
-            expect(t1).not.toBe(t2);
+            const t2 = Date.now();
+            expect(t2).toBeGreaterThanOrEqual(t1);
         });
     });
 
@@ -165,15 +170,12 @@ describe('Visual Configurator', () => {
             expect(prev2).toHaveLength(1);
         });
 
-        it('respects MAX_HISTORY cap without pointer overflow', () => {
-            const MAX = 50;
+        it('handles many sequential pushes without pointer overflow', () => {
             const h = createHistory();
-            for (let i = 0; i <= MAX + 5; i++) {
+            for (let i = 0; i <= MAX_HISTORY + 5; i++) {
                 h.push([{ id: String(i), type: 'Hero' }]);
             }
-            // Should not exceed MAX entries
-            // The test history helper doesn't cap, but this validates the logic concept
-            expect(h.current[0].id).toBe(String(MAX + 5));
+            expect(h.current[0].id).toBe(String(MAX_HISTORY + 5));
             expect(h.canUndo).toBe(true);
         });
     });
@@ -200,26 +202,24 @@ describe('Visual Configurator', () => {
     });
 
     describe('theme labels', () => {
-        const AVAILABLE_THEMES = ['clean', 'editorial', 'bold', 'minimal'];
-
         it('has 4 themes', () => {
-            expect(AVAILABLE_THEMES).toHaveLength(4);
+            expect(EXPECTED_THEMES).toHaveLength(4);
         });
 
         it('includes clean as default', () => {
-            expect(AVAILABLE_THEMES).toContain('clean');
+            expect(EXPECTED_THEMES).toContain('clean');
         });
     });
 
     describe('configurator bridge script injection', () => {
-        it('bridge script includes block-select postMessage', () => {
-            const bridgeScript = `parent.postMessage({type:'block-select',blockId:el.getAttribute('data-block-id')`;
+        it('generated bridge script includes block-select postMessage', () => {
+            const bridgeScript = getConfiguratorBridgeScript();
             expect(bridgeScript).toContain('block-select');
             expect(bridgeScript).toContain('data-block-id');
         });
 
-        it('bridge script includes block-highlight listener', () => {
-            const bridgeScript = `e.data.type!=='block-highlight'`;
+        it('generated bridge script includes block-highlight listener', () => {
+            const bridgeScript = getConfiguratorBridgeScript();
             expect(bridgeScript).toContain('block-highlight');
         });
 
@@ -235,13 +235,13 @@ describe('Visual Configurator', () => {
     });
 
     describe('theme/skin validation', () => {
-        const VALID_THEMES = new Set(['clean', 'editorial', 'bold', 'minimal']);
-        const VALID_SKINS = new Set(['slate', 'ocean', 'forest', 'ember', 'midnight', 'coral']);
+        const VALID_THEMES = new Set<string>(EXPECTED_THEMES);
+        const VALID_SKINS = new Set<string>(EXPECTED_SKINS);
 
         it('accepts valid themes', () => {
-            for (const t of VALID_THEMES) {
-                expect(VALID_THEMES.has(t)).toBe(true);
-            }
+            expect(VALID_THEMES).toEqual(new Set(['clean', 'editorial', 'bold', 'minimal']));
+            expect(VALID_THEMES.has('clean')).toBe(true);
+            expect(VALID_THEMES.has('minimal')).toBe(true);
         });
 
         it('rejects invalid themes', () => {
@@ -251,9 +251,9 @@ describe('Visual Configurator', () => {
         });
 
         it('accepts valid skins', () => {
-            for (const s of VALID_SKINS) {
-                expect(VALID_SKINS.has(s)).toBe(true);
-            }
+            expect(VALID_SKINS).toEqual(new Set(['slate', 'ocean', 'forest', 'ember', 'midnight', 'coral']));
+            expect(VALID_SKINS.has('slate')).toBe(true);
+            expect(VALID_SKINS.has('modern')).toBe(false);
         });
 
         it('rejects invalid skins', () => {

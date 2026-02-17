@@ -38,6 +38,7 @@ export default async function FinancesPage() {
             id: domains.id,
             domain: domains.domain,
             purchasePrice: domains.purchasePrice,
+            renewalPrice: domains.renewalPrice,
         }).from(domains),
         db.select({
             domainId: domainFinanceLedgerEntries.domainId,
@@ -81,6 +82,33 @@ export default async function FinancesPage() {
     const totalRevenue30d = recentRevenue[0]?.total || 0;
     const profit30d = totalRevenue30d - totalExpenses30d;
     const totalInvestment = allDomains.reduce((sum, d) => sum + Number(d.purchasePrice || 0), 0);
+
+    // Build per-domain ROI map: merge ledger P&L with purchase/renewal costs
+    const domainRoiData = ledgerRollups30d.map((row) => {
+        const domainInfo = allDomains.find((d) => d.id === row.domainId);
+        const revenue = toMoney(row.revenueTotal);
+        const cost = toMoney(row.costTotal);
+        const net = revenue - cost;
+        const purchasePrice = Number(domainInfo?.purchasePrice || 0);
+        const renewalPrice = Number(domainInfo?.renewalPrice || 0);
+        const totalCostBasis = purchasePrice + renewalPrice;
+        const annualizedNet = net * 12; // 30d → annual
+        const roi = totalCostBasis > 0 ? (annualizedNet / totalCostBasis) * 100 : null;
+        const paybackMonths = net > 0 ? totalCostBasis / net : null;
+        return {
+            domainId: row.domainId,
+            domain: row.domain,
+            revenue,
+            cost,
+            net,
+            purchasePrice,
+            renewalPrice,
+            totalCostBasis,
+            annualizedNet,
+            roi,
+            paybackMonths,
+        };
+    }).sort((a, b) => (b.roi ?? -Infinity) - (a.roi ?? -Infinity));
     const ledgerRevenue30d = ledgerRollups30d.reduce((sum, row) => sum + toMoney(row.revenueTotal), 0);
     const ledgerCost30d = ledgerRollups30d.reduce((sum, row) => sum + toMoney(row.costTotal), 0);
     const ledgerNet30d = ledgerRevenue30d - ledgerCost30d;
@@ -260,6 +288,63 @@ export default async function FinancesPage() {
                     </table>
                 </div>
             </div>
+
+            {/* Per-Domain ROI Calculator */}
+            {domainRoiData.length > 0 && (
+                <div className="bg-card rounded-lg border overflow-hidden">
+                    <h2 className="text-lg font-semibold p-4 border-b">Per-Domain ROI (Annualized from 30d Ledger)</h2>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead className="bg-muted/50">
+                                <tr>
+                                    <th className="text-left p-3">Domain</th>
+                                    <th className="text-right p-3">30d Revenue</th>
+                                    <th className="text-right p-3">30d Cost</th>
+                                    <th className="text-right p-3">30d Net</th>
+                                    <th className="text-right p-3">Purchase</th>
+                                    <th className="text-right p-3">Renewal</th>
+                                    <th className="text-right p-3">Cost Basis</th>
+                                    <th className="text-right p-3">Annual ROI</th>
+                                    <th className="text-right p-3">Payback</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {domainRoiData.map((row) => (
+                                    <tr key={row.domainId} className="border-t">
+                                        <td className="p-3 font-mono">{row.domain}</td>
+                                        <td className="p-3 text-right text-green-600">${row.revenue.toFixed(2)}</td>
+                                        <td className="p-3 text-right text-red-600">${row.cost.toFixed(2)}</td>
+                                        <td className={`p-3 text-right font-medium ${row.net >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                            ${row.net.toFixed(2)}
+                                        </td>
+                                        <td className="p-3 text-right">{row.purchasePrice > 0 ? `$${row.purchasePrice.toFixed(0)}` : '—'}</td>
+                                        <td className="p-3 text-right">{row.renewalPrice > 0 ? `$${row.renewalPrice.toFixed(0)}` : '—'}</td>
+                                        <td className="p-3 text-right">{row.totalCostBasis > 0 ? `$${row.totalCostBasis.toFixed(0)}` : '—'}</td>
+                                        <td className="p-3 text-right">
+                                            {row.roi !== null ? (
+                                                <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+                                                    row.roi >= 100 ? 'bg-green-100 text-green-800' :
+                                                    row.roi >= 0 ? 'bg-yellow-100 text-yellow-800' :
+                                                    'bg-red-100 text-red-800'
+                                                }`}>
+                                                    {row.roi.toFixed(0)}%
+                                                </span>
+                                            ) : '—'}
+                                        </td>
+                                        <td className="p-3 text-right text-muted-foreground">
+                                            {row.paybackMonths !== null
+                                                ? row.paybackMonths < 1
+                                                    ? '<1 mo'
+                                                    : `${row.paybackMonths.toFixed(1)} mo`
+                                                : '—'}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
 
             <div className="bg-card rounded-lg border overflow-hidden">
                 <h2 className="text-lg font-semibold p-4 border-b">Monthly Close Snapshots (Last 90 Days)</h2>

@@ -78,6 +78,7 @@ import { runIntegrationHealthSweep } from '@/lib/integrations/health-monitor';
 import { runIntegrationConnectionSync } from '@/lib/integrations/executor';
 import { scheduleIntegrationConnectionSyncJobs } from '@/lib/integrations/scheduler';
 import { runCampaignLaunchReviewEscalationSweep } from '@/lib/review/campaign-launch-sla';
+import { runDomainHealthSweep } from '@/lib/health/sweep';
 import {
     runGrowthLaunchFreezePostmortemSlaSweep,
     syncGrowthLaunchFreezeAuditState,
@@ -87,6 +88,7 @@ import {
     evaluatePromotionIntegrityAlert,
     summarizePromotionIntegrity,
 } from '@/lib/growth/integrity';
+import { archiveStaleSubscribers } from '@/lib/subscribers';
 
 const LOCK_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 const JOB_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes max per job
@@ -3339,6 +3341,15 @@ export async function runWorkerContinuously(options: WorkerOptions = {}): Promis
                 await checkStaleDatasets().catch((err: unknown) => console.error('[DatasetFreshness] Error:', err));
                 await purgeExpiredSessions().catch((err: unknown) => console.error('[SessionPurge] Error:', err));
                 await purgeExpiredPreviewBuilds().catch((err: unknown) => console.error('[PreviewBuildPurge] Error:', err));
+                await archiveStaleSubscribers()
+                    .then((summary) => {
+                        if (summary.archivedCount > 0) {
+                            console.log(
+                                `[SubscriberRetention] archived=${summary.archivedCount} retentionDays=${summary.retentionDays}`,
+                            );
+                        }
+                    })
+                    .catch((err: unknown) => console.error('[SubscriberRetention] Error:', err));
                 await purgeDeletedGrowthMediaStorage()
                     .then((summary) => {
                         if (summary.scanned > 0) {
@@ -3495,6 +3506,16 @@ export async function runWorkerContinuously(options: WorkerOptions = {}): Promis
                     })
                     .catch((err: unknown) => console.error('[GrowthLaunchFreezePostmortemSLA] Error:', err));
                 await runAllMonitoringChecks().catch((err: unknown) => console.error('[Monitoring] Error:', err));
+                await runDomainHealthSweep()
+                    .then((summary) => {
+                        if (summary.scanned > 0) {
+                            console.log(
+                                `[DomainHealthSweep] scanned=${summary.scanned} updated=${summary.updated} ` +
+                                `sslWarnings=${summary.sslWarnings} dnsFailures=${summary.dnsFailures} errors=${summary.errors}`,
+                            );
+                        }
+                    })
+                    .catch((err: unknown) => console.error('[DomainHealthSweep] Error:', err));
                 lastSchedulerCheck = now;
             }
 

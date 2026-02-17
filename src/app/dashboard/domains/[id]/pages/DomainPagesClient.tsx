@@ -91,6 +91,7 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, initialP
         if (!confirm('Delete this page definition? This cannot be undone.')) return;
         setLoading(`del-${pageId}`);
         setError(null);
+        setSuccess(null);
         try {
             const res = await fetch(`/api/pages/${pageId}`, { method: 'DELETE' });
             if (!res.ok) {

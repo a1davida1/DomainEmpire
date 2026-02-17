@@ -13,7 +13,7 @@ const CSRF_EXEMPT_PREFIXES = [
 ];
 
 function isCsrfExempt(pathname: string): boolean {
-    return CSRF_EXEMPT_PREFIXES.some(prefix => pathname.startsWith(prefix));
+    return CSRF_EXEMPT_PREFIXES.some(prefix => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
 export function middleware(request: NextRequest) {

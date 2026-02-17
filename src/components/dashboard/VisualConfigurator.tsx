@@ -30,8 +30,8 @@ interface VisualConfiguratorProps {
 // Constants
 // ============================================================
 
-const AVAILABLE_THEMES = ['clean', 'editorial', 'bold', 'minimal'] as const;
-const AVAILABLE_SKINS = ['slate', 'ocean', 'forest', 'ember', 'midnight', 'coral'] as const;
+export const AVAILABLE_THEMES = ['clean', 'editorial', 'bold', 'minimal'] as const;
+export const AVAILABLE_SKINS = ['slate', 'ocean', 'forest', 'ember', 'midnight', 'coral'] as const;
 
 const SKIN_COLORS: Record<string, string> = {
     slate: '#1e293b',
@@ -122,7 +122,7 @@ const VIEWPORT_WIDTHS: Record<ViewportSize, string> = {
     mobile: '375px',
 };
 
-const MAX_HISTORY = 50;
+export const MAX_HISTORY = 50;
 
 // ============================================================
 // Structured Field Schemas — typed form fields per block type
@@ -552,6 +552,7 @@ export function VisualConfigurator({
     const [regenerating, setRegenerating] = useState<string | null>(null);
     const [successMsg, setSuccessMsg] = useState<string | null>(null);
     const [iframeLoading, setIframeLoading] = useState(true);
+    const [jsonError, setJsonError] = useState<string | null>(null);
 
     const iframeRef = useRef<HTMLIFrameElement>(null);
     const blockListRef = useRef<HTMLDivElement>(null);
@@ -561,10 +562,15 @@ export function VisualConfigurator({
         function handleBeforeUnload(e: BeforeUnloadEvent) {
             if (!dirty) return;
             e.preventDefault();
+            e.returnValue = '';
         }
         window.addEventListener('beforeunload', handleBeforeUnload);
         return () => window.removeEventListener('beforeunload', handleBeforeUnload);
     }, [dirty]);
+
+    useEffect(() => {
+        setJsonError(null);
+    }, [selectedBlockId]);
 
     // --- postMessage bridge listener ---
     useEffect(() => {
@@ -731,6 +737,20 @@ export function VisualConfigurator({
         updateBlocks(updated);
     }
 
+    function handleJsonBlur(blockId: string, field: 'config' | 'content', rawValue: string) {
+        try {
+            const parsed = JSON.parse(rawValue);
+            updateBlockField(blockId, field, parsed);
+            setJsonError(null);
+        } catch (err) {
+            setJsonError(
+                err instanceof Error
+                    ? `Invalid ${field} JSON: ${err.message}`
+                    : `Invalid ${field} JSON`
+            );
+        }
+    }
+
     // --- Regenerate single block ---
     async function handleRegenerateBlock(blockId: string) {
         setRegenerating(blockId);
@@ -778,7 +798,8 @@ export function VisualConfigurator({
         }
         const updated = [...blocks];
         const [moved] = updated.splice(dragIndex, 1);
-        updated.splice(index, 0, moved);
+        const targetIndex = dragIndex < index ? index - 1 : index;
+        updated.splice(targetIndex, 0, moved);
         updateBlocks(updated);
         setDragIndex(null);
         setDragOverIndex(null);
@@ -1145,11 +1166,8 @@ export function VisualConfigurator({
                                                     defaultValue={JSON.stringify(selectedBlock.config || {}, null, 2)}
                                                     title="Block config JSON"
                                                     key={`config-adv-${selectedBlock.id}`}
-                                                    onBlur={(e) => {
-                                                        try {
-                                                            updateBlockField(selectedBlock.id, 'config', JSON.parse(e.target.value));
-                                                        } catch { /* invalid */ }
-                                                    }}
+                                                    onChange={() => setJsonError(null)}
+                                                    onBlur={(e) => handleJsonBlur(selectedBlock.id, 'config', e.currentTarget.value)}
                                                 />
                                             </div>
                                             <div>
@@ -1160,13 +1178,13 @@ export function VisualConfigurator({
                                                     defaultValue={JSON.stringify(selectedBlock.content || {}, null, 2)}
                                                     title="Block content JSON"
                                                     key={`content-adv-${selectedBlock.id}`}
-                                                    onBlur={(e) => {
-                                                        try {
-                                                            updateBlockField(selectedBlock.id, 'content', JSON.parse(e.target.value));
-                                                        } catch { /* invalid */ }
-                                                    }}
+                                                    onChange={() => setJsonError(null)}
+                                                    onBlur={(e) => handleJsonBlur(selectedBlock.id, 'content', e.currentTarget.value)}
                                                 />
                                             </div>
+                                            {jsonError && (
+                                                <p className="text-[10px] text-destructive">{jsonError}</p>
+                                            )}
                                         </div>
                                     </details>
                                 </div>
@@ -1181,11 +1199,8 @@ export function VisualConfigurator({
                                             defaultValue={JSON.stringify(selectedBlock.config || {}, null, 2)}
                                             title="Block config JSON"
                                             key={`config-${selectedBlock.id}`}
-                                            onBlur={(e) => {
-                                                try {
-                                                    updateBlockField(selectedBlock.id, 'config', JSON.parse(e.target.value));
-                                                } catch { /* invalid */ }
-                                            }}
+                                            onChange={() => setJsonError(null)}
+                                            onBlur={(e) => handleJsonBlur(selectedBlock.id, 'config', e.currentTarget.value)}
                                         />
                                     </div>
                                     <div>
@@ -1196,13 +1211,13 @@ export function VisualConfigurator({
                                             defaultValue={JSON.stringify(selectedBlock.content || {}, null, 2)}
                                             title="Block content JSON"
                                             key={`content-${selectedBlock.id}`}
-                                            onBlur={(e) => {
-                                                try {
-                                                    updateBlockField(selectedBlock.id, 'content', JSON.parse(e.target.value));
-                                                } catch { /* invalid */ }
-                                            }}
+                                            onChange={() => setJsonError(null)}
+                                            onBlur={(e) => handleJsonBlur(selectedBlock.id, 'content', e.currentTarget.value)}
                                         />
                                     </div>
+                                    {jsonError && (
+                                        <p className="text-[10px] text-destructive">{jsonError}</p>
+                                    )}
                                 </>
                             )}
 

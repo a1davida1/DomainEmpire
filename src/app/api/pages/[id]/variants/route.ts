@@ -6,6 +6,21 @@ import { eq, and } from 'drizzle-orm';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+function isUniqueViolation(error: unknown): boolean {
+    return typeof error === 'object'
+        && error !== null
+        && 'code' in error
+        && (error as { code?: string }).code === '23505';
+}
+
+async function parseJsonBody(request: NextRequest): Promise<Record<string, unknown> | null> {
+    try {
+        return await request.json();
+    } catch {
+        return null;
+    }
+}
+
 /**
  * GET /api/pages/[id]/variants — List all A/B variants for a page definition
  */
@@ -55,30 +70,34 @@ export async function POST(
         return NextResponse.json({ error: 'Page definition not found' }, { status: 404 });
     }
 
-    const body = await request.json();
-    const variantKey = (body.variantKey || '').trim();
+    const body = await parseJsonBody(request);
+    if (!body) {
+        return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
+
+    const variantKey = typeof body.variantKey === 'string' ? body.variantKey.trim() : '';
     if (!variantKey) {
         return NextResponse.json({ error: 'variantKey is required' }, { status: 400 });
     }
 
-    // Check for duplicate
-    const existing = await db.select({ id: pageVariants.id })
-        .from(pageVariants)
-        .where(and(eq(pageVariants.pageId, id), eq(pageVariants.variantKey, variantKey)))
-        .limit(1);
-    if (existing.length > 0) {
-        return NextResponse.json({ error: `Variant '${variantKey}' already exists` }, { status: 409 });
-    }
-
-    const weight = typeof body.weight === 'number' ? Math.max(0, Math.min(100, body.weight)) : 50;
+    const weight = typeof body.weight === 'number' ? Math.max(1, Math.min(100, body.weight)) : 50;
     const blocks = Array.isArray(body.blocks) ? body.blocks : pageRows[0].blocks;
 
-    const [created] = await db.insert(pageVariants).values({
-        pageId: id,
-        variantKey,
-        weight,
-        blocks,
-    }).returning();
+    let created: typeof pageVariants.$inferSelect;
+    try {
+        const [inserted] = await db.insert(pageVariants).values({
+            pageId: id,
+            variantKey,
+            weight,
+            blocks,
+        }).returning();
+        created = inserted;
+    } catch (error) {
+        if (isUniqueViolation(error)) {
+            return NextResponse.json({ error: `Variant '${variantKey}' already exists` }, { status: 409 });
+        }
+        throw error;
+    }
 
     return NextResponse.json(created, { status: 201 });
 }
@@ -99,8 +118,12 @@ export async function PATCH(
         return NextResponse.json({ error: 'Invalid page ID' }, { status: 400 });
     }
 
-    const body = await request.json();
-    const variantId = body.variantId;
+    const body = await parseJsonBody(request);
+    if (!body) {
+        return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
+
+    const variantId = typeof body.variantId === 'string' ? body.variantId : '';
     if (!variantId || !UUID_RE.test(variantId)) {
         return NextResponse.json({ error: 'variantId is required' }, { status: 400 });
     }
@@ -114,7 +137,7 @@ export async function PATCH(
 
     const updates: Record<string, unknown> = { updatedAt: new Date() };
     if (typeof body.weight === 'number') {
-        updates.weight = Math.max(0, Math.min(100, body.weight));
+        updates.weight = Math.max(1, Math.min(100, body.weight));
     }
     if (Array.isArray(body.blocks)) {
         updates.blocks = body.blocks;
@@ -147,8 +170,12 @@ export async function DELETE(
         return NextResponse.json({ error: 'Invalid page ID' }, { status: 400 });
     }
 
-    const body = await request.json();
-    const variantId = body.variantId;
+    const body = await parseJsonBody(request);
+    if (!body) {
+        return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
+
+    const variantId = typeof body.variantId === 'string' ? body.variantId : '';
     if (!variantId || !UUID_RE.test(variantId)) {
         return NextResponse.json({ error: 'variantId is required' }, { status: 400 });
     }

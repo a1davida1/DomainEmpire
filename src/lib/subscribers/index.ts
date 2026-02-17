@@ -4,8 +4,15 @@
  */
 
 import { db, subscribers, monetizationProfiles, domains } from '@/lib/db';
-import { eq, and, count, sql, desc, gte } from 'drizzle-orm';
+import { eq, and, count, sql, desc, gte, lte, or, ne } from 'drizzle-orm';
 import type { NewSubscriber } from '@/lib/db/schema';
+import {
+    hashEmail,
+    hashPhone,
+    hashIpAddress,
+    fingerprintUserAgent,
+    fingerprintReferrer,
+} from '@/lib/subscribers/privacy';
 
 interface CaptureInput {
     domainId: string;
@@ -29,6 +36,11 @@ interface CaptureInput {
  */
 export async function captureSubscriber(input: CaptureInput) {
     const email = input.email.toLowerCase().trim();
+    const emailHash = hashEmail(email);
+    const phoneHash = hashPhone(input.phone);
+    const ipHash = hashIpAddress(input.ipAddress);
+    const userAgentFingerprint = fingerprintUserAgent(input.userAgent);
+    const referrerFingerprint = fingerprintReferrer(input.referrer);
 
     // Look up estimated value from monetization profile
     let estimatedValue: number | null = null;
@@ -48,8 +60,11 @@ export async function captureSubscriber(input: CaptureInput) {
     const record: NewSubscriber = {
         domainId: input.domainId,
         email,
+        emailHash,
         name: input.name || null,
-        phone: input.phone || null,
+        // Plaintext phone is intentionally not persisted.
+        phone: null,
+        phoneHash,
         source: input.source || 'lead_form',
         sourceCampaignId: input.sourceCampaignId || null,
         sourceClickId: input.sourceClickId || null,
@@ -57,9 +72,13 @@ export async function captureSubscriber(input: CaptureInput) {
         formData: input.formData || {},
         articleId: input.articleId || null,
         estimatedValue,
-        ipAddress: input.ipAddress || null,
-        userAgent: input.userAgent || null,
-        referrer: input.referrer || null,
+        // Plaintext metadata is intentionally not persisted.
+        ipAddress: null,
+        ipHash,
+        userAgent: null,
+        userAgentFingerprint,
+        referrer: null,
+        referrerFingerprint,
     };
 
     // Upsert: insert or update on conflict
@@ -69,12 +88,20 @@ export async function captureSubscriber(input: CaptureInput) {
         .onConflictDoUpdate({
             target: [subscribers.domainId, subscribers.email],
             set: {
+                emailHash: record.emailHash,
                 name: sql`COALESCE(${record.name}, ${subscribers.name})`,
-                phone: sql`COALESCE(${record.phone}, ${subscribers.phone})`,
+                phone: null,
+                phoneHash: sql`COALESCE(${record.phoneHash}, ${subscribers.phoneHash})`,
                 formData: sql`${subscribers.formData} || ${JSON.stringify(record.formData)}::jsonb`,
                 sourceCampaignId: sql`COALESCE(${record.sourceCampaignId}, ${subscribers.sourceCampaignId})`,
                 sourceClickId: sql`COALESCE(${record.sourceClickId}, ${subscribers.sourceClickId})`,
                 originalUtm: sql`${subscribers.originalUtm} || ${JSON.stringify(record.originalUtm)}::jsonb`,
+                ipAddress: null,
+                ipHash: sql`COALESCE(${record.ipHash}, ${subscribers.ipHash})`,
+                userAgent: null,
+                userAgentFingerprint: sql`COALESCE(${record.userAgentFingerprint}, ${subscribers.userAgentFingerprint})`,
+                referrer: null,
+                referrerFingerprint: sql`COALESCE(${record.referrerFingerprint}, ${subscribers.referrerFingerprint})`,
                 updatedAt: new Date(),
             },
         })
@@ -112,7 +139,7 @@ export async function getSubscribers(filters: SubscriberFilters = {}) {
                 id: subscribers.id,
                 email: subscribers.email,
                 name: subscribers.name,
-                phone: subscribers.phone,
+                phoneHash: subscribers.phoneHash,
                 source: subscribers.source,
                 status: subscribers.status,
                 estimatedValue: subscribers.estimatedValue,
@@ -179,8 +206,9 @@ export async function exportSubscribers(domainId?: string): Promise<string> {
     const rows = await db
         .select({
             email: subscribers.email,
+            emailHash: subscribers.emailHash,
             name: subscribers.name,
-            phone: subscribers.phone,
+            phoneHash: subscribers.phoneHash,
             source: subscribers.source,
             status: subscribers.status,
             estimatedValue: subscribers.estimatedValue,
@@ -192,12 +220,13 @@ export async function exportSubscribers(domainId?: string): Promise<string> {
         .where(where)
         .orderBy(desc(subscribers.createdAt));
 
-    const header = 'email,name,phone,source,status,estimated_value,domain,created_at';
+    const header = 'email,email_hash,name,phone_hash,source,status,estimated_value,domain,created_at';
     const csvRows = rows.map(r => {
         const fields = [
             r.email,
+            r.emailHash,
             r.name || '',
-            r.phone || '',
+            r.phoneHash || '',
             r.source,
             r.status,
             r.estimatedValue?.toString() || '',
@@ -222,4 +251,46 @@ export async function unsubscribe(email: string, domainId: string) {
             eq(subscribers.domainId, domainId),
         ))
         .returning();
+}
+
+type ArchiveStaleSubscriberOptions = {
+    retentionDays?: number;
+};
+
+const DEFAULT_SUBSCRIBER_RETENTION_DAYS = 180;
+
+/**
+ * Archive + anonymize stale subscribers beyond retention threshold.
+ */
+export async function archiveStaleSubscribers(options: ArchiveStaleSubscriberOptions = {}) {
+    const retentionDays = Math.max(1, Math.floor(options.retentionDays ?? DEFAULT_SUBSCRIBER_RETENTION_DAYS));
+    const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+
+    const archived = await db
+        .update(subscribers)
+        .set({
+            status: 'archived',
+            email: sql`'archived+' || ${subscribers.id}::text || '@redacted.local'`,
+            name: null,
+            phone: null,
+            phoneHash: null,
+            ipAddress: null,
+            userAgent: null,
+            referrer: null,
+            updatedAt: new Date(),
+        })
+        .where(and(
+            ne(subscribers.status, 'archived'),
+            lte(subscribers.createdAt, cutoff),
+            or(
+                sql`${subscribers.convertedAt} IS NULL`,
+                lte(subscribers.convertedAt, cutoff),
+            ),
+        ))
+        .returning({ id: subscribers.id });
+
+    return {
+        retentionDays,
+        archivedCount: archived.length,
+    };
 }

@@ -55,6 +55,18 @@ function escapeHtml(s: string): string {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+function parseFlagValue(args: string[], flagName: string): string | null {
+    const flagIndex = args.indexOf(flagName);
+    if (flagIndex < 0) return null;
+
+    const value = args[flagIndex + 1];
+    if (!value || value.startsWith('--')) {
+        throw new Error(`Missing value for ${flagName}`);
+    }
+
+    return value;
+}
+
 function generateHtmlReport(
     domain: string,
     stats: DiffStats,
@@ -157,12 +169,18 @@ function generateHtmlReport(
 
 async function main() {
     const args = process.argv.slice(2);
-    const domainFlag = args.indexOf('--domain');
-    const domainIdFlag = args.indexOf('--domain-id');
-    const outputFlag = args.indexOf('--output');
-    const filterDomain = domainFlag >= 0 ? args[domainFlag + 1] : null;
-    const filterDomainId = domainIdFlag >= 0 ? args[domainIdFlag + 1] : null;
-    const outputPath = outputFlag >= 0 ? args[outputFlag + 1] : null;
+
+    let filterDomain: string | null = null;
+    let filterDomainId: string | null = null;
+    let outputPath: string | null = null;
+    try {
+        filterDomain = parseFlagValue(args, '--domain');
+        filterDomainId = parseFlagValue(args, '--domain-id');
+        outputPath = parseFlagValue(args, '--output');
+    } catch (err) {
+        console.error(err instanceof Error ? err.message : String(err));
+        process.exit(1);
+    }
 
     if (!filterDomain && !filterDomainId) {
         console.error('Usage: npx tsx scripts/visual-diff.ts --domain example.com');
@@ -212,37 +230,20 @@ async function main() {
         const { generateSiteFiles } = await import('../src/lib/deploy/generator');
 
         console.log('\nGenerating v1 files...');
-        // v1 generation: temporarily remove page_definitions so generator uses v1 path
-        // We do this by generating with the current state (which may include v2)
-        // and then comparing
-        const allFiles = await generateSiteFiles(domain.id);
+        const allFiles = await generateSiteFiles(domain.id, { forceV1: true });
         const v1Files = new Map<string, string>();
         for (const f of allFiles) {
             v1Files.set(f.path, f.content);
         }
         console.log(`  v1: ${allFiles.length} files, ${allFiles.reduce((s, f) => s + f.content.length, 0)} bytes`);
 
-        // For the diff we need to check if v2 path was used
-        // The generator auto-selects v2 if published page_definitions exist
-        // If no page_definitions, v1 and v2 outputs would be identical
-        // So we report based on what we have
+        console.log('\nGenerating v2 files...');
+        const generatedV2Files = await generateSiteFiles(domain.id);
         const v2Files = new Map<string, string>();
-        if (pageDefs.length > 0) {
-            // Generator already produces v2 output when page_definitions exist
-            // To get v1 output, we'd need to bypass v2 — but we can't without mocking
-            // Instead, report the current output as "current" and note it's v2-based
-            for (const f of allFiles) {
-                v2Files.set(f.path, f.content);
-            }
-            console.log(`  v2: ${allFiles.length} files (same generation — v2 path active)`);
-            console.log('\nNote: Domain has v2 page_definitions so generator used v2 path.');
-            console.log('To compare v1 vs v2, temporarily delete page_definitions, generate v1, restore, then compare.');
-        } else {
-            // No v2 — copy v1 as both
-            for (const f of allFiles) {
-                v2Files.set(f.path, f.content);
-            }
+        for (const f of generatedV2Files) {
+            v2Files.set(f.path, f.content);
         }
+        console.log(`  v2: ${generatedV2Files.length} files, ${generatedV2Files.reduce((s, f) => s + f.content.length, 0)} bytes`);
 
         // Compute diff stats
         const allPaths = new Set([...v1Files.keys(), ...v2Files.keys()]);

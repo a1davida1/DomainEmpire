@@ -29,6 +29,7 @@ import { db, domains, domainResearch, apiCallLogs, revenueSnapshots } from '@/li
 import { eq, and, gte, sql } from 'drizzle-orm';
 import { checkDomainAvailability } from '@/lib/deploy/godaddy';
 import { createHash } from 'node:crypto';
+import { redactPromptBody } from '@/lib/privacy/prompt-redaction';
 
 // ─── Result Types ───────────────────────────────────────────
 
@@ -515,6 +516,7 @@ async function logApiCall(
 ): Promise<void> {
     const promptBody = prompt.replaceAll('\r\n', '\n');
     const promptHash = createHash('sha256').update(promptBody).digest('hex');
+    const promptBodyRedacted = redactPromptBody(promptBody);
     await db.insert(apiCallLogs).values({
         stage: stage as 'evaluate',
         modelKey: result.modelKey || 'legacy',
@@ -523,7 +525,7 @@ async function logApiCall(
         promptVersion: result.promptVersion || 'legacy.v1',
         routingVersion: result.routingVersion || 'legacy',
         promptHash,
-        promptBody,
+        promptBodyRedacted,
         fallbackUsed: result.fallbackUsed === true,
         inputTokens: result.inputTokens,
         outputTokens: result.outputTokens,

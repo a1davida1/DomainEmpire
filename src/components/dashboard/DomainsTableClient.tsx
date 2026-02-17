@@ -141,6 +141,9 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints
     const [compact, setCompact] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
+    const [bulkStatusOpen, setBulkStatusOpen] = useState(false);
+    const [bulkNicheOpen, setBulkNicheOpen] = useState(false);
+    const [bulkNicheValue, setBulkNicheValue] = useState('');
 
     // Hydrate preferences from localStorage after mount
     useEffect(() => {
@@ -320,6 +323,83 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints
                             <Button size="sm" variant="outline" onClick={() => bulkAction('/api/domains/classify', 'Classify queued')} disabled={acting}>Classify</Button>
                             <Button size="sm" variant="outline" onClick={() => setConfirmAction({ endpoint: '/api/domains/bulk-seed', label: 'Seed' })} disabled={acting}>Seed Content</Button>
                             <BulkNameserverCutoverButton domainIds={selectedAutomatedDnsIds} compact />
+                            <div className="relative">
+                                <Button size="sm" variant="outline" onClick={() => { setBulkStatusOpen(!bulkStatusOpen); setBulkNicheOpen(false); }} disabled={acting}>Status</Button>
+                                {bulkStatusOpen && (
+                                    <div className="absolute top-full left-0 mt-1 z-30 bg-popover border rounded-md shadow-md py-1 min-w-[120px]">
+                                        {STATUSES.map(s => (
+                                            <button
+                                                key={s}
+                                                className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors capitalize"
+                                                onClick={async () => {
+                                                    setBulkStatusOpen(false);
+                                                    setActing(true);
+                                                    try {
+                                                        const res = await fetch('/api/domains/bulk-status', {
+                                                            method: 'POST',
+                                                            headers: { 'Content-Type': 'application/json' },
+                                                            body: JSON.stringify({ domainIds: [...selected], status: s }),
+                                                        });
+                                                        if (res.ok) {
+                                                            const data = await res.json();
+                                                            toast.success(`Set ${data.updated} domains to "${s}"`);
+                                                            setSelected(new Set());
+                                                            router.refresh();
+                                                        } else {
+                                                            const data = await res.json().catch(() => ({}));
+                                                            toast.error(data.error || 'Failed to update status');
+                                                        }
+                                                    } catch { toast.error('Status update failed'); }
+                                                    finally { setActing(false); }
+                                                }}
+                                            >
+                                                {statusConfig[s]?.label || s}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                            <div className="relative">
+                                <Button size="sm" variant="outline" onClick={() => { setBulkNicheOpen(!bulkNicheOpen); setBulkStatusOpen(false); }} disabled={acting}>Niche</Button>
+                                {bulkNicheOpen && (
+                                    <div className="absolute top-full left-0 mt-1 z-30 bg-popover border rounded-md shadow-md p-2 min-w-[180px]">
+                                        <form onSubmit={async (e) => {
+                                            e.preventDefault();
+                                            if (!bulkNicheValue.trim()) return;
+                                            setBulkNicheOpen(false);
+                                            setActing(true);
+                                            try {
+                                                const res = await fetch('/api/domains/bulk-niche', {
+                                                    method: 'POST',
+                                                    headers: { 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify({ domainIds: [...selected], niche: bulkNicheValue.trim() }),
+                                                });
+                                                if (res.ok) {
+                                                    const data = await res.json();
+                                                    toast.success(`Set niche "${data.niche}" on ${data.updated} domains`);
+                                                    setSelected(new Set());
+                                                    setBulkNicheValue('');
+                                                    router.refresh();
+                                                } else {
+                                                    const data = await res.json().catch(() => ({}));
+                                                    toast.error(data.error || 'Failed to update niche');
+                                                }
+                                            } catch { toast.error('Niche update failed'); }
+                                            finally { setActing(false); }
+                                        }}>
+                                            <input
+                                                type="text"
+                                                value={bulkNicheValue}
+                                                onChange={e => setBulkNicheValue(e.target.value)}
+                                                placeholder="Enter niche..."
+                                                className="w-full rounded border bg-background px-2 py-1 text-sm mb-1.5"
+                                                autoFocus
+                                            />
+                                            <Button size="sm" type="submit" className="w-full" disabled={!bulkNicheValue.trim()}>Apply</Button>
+                                        </form>
+                                    </div>
+                                )}
+                            </div>
                         </>
                     )}
                     <Button size="sm" variant="ghost" onClick={copySelectedNames} disabled={acting} title="Copy selected domain names">

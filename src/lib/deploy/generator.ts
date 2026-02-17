@@ -67,6 +67,10 @@ interface GeneratedFile {
     content: string;
 }
 
+interface GenerateSiteFilesOptions {
+    forceV1?: boolean;
+}
+
 /**
  * Fetch datasets linked to an article
  */
@@ -85,7 +89,10 @@ async function getArticleDatasetInfo(articleId: string): Promise<ArticleDatasetI
 /**
  * Generate all site files for a domain
  */
-export async function generateSiteFiles(domainId: string): Promise<GeneratedFile[]> {
+export async function generateSiteFiles(
+    domainId: string,
+    options: GenerateSiteFilesOptions = {},
+): Promise<GeneratedFile[]> {
     const domainResult = await db.select().from(domains).where(eq(domains.id, domainId)).limit(1);
     if (domainResult.length === 0) throw new Error('Domain not found');
     const domain = domainResult[0];
@@ -121,7 +128,7 @@ export async function generateSiteFiles(domainId: string): Promise<GeneratedFile
     const pageDefs = await db.select().from(pageDefinitions)
         .where(and(eq(pageDefinitions.domainId, domainId), eq(pageDefinitions.isPublished, true)));
 
-    if (pageDefs.length > 0) {
+    if (!options?.forceV1 && pageDefs.length > 0) {
         return generateV2SiteFiles(domain, pageDefs, publishedArticles, scripts, datasetsByArticle);
     }
 

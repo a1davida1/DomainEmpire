@@ -25,8 +25,8 @@ export interface AIDetectionResult {
  * Check content for AI-generated probability via GPTZero API.
  */
 export async function checkAIDetection(text: string): Promise<AIDetectionResult> {
-    const apiKey = process.env.GPTZERO_API_KEY;
-    if (!apiKey) {
+    const apiKey = process.env.GPTZERO_API_KEY?.trim() || '';
+    if (apiKey.length === 0) {
         throw new Error('GPTZERO_API_KEY environment variable is not set');
     }
 

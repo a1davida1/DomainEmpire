@@ -32,6 +32,7 @@ import { enqueueContentJob } from '@/lib/queue/content-queue';
 import { generateResearchWithCache } from '@/lib/ai/research-cache';
 import { buildDomainDifferentiationInstructions, buildIntentCoverageGuidance } from '@/lib/ai/differentiation';
 import { isInternalLinkingEnabled } from '@/lib/content/link-policy';
+import { redactPromptBody } from '../privacy/prompt-redaction';
 
 // Helper to slugify string
 function slugify(text: string) {
@@ -146,10 +147,6 @@ type ApiCallUsage = {
     durationMs: number;
 };
 
-function normalizePromptBody(prompt: string): string {
-    return prompt.replaceAll('\r\n', '\n');
-}
-
 function promptHash(promptBody: string): string {
     return createHash('sha256').update(promptBody).digest('hex');
 }
@@ -161,7 +158,8 @@ async function logApiCallWithPrompt(args: {
     prompt: string;
     usage: ApiCallUsage;
 }): Promise<void> {
-    const promptBody = normalizePromptBody(args.prompt);
+    const promptBody = args.prompt.replaceAll('\r\n', '\n');
+    const promptBodyRedacted = redactPromptBody(promptBody);
     await db.insert(apiCallLogs).values({
         articleId: args.articleId ?? null,
         stage: args.stage,
@@ -171,7 +169,7 @@ async function logApiCallWithPrompt(args: {
         promptVersion: args.usage.promptVersion,
         routingVersion: args.usage.routingVersion,
         promptHash: promptHash(promptBody),
-        promptBody,
+        promptBodyRedacted,
         fallbackUsed: args.usage.fallbackUsed,
         inputTokens: args.usage.inputTokens,
         outputTokens: args.usage.outputTokens,
@@ -236,6 +234,29 @@ type ContentType =
     | 'assessment'
     | 'interactive_infographic'
     | 'interactive_map';
+
+const CONTENT_TYPE_VALUES: ReadonlySet<ContentType> = new Set([
+    'article',
+    'comparison',
+    'calculator',
+    'cost_guide',
+    'lead_capture',
+    'health_decision',
+    'checklist',
+    'faq',
+    'review',
+    'wizard',
+    'configurator',
+    'quiz',
+    'survey',
+    'assessment',
+    'interactive_infographic',
+    'interactive_map',
+]);
+
+function isContentType(value: unknown): value is ContentType {
+    return typeof value === 'string' && CONTENT_TYPE_VALUES.has(value as ContentType);
+}
 
 // Helper: word-boundary test to avoid false positives like "Elvis" → "vs"
 function wb(keyword: string, pattern: RegExp): boolean {
@@ -323,8 +344,10 @@ export async function processOutlineJob(jobId: string): Promise<void> {
         stage: 'outline',
     });
 
-    // Use explicit content type from payload if provided; otherwise auto-detect
-    const detectedType = (payload.contentType as ContentType) || getContentType(payload.targetKeyword);
+    // Use explicit content type from payload if valid; otherwise auto-detect
+    const detectedType = isContentType(payload.contentType)
+        ? payload.contentType
+        : getContentType(payload.targetKeyword);
 
     // Build content-type-specific outline instructions
     let typeSpecificInstructions = '';
@@ -684,8 +707,10 @@ export async function processDraftJob(jobId: string): Promise<void> {
 
     const voiceSeed = await getOrCreateVoiceSeed(job.domainId!, domain.domain, domain.niche || 'general');
 
-    // Use contentType already set by outline stage; fall back to re-detection
-    const contentType = (article.contentType as ContentType) || getContentType(payload.targetKeyword);
+    // Use contentType already set by outline stage if valid; fall back to re-detection
+    const contentType = isContentType(article.contentType)
+        ? article.contentType
+        : getContentType(payload.targetKeyword);
 
     let prompt = '';
 

@@ -23,8 +23,8 @@ CREATE TABLE "page_variants" (
 	"weight" integer DEFAULT 50 NOT NULL,
 	"blocks" jsonb DEFAULT '[]'::jsonb NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
-	"impressions" integer DEFAULT 0 NOT NULL,
-	"conversions" integer DEFAULT 0 NOT NULL,
+	"impressions" bigint DEFAULT 0 NOT NULL,
+	"conversions" bigint DEFAULT 0 NOT NULL,
 	"created_at" timestamp DEFAULT now(),
 	"updated_at" timestamp DEFAULT now()
 );
@@ -41,5 +41,7 @@ CREATE INDEX "block_tpl_global_idx" ON "block_templates" USING btree ("is_global
 CREATE UNIQUE INDEX "page_variant_page_key_uidx" ON "page_variants" USING btree ("page_id","variant_key");--> statement-breakpoint
 CREATE INDEX "page_variant_page_idx" ON "page_variants" USING btree ("page_id");--> statement-breakpoint
 CREATE INDEX "page_variant_active_idx" ON "page_variants" USING btree ("is_active");--> statement-breakpoint
-ALTER TABLE "page_definitions" ADD CONSTRAINT "page_definitions_last_reviewed_by_users_id_fk" FOREIGN KEY ("last_reviewed_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "page_variants" ADD CONSTRAINT "ab_page_variants_weight_check" CHECK ("weight" > 0);--> statement-breakpoint
+ALTER TABLE "page_definitions" ALTER COLUMN "last_reviewed_by" DROP NOT NULL;--> statement-breakpoint
+ALTER TABLE "page_definitions" ADD CONSTRAINT "page_definitions_last_reviewed_by_users_id_fk" FOREIGN KEY ("last_reviewed_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "page_def_status_idx" ON "page_definitions" USING btree ("status");

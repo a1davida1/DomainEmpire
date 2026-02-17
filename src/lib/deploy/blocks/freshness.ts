@@ -64,7 +64,7 @@ export async function checkBlockFreshness(
             if (generatedAt) {
                 const genTime = new Date(generatedAt).getTime();
                 if (Number.isFinite(genTime)) {
-                    ageDays = Math.floor((now - genTime) / (24 * 60 * 60 * 1000));
+                    ageDays = Math.max(0, Math.floor((now - genTime) / (24 * 60 * 60 * 1000)));
                 }
             }
 

@@ -4,6 +4,7 @@ import { Activity, AlertTriangle, Bell, CheckCircle2, Eye } from 'lucide-react';
 import Link from 'next/link';
 import { db, notifications } from '@/lib/db';
 import { inArray, desc } from 'drizzle-orm';
+import { DataLoadError } from '@/components/dashboard/DataLoadError';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,21 +16,25 @@ const SEVERITY_COLORS: Record<string, string> = {
     info: 'outline',
 };
 
-async function getMonitoringAlerts() {
+type MonitoringAlert = typeof notifications.$inferSelect;
+
+async function getMonitoringAlerts(): Promise<{ data: MonitoringAlert[]; error: string | null }> {
     try {
-        return await db
+        const data = await db
             .select()
             .from(notifications)
             .where(inArray(notifications.type, [...MONITORING_TYPES]))
             .orderBy(desc(notifications.createdAt))
             .limit(100);
-    } catch {
-        return [];
+        return { data, error: null };
+    } catch (err) {
+        console.error('[Monitoring] Failed to load alerts:', err);
+        return { data: [], error: err instanceof Error ? err.message : 'Failed to load monitoring alerts' };
     }
 }
 
 export default async function MonitoringPage() {
-    const alerts = await getMonitoringAlerts();
+    const { data: alerts, error: alertsError } = await getMonitoringAlerts();
 
     const criticalCount = alerts.filter(a => a.severity === 'critical' && !a.isRead).length;
     const warningCount = alerts.filter(a => a.severity === 'warning' && !a.isRead).length;
@@ -38,6 +43,7 @@ export default async function MonitoringPage() {
 
     return (
         <div className="space-y-6">
+            {alertsError && <DataLoadError message="Failed to load monitoring alerts" detail={alertsError} />}
             {/* Header */}
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-3">

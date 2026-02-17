@@ -38,7 +38,13 @@ export async function POST(
         return NextResponse.json({ error: 'Invalid page definition ID' }, { status: 400 });
     }
 
-    const body = await request.json();
+    let body: Record<string, unknown>;
+    try {
+        body = await request.json();
+    } catch {
+        return NextResponse.json({ error: 'invalid JSON' }, { status: 400 });
+    }
+
     const newStatus = body.status as string;
     if (!newStatus || typeof newStatus !== 'string') {
         return NextResponse.json({ error: 'status is required' }, { status: 400 });
@@ -100,6 +106,8 @@ export async function POST(
 
     type ReviewEventType = typeof reviewEvents.$inferInsert.eventType;
 
+    const rationale = typeof body.rationale === 'string' ? body.rationale : null;
+
     await db.transaction(async (tx) => {
         await tx.update(pageDefinitions).set(updates).where(eq(pageDefinitions.id, id));
 
@@ -108,7 +116,7 @@ export async function POST(
             actorId: user.id,
             actorRole: user.role,
             eventType: (eventTypeMap[newStatus] || 'edited') as NonNullable<ReviewEventType>,
-            rationale: body.rationale || null,
+            rationale,
         });
     });
 

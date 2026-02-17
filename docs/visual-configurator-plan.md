@@ -78,7 +78,8 @@
 
 1. **Inject script into preview HTML** — New preview API query param `?configurator=true` that injects a small script into the rendered HTML. The script:
    - Adds click handlers on all `[data-block-id]` elements
-   - On click: `parent.postMessage({ type: 'block-select', blockId, blockType }, '*')`
+   - Derives/validates `parentOrigin` first (for example from an `ALLOWED_PARENT_ORIGIN` constant or a validated runtime value)
+   - On click: only sends when `parentOrigin` is trusted, then call `parent.postMessage({ type: 'block-select', blockId, blockType }, parentOrigin)`
    - Adds hover highlight (outline) on `[data-block-id]:hover`
    - Listens for `block-highlight` messages from parent to scroll-to and outline a specific block
 
@@ -143,6 +144,7 @@
 
 ## Risk Mitigations
 - **iframe CORS** — Preview API already sets `X-Frame-Options: SAMEORIGIN`, so same-origin iframe works
-- **postMessage security** — Validate `event.origin` matches `window.location.origin`
+- **postMessage security** — Validate `event.origin` matches an expected origin on receive **and** always send with an explicit `targetOrigin` (never `'*'`)
+- **Send-side origin enforcement** — Derive destination origin from a trusted source (validated iframe `src` origin or an `allowedOrigins` list), verify iframe `src` matches expected origin before sending via `iframe.contentWindow.postMessage` / `window.postMessage`, and reject sends when destination origin cannot be determined
 - **Preview staleness** — Cache-busting via `?t=Date.now()` param on iframe src
 - **Large pages** — Preview is server-rendered HTML, no client-side hydration needed

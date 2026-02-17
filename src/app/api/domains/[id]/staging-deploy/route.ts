@@ -25,8 +25,13 @@ export async function POST(
         const result = await processStagingDeploy(id);
 
         if (!result.success) {
+            console.error('[staging-deploy] processStagingDeploy failed', {
+                domainId: id,
+                error: result.error,
+                result,
+            });
             return NextResponse.json(
-                { error: result.error || 'Staging deploy failed' },
+                { error: 'Staging deploy failed', code: 'STAGING_DEPLOY_FAILED' },
                 { status: 500 },
             );
         }

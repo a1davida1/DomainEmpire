@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockSelectResult = vi.fn();
 
@@ -34,16 +34,13 @@ const DOMAIN_ID = '00000000-0000-4000-8000-000000000001';
 
 describe('block freshness', () => {
     beforeEach(() => {
+        vi.useFakeTimers();
         vi.clearAllMocks();
         vi.setSystemTime(new Date('2026-02-16T14:00:00Z'));
     });
 
     afterEach(() => {
         vi.useRealTimers();
-    });
-
-    beforeAll(() => {
-        vi.useFakeTimers();
     });
 
     describe('checkBlockFreshness', () => {
