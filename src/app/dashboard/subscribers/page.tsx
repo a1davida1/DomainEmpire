@@ -25,6 +25,19 @@ async function getDomainOptions() {
     }
 }
 
+async function getSubscriberStatsSafe(domainId?: string) {
+    try {
+        const data = await getSubscriberStats(domainId);
+        return { data, error: null as string | null };
+    } catch (err) {
+        console.error('[Subscribers] Failed to load stats:', err);
+        return {
+            data: { total: 0, bySource: {}, estimatedTotalValue: 0, last30d: 0 },
+            error: err instanceof Error ? err.message : 'Failed to load subscriber stats',
+        };
+    }
+}
+
 async function getRecentSubscribers(domainId?: string, page = 1) {
     const limit = 50;
     const offset = (page - 1) * limit;
@@ -81,22 +94,23 @@ export default async function SubscribersPage({
     const rawPage = parseInt(params.page || '1', 10);
     const page = Number.isFinite(rawPage) ? Math.max(1, rawPage) : 1;
 
-    const [domainOptionsResult, stats, subscribersResult] = await Promise.all([
+    const [domainOptionsResult, statsResult, subscribersResult] = await Promise.all([
         getDomainOptions(),
-        getSubscriberStats(domainId),
+        getSubscriberStatsSafe(domainId),
         getRecentSubscribers(domainId, page),
     ]);
     const domainOptions = domainOptionsResult.data;
+    const stats = statsResult.data;
     const { rows, total, error: subscribersError } = subscribersResult;
 
     const totalPages = Math.ceil(total / 50);
 
     return (
         <div className="space-y-6">
-            {(domainOptionsResult.error || subscribersError) && (
+            {(domainOptionsResult.error || statsResult.error || subscribersError) && (
                 <DataLoadError
                     message="Failed to load subscriber data"
-                    detail={domainOptionsResult.error || subscribersError || undefined}
+                    detail={domainOptionsResult.error || statsResult.error || subscribersError || undefined}
                 />
             )}
             {/* Header */}

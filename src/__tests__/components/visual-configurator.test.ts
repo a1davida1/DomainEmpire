@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { getConfiguratorBridgeScript } from '../../lib/deploy/blocks/assembler';
-import { MAX_HISTORY } from '../../components/dashboard/VisualConfigurator';
+import { MAX_HISTORY, buildConfiguratorPreviewUrl } from '../../components/dashboard/VisualConfigurator';
 
 const EXPECTED_THEMES = ['clean', 'editorial', 'bold', 'minimal'] as const;
 const EXPECTED_SKINS = ['slate', 'ocean', 'forest', 'ember', 'midnight', 'coral'] as const;
@@ -16,7 +16,7 @@ describe('Visual Configurator', () => {
         it('builds correct preview URL with configurator flag', () => {
             const pageId = '00000000-0000-4000-8000-000000000001';
             const t = 1708000000000;
-            const url = `/api/pages/${pageId}/preview?format=html&configurator=true&t=${t}`;
+            const url = buildConfiguratorPreviewUrl(pageId, t);
             expect(url).toContain(pageId);
             expect(url).toContain('configurator=true');
             expect(url).toContain('format=html');
@@ -24,9 +24,12 @@ describe('Visual Configurator', () => {
         });
 
         it('cache breaker changes on each call', () => {
-            const t1 = Date.now();
-            const t2 = Date.now();
-            expect(t2).toBeGreaterThanOrEqual(t1);
+            const pageId = '00000000-0000-4000-8000-000000000001';
+            const first = buildConfiguratorPreviewUrl(pageId, 1708000000000);
+            const second = buildConfiguratorPreviewUrl(pageId, 1708000000001);
+            expect(first).not.toBe(second);
+            expect(first).toContain('t=1708000000000');
+            expect(second).toContain('t=1708000000001');
         });
     });
 
@@ -213,13 +216,13 @@ describe('Visual Configurator', () => {
 
     describe('configurator bridge script injection', () => {
         it('generated bridge script includes block-select postMessage', () => {
-            const bridgeScript = getConfiguratorBridgeScript();
+            const bridgeScript = getConfiguratorBridgeScript('http://localhost:3000');
             expect(bridgeScript).toContain('block-select');
             expect(bridgeScript).toContain('data-block-id');
         });
 
         it('generated bridge script includes block-highlight listener', () => {
-            const bridgeScript = getConfiguratorBridgeScript();
+            const bridgeScript = getConfiguratorBridgeScript('http://localhost:3000');
             expect(bridgeScript).toContain('block-highlight');
         });
 

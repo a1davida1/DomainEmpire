@@ -8,7 +8,15 @@ import { DataLoadError } from '@/components/dashboard/DataLoadError';
 
 export const dynamic = 'force-dynamic';
 
-const MONITORING_TYPES = ['traffic_drop', 'deploy_failed', 'backlink_lost', 'revenue_milestone', 'search_quality'] as const;
+const MONITORING_TYPES = [
+    'traffic_drop',
+    'deploy_failed',
+    'backlink_lost',
+    'revenue_milestone',
+    'search_quality',
+    'ssl_expiring',
+    'dns_failure',
+] as const;
 
 const SEVERITY_COLORS: Record<string, string> = {
     critical: 'destructive',
@@ -18,7 +26,7 @@ const SEVERITY_COLORS: Record<string, string> = {
 
 type MonitoringAlert = typeof notifications.$inferSelect;
 
-async function getMonitoringAlerts(): Promise<{ data: MonitoringAlert[]; error: string | null }> {
+async function getMonitoringAlerts(): Promise<{ data: MonitoringAlert[] | null; error: string | null }> {
     try {
         const data = await db
             .select()
@@ -29,12 +37,13 @@ async function getMonitoringAlerts(): Promise<{ data: MonitoringAlert[]; error: 
         return { data, error: null };
     } catch (err) {
         console.error('[Monitoring] Failed to load alerts:', err);
-        return { data: [], error: err instanceof Error ? err.message : 'Failed to load monitoring alerts' };
+        return { data: null, error: err instanceof Error ? err.message : 'Failed to load monitoring alerts' };
     }
 }
 
 export default async function MonitoringPage() {
-    const { data: alerts, error: alertsError } = await getMonitoringAlerts();
+    const { data: alertsData, error: alertsError } = await getMonitoringAlerts();
+    const alerts = alertsData ?? [];
 
     const criticalCount = alerts.filter(a => a.severity === 'critical' && !a.isRead).length;
     const warningCount = alerts.filter(a => a.severity === 'warning' && !a.isRead).length;
@@ -119,7 +128,7 @@ export default async function MonitoringPage() {
                     <CardTitle className="text-base">Recent Alerts</CardTitle>
                 </CardHeader>
                 <CardContent className="p-0">
-                    {alerts.length === 0 ? (
+                    {alertsData !== null && alerts.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-16 px-8 text-center">
                             <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted mb-4">
                                 <CheckCircle2 className="h-7 w-7 text-muted-foreground" />

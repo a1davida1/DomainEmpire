@@ -115,7 +115,7 @@ export default function DeployPage() {
 
     const fetchData = useCallback(async (signal?: AbortSignal) => {
         try {
-            const domainsRes = await fetch('/api/domains?status=active', { signal });
+            const domainsRes = await fetch('/api/domains?status=active&limit=500', { signal });
 
             if (!domainsRes.ok) {
                 console.error('Failed to fetch domains:', domainsRes.status);

@@ -124,6 +124,10 @@ const VIEWPORT_WIDTHS: Record<ViewportSize, string> = {
 
 export const MAX_HISTORY = 50;
 
+export function buildConfiguratorPreviewUrl(pageId: string, cacheBuster: number): string {
+    return `/api/pages/${pageId}/preview?format=html&configurator=true&t=${cacheBuster}`;
+}
+
 // ============================================================
 // Structured Field Schemas — typed form fields per block type
 // ============================================================
@@ -605,7 +609,7 @@ export function VisualConfigurator({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [undo, redo, blocks, theme, skin, dirty]);
 
-    const previewUrl = `/api/pages/${pageId}/preview?format=html&configurator=true&t=${previewKey}`;
+    const previewUrl = buildConfiguratorPreviewUrl(pageId, previewKey);
 
     function updateBlocks(newBlocks: Block[]) {
         pushHistory(newBlocks);

@@ -15,6 +15,33 @@ import { generateV2GlobalStyles } from '@/lib/deploy/themes';
 import { extractSiteTitle } from '@/lib/deploy/templates/shared';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+function deriveAllowedParentOrigin(request: NextRequest): string {
+    const configured = process.env.ALLOWED_PARENT_ORIGIN?.trim();
+    const allowedOrigins = new Set([request.nextUrl.origin]);
+    if (configured) {
+        allowedOrigins.add(configured);
+    }
+
+    const originHeader = request.headers.get('origin');
+    const refererHeader = request.headers.get('referer');
+
+    let refererOrigin: string | null = null;
+    if (refererHeader) {
+        try {
+            refererOrigin = new URL(refererHeader).origin;
+        } catch {
+            refererOrigin = null;
+        }
+    }
+
+    const candidate = configured
+        ?? originHeader
+        ?? refererOrigin
+        ?? request.nextUrl.origin;
+
+    return allowedOrigins.has(candidate) ? candidate : '';
+}
+
 // extractSiteTitle imported from '@/lib/deploy/templates/shared'
 
 /**
@@ -105,7 +132,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
     // that enables click-to-select and hover-highlight on blocks.
     const isConfigurator = request.nextUrl.searchParams.get('configurator') === 'true';
     if (isConfigurator) {
-        const bridgeScript = getConfiguratorBridgeScript();
+        const bridgeScript = getConfiguratorBridgeScript(deriveAllowedParentOrigin(request));
         previewHtml = previewHtml.replace('</body>', bridgeScript + '</body>');
     }
 

@@ -78,8 +78,8 @@
 
 1. **Inject script into preview HTML** — New preview API query param `?configurator=true` that injects a small script into the rendered HTML. The script:
    - Adds click handlers on all `[data-block-id]` elements
-   - Derives/validates `parentOrigin` first (for example from an `ALLOWED_PARENT_ORIGIN` constant or a validated runtime value)
-   - On click: only sends when `parentOrigin` is trusted, then call `parent.postMessage({ type: 'block-select', blockId, blockType }, parentOrigin)`
+   - Uses a server-injected `ALLOWED_PARENT_ORIGIN` constant derived from a server-side allowlist (`ALLOWED_PARENT_ORIGIN` env + request origin validation)
+   - On click: if `ALLOWED_PARENT_ORIGIN` is missing/invalid or not on the allowlist, do **not** send; otherwise call `parent.postMessage({ type: 'block-select', blockId, blockType }, ALLOWED_PARENT_ORIGIN)`
    - Adds hover highlight (outline) on `[data-block-id]:hover`
    - Listens for `block-highlight` messages from parent to scroll-to and outline a specific block
 

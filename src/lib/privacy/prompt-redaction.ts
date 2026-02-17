@@ -1,9 +1,17 @@
+import { isIP } from 'node:net';
+
 const MAX_PROMPT_BODY_CHARS = 2_000;
 
 const EMAIL_RE = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
-const IPV4_RE = /\b(?:\d{1,3}\.){3}\d{1,3}\b/g;
-const IPV6_RE = /\b(?:[a-f0-9]{1,4}:){2,7}[a-f0-9]{1,4}\b/gi;
+const CANDIDATE_IP_RE = /(^|[^A-Za-z0-9:._-])(([A-Fa-f0-9:.]+))(?![A-Za-z0-9:._-])/g;
 const PHONE_RE = /\+?\d[\d\s().-]{7,}\d/g;
+
+function redactIpLiterals(input: string): string {
+    return input.replaceAll(CANDIDATE_IP_RE, (match, prefix: string, candidate: string) => {
+        const token = String(candidate ?? '');
+        return isIP(token) > 0 ? `${prefix}[redacted-ip]` : match;
+    });
+}
 
 function clampPromptBody(value: string): string {
     if (value.length <= MAX_PROMPT_BODY_CHARS) {
@@ -15,10 +23,8 @@ function clampPromptBody(value: string): string {
 
 export function redactPromptBody(promptBody: string): string {
     const normalized = promptBody.replaceAll('\r\n', '\n');
-    const redacted = normalized
+    const redacted = redactIpLiterals(normalized)
         .replaceAll(EMAIL_RE, '[redacted-email]')
-        .replaceAll(IPV4_RE, '[redacted-ip]')
-        .replaceAll(IPV6_RE, '[redacted-ip]')
         .replaceAll(PHONE_RE, '[redacted-phone]');
 
     return clampPromptBody(redacted);

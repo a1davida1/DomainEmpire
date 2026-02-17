@@ -121,5 +121,8 @@ export async function POST(
     });
 
     const updated = await db.select().from(pageDefinitions).where(eq(pageDefinitions.id, id)).limit(1);
+    if (updated.length === 0) {
+        return NextResponse.json({ error: 'Page not found after update' }, { status: 404 });
+    }
     return NextResponse.json(updated[0]);
 }

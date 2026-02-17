@@ -155,8 +155,8 @@ export default function DuplicatesPage() {
                                 </div>
                             ) : (
                                 <div className="space-y-4">
-                                    {result.duplicates.map((dup, i) => (
-                                        <div key={i} className="flex flex-col md:flex-row items-center justify-between p-4 border rounded-lg bg-muted/20">
+                                    {result.duplicates.map((dup) => (
+                                        <div key={`${dup.articleA.id}-${dup.articleB.id}`} className="flex flex-col md:flex-row items-center justify-between p-4 border rounded-lg bg-muted/20">
                                             <div className="flex-1 space-y-2">
                                                 <div className="flex items-center gap-2">
                                                     <FileText className="h-4 w-4 text-muted-foreground" />
@@ -176,7 +176,7 @@ export default function DuplicatesPage() {
                                                     <div className="text-xs text-muted-foreground">Similarity</div>
                                                 </div>
                                                 <Button variant="outline" size="sm" asChild>
-                                                    <Link href={`/dashboard/content/${dup.articleA.id}`}>
+                                                    <Link href={`/dashboard/content/articles/${dup.articleA.id}`}>
                                                         Edit <ArrowRight className="ml-2 h-3 w-3" />
                                                     </Link>
                                                 </Button>

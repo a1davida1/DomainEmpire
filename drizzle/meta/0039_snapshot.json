@@ -10207,9 +10207,20 @@
           ]
         }
       },
-      "policies": {},
+      "policies": {
+        "sessions_backend_access": {
+          "name": "sessions_backend_access",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "postgres"
+          ],
+          "using": "(true)",
+          "withCheck": "(true)"
+        }
+      },
       "checkConstraints": {},
-      "isRLSEnabled": false
+      "isRLSEnabled": true
     },
     "public.site_templates": {
       "name": "site_templates",
@@ -10642,9 +10653,20 @@
           ]
         }
       },
-      "policies": {},
+      "policies": {
+        "subscribers_backend_access": {
+          "name": "subscribers_backend_access",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "postgres"
+          ],
+          "using": "(true)",
+          "withCheck": "(true)"
+        }
+      },
       "checkConstraints": {},
-      "isRLSEnabled": false
+      "isRLSEnabled": true
     },
     "public.users": {
       "name": "users",
@@ -10781,9 +10803,20 @@
           ]
         }
       },
-      "policies": {},
+      "policies": {
+        "users_backend_access": {
+          "name": "users_backend_access",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "postgres"
+          ],
+          "using": "(true)",
+          "withCheck": "(true)"
+        }
+      },
       "checkConstraints": {},
-      "isRLSEnabled": false
+      "isRLSEnabled": true
     }
   },
   "enums": {},

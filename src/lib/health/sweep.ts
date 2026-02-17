@@ -5,7 +5,8 @@
  */
 
 import { db, domains } from '@/lib/db';
-import { and, isNull, or, lte, sql } from 'drizzle-orm';
+import { notifications } from '@/lib/db/schema';
+import { and, eq, gte, isNull, lte, or, sql } from 'drizzle-orm';
 import { calculateCompositeHealth } from './scoring';
 import { createNotification } from '@/lib/notifications';
 
@@ -13,6 +14,7 @@ const STALE_HEALTH_HOURS = 6; // Re-score domains whose health is older than 6 h
 const SSL_WARNING_DAYS = 14;
 const SSL_CRITICAL_DAYS = 7;
 const MAX_DOMAINS_PER_SWEEP = 50;
+const NOTIFICATION_THROTTLE_HOURS = 6;
 
 interface HealthSweepSummary {
     scanned: number;
@@ -20,6 +22,27 @@ interface HealthSweepSummary {
     sslWarnings: number;
     dnsFailures: number;
     errors: number;
+}
+
+async function shouldEmitHealthNotification(args: {
+    domainId: string;
+    type: 'ssl_expiring' | 'dns_failure';
+    severity: 'warning' | 'critical';
+}): Promise<boolean> {
+    const threshold = new Date(Date.now() - NOTIFICATION_THROTTLE_HOURS * 60 * 60 * 1000);
+    const existing = await db
+        .select({ id: notifications.id })
+        .from(notifications)
+        .where(and(
+            eq(notifications.domainId, args.domainId),
+            eq(notifications.type, args.type),
+            eq(notifications.severity, args.severity),
+            eq(notifications.isRead, false),
+            gte(notifications.createdAt, threshold),
+        ))
+        .limit(1);
+
+    return existing.length === 0;
 }
 
 /**
@@ -31,7 +54,7 @@ async function checkSslExpiry(domainName: string): Promise<{ daysRemaining: numb
         // Use Node.js TLS to check certificate
         const tls = await import('node:tls');
         return new Promise((resolve) => {
-            const socket = tls.connect(443, domainName, { servername: domainName, timeout: 10_000 }, () => {
+            const socket = tls.connect(443, domainName, { servername: domainName }, () => {
                 const cert = socket.getPeerCertificate();
                 socket.destroy();
                 if (cert && cert.valid_to) {
@@ -112,40 +135,49 @@ export async function runDomainHealthSweep(): Promise<HealthSweepSummary> {
                     const ssl = await checkSslExpiry(domain.domain);
                     if (ssl.daysRemaining !== null) {
                         if (ssl.daysRemaining <= SSL_CRITICAL_DAYS) {
-                            await createNotification({
-                                domainId: domain.id,
-                                type: 'deploy_failed',
-                                severity: 'critical',
-                                title: `SSL certificate expiring in ${ssl.daysRemaining} days on ${domain.domain}`,
-                                message: `The SSL certificate for ${domain.domain} expires in ${ssl.daysRemaining} days. Renew immediately.`,
-                                actionUrl: `/dashboard/domains/${domain.id}`,
-                            });
-                            summary.sslWarnings++;
+                            if (await shouldEmitHealthNotification({ domainId: domain.id, type: 'ssl_expiring', severity: 'critical' })) {
+                                await createNotification({
+                                    domainId: domain.id,
+                                    type: 'ssl_expiring',
+                                    severity: 'critical',
+                                    title: `SSL certificate expiring on ${domain.domain}`,
+                                    message: `The SSL certificate for ${domain.domain} expires in ${ssl.daysRemaining} days. Renew immediately.`,
+                                    actionUrl: `/dashboard/domains/${domain.id}`,
+                                    metadata: { lastNotifiedAt: new Date().toISOString() },
+                                });
+                                summary.sslWarnings++;
+                            }
                         } else if (ssl.daysRemaining <= SSL_WARNING_DAYS) {
-                            await createNotification({
-                                domainId: domain.id,
-                                type: 'deploy_failed',
-                                severity: 'warning',
-                                title: `SSL certificate expiring soon on ${domain.domain}`,
-                                message: `The SSL certificate for ${domain.domain} expires in ${ssl.daysRemaining} days.`,
-                                actionUrl: `/dashboard/domains/${domain.id}`,
-                            });
-                            summary.sslWarnings++;
+                            if (await shouldEmitHealthNotification({ domainId: domain.id, type: 'ssl_expiring', severity: 'warning' })) {
+                                await createNotification({
+                                    domainId: domain.id,
+                                    type: 'ssl_expiring',
+                                    severity: 'warning',
+                                    title: `SSL certificate expiring soon on ${domain.domain}`,
+                                    message: `The SSL certificate for ${domain.domain} expires in ${ssl.daysRemaining} days.`,
+                                    actionUrl: `/dashboard/domains/${domain.id}`,
+                                    metadata: { lastNotifiedAt: new Date().toISOString() },
+                                });
+                                summary.sslWarnings++;
+                            }
                         }
                     }
 
                     // DNS check
                     const dns = await checkDnsResolution(domain.domain);
                     if (!dns.resolved) {
-                        await createNotification({
-                            domainId: domain.id,
-                            type: 'deploy_failed',
-                            severity: 'critical',
-                            title: `DNS resolution failed for ${domain.domain}`,
-                            message: `Cannot resolve ${domain.domain}: ${dns.error || 'unknown error'}`,
-                            actionUrl: `/dashboard/domains/${domain.id}`,
-                        });
-                        summary.dnsFailures++;
+                        if (await shouldEmitHealthNotification({ domainId: domain.id, type: 'dns_failure', severity: 'critical' })) {
+                            await createNotification({
+                                domainId: domain.id,
+                                type: 'dns_failure',
+                                severity: 'critical',
+                                title: `DNS resolution failed for ${domain.domain}`,
+                                message: `Cannot resolve ${domain.domain}: ${dns.error || 'unknown error'}`,
+                                actionUrl: `/dashboard/domains/${domain.id}`,
+                                metadata: { lastNotifiedAt: new Date().toISOString() },
+                            });
+                            summary.dnsFailures++;
+                        }
                     }
                 }
             } catch (err) {

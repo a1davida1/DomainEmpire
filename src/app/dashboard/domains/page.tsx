@@ -7,7 +7,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { TableHead } from '@/components/ui/table';
 import { Plus, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import { db, domainRegistrarProfiles, domains } from '@/lib/db';
-import { and, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
 import { articles, contentQueue } from '@/lib/db/schema';
 import { formatDate } from '@/lib/format-utils';
 import { DeployAllButton } from '@/components/dashboard/DeployAllButton';
@@ -86,11 +86,18 @@ function isDeployFilter(value: string | undefined): value is DeployFilter {
     return !!value && (DEPLOY_FILTER_VALUES as readonly string[]).includes(value);
 }
 
+function isTruthyQueryParam(value: string | undefined): boolean {
+    if (!value) return false;
+    const normalized = value.trim().toLowerCase();
+    return normalized === 'true' || normalized === '1' || normalized === 'yes';
+}
+
 interface DomainsPageProps {
     readonly searchParams: Promise<{
         readonly q?: string; readonly status?: string; readonly tier?: string;
         readonly account?: string;
         readonly deploy?: string;
+        readonly renewalSoon?: string;
         readonly page?: string; readonly sort?: string; readonly dir?: string;
     }>;
 }
@@ -221,7 +228,17 @@ function SortIndicator({ col, activeCol, activeDir }: { col: SortColumn; activeC
         : <ChevronDown className="ml-1 inline h-3 w-3 text-primary" />;
 }
 
-async function getDomains(filters: { q?: string; status?: string; tier?: string; account?: string; deploy?: string; sort?: string; dir?: string; page?: string }): Promise<DomainListResult> {
+async function getDomains(filters: {
+    q?: string;
+    status?: string;
+    tier?: string;
+    account?: string;
+    deploy?: string;
+    renewalSoon?: string;
+    sort?: string;
+    dir?: string;
+    page?: string;
+}): Promise<DomainListResult> {
     try {
         // Build SQL WHERE conditions
         const conditions = [isNull(domains.deletedAt)];
@@ -261,6 +278,18 @@ async function getDomains(filters: { q?: string; status?: string; tier?: string;
                 if (notDeployedCondition) {
                     conditions.push(notDeployedCondition);
                 }
+            }
+        }
+        if (isTruthyQueryParam(filters.renewalSoon)) {
+            const now = new Date();
+            const thirtyDaysFromNow = new Date(now);
+            thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+            const renewalSoonCondition = and(
+                gte(domains.renewalDate, now),
+                lt(domains.renewalDate, thirtyDaysFromNow),
+            );
+            if (renewalSoonCondition) {
+                conditions.push(renewalSoonCondition);
             }
         }
 
@@ -422,6 +451,7 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
         if (params.tier) p.set('tier', params.tier);
         if (params.account) p.set('account', params.account);
         if (params.deploy) p.set('deploy', params.deploy);
+        if (params.renewalSoon) p.set('renewalSoon', params.renewalSoon);
         p.set('sort', col);
         p.set('dir', newDir);
         return `/dashboard/domains?${p.toString()}`;
@@ -434,6 +464,7 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
         if (params.tier) p.set('tier', params.tier);
         if (params.account) p.set('account', params.account);
         if (params.deploy) p.set('deploy', params.deploy);
+        if (params.renewalSoon) p.set('renewalSoon', params.renewalSoon);
         if (params.sort) p.set('sort', params.sort);
         if (params.dir) p.set('dir', params.dir);
         p.set('page', String(pg));
@@ -601,6 +632,7 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                                 if (params.status) p.set('status', params.status);
                                 if (params.tier) p.set('tier', params.tier);
                                 if (params.deploy) p.set('deploy', params.deploy);
+                                if (params.renewalSoon) p.set('renewalSoon', params.renewalSoon);
                                 return `/dashboard/domains?${p.toString()}`;
                             })()}
                             className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
@@ -618,6 +650,7 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                             if (params.status) p.set('status', params.status);
                             if (params.tier) p.set('tier', params.tier);
                             if (params.deploy) p.set('deploy', params.deploy);
+                            if (params.renewalSoon) p.set('renewalSoon', params.renewalSoon);
                             p.set('account', account);
                             return (
                                 <Link
@@ -849,7 +882,7 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                             nameserverPending: nameserverHintsByDomainId[d.id]?.pending ?? false,
                         }))}
                         queueHints={queueSpotlight.hintsByDomain}
-                        hasFilters={!!(params.q || params.status || params.tier || params.account || params.deploy)}
+                        hasFilters={!!(params.q || params.status || params.tier || params.account || params.deploy || params.renewalSoon)}
                         headerSlot={
                             <>
                                 <TableHead><Link href={sortHref('domain')} className="group inline-flex items-center hover:text-foreground cursor-pointer hover:underline underline-offset-2">Domain<SortIndicator col="domain" activeCol={sortCol} activeDir={sortDir} /></Link></TableHead>

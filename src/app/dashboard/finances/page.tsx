@@ -91,7 +91,7 @@ export default async function FinancesPage() {
         const net = revenue - cost;
         const purchasePrice = Number(domainInfo?.purchasePrice || 0);
         const renewalPrice = Number(domainInfo?.renewalPrice || 0);
-        const totalCostBasis = purchasePrice + renewalPrice;
+        const totalCostBasis = purchasePrice;
         const annualizedNet = net * 12; // 30d → annual
         const roi = totalCostBasis > 0 ? (annualizedNet / totalCostBasis) * 100 : null;
         const paybackMonths = net > 0 ? totalCostBasis / net : null;

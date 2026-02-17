@@ -1405,7 +1405,8 @@ export const notifications = pgTable('notifications', {
 
     type: text('type', {
         enum: ['renewal_warning', 'job_failed', 'deploy_failed', 'traffic_drop',
-            'revenue_milestone', 'content_stale', 'domain_expiring', 'backlink_lost', 'search_quality', 'info']
+            'revenue_milestone', 'content_stale', 'domain_expiring', 'backlink_lost', 'search_quality',
+            'ssl_expiring', 'dns_failure', 'info']
     }).notNull(),
     severity: text('severity', {
         enum: ['info', 'warning', 'critical']

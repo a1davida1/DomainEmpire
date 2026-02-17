@@ -61,17 +61,19 @@ export default async function ArticlePage({ params }: PageProps) {
                             )}
                         </div>
                         <p className="text-muted-foreground text-sm">
-                            {article.domain.domain} • {formatNumber(article.wordCount)} words
+                            {article.domain?.domain ?? 'Unknown domain'} • {formatNumber(article.wordCount)} words
                         </p>
                     </div>
                 </div>
                 <div className="flex gap-2">
-                    <Link href={`/dashboard/domains/${article.domain.id}/preview?articleId=${id}`}>
-                        <Button variant="outline">
-                            <Eye className="mr-2 h-4 w-4" />
-                            Visual Site
-                        </Button>
-                    </Link>
+                    {article.domain && (
+                        <Link href={`/dashboard/domains/${article.domain.id}/preview?articleId=${id}`}>
+                            <Button variant="outline">
+                                <Eye className="mr-2 h-4 w-4" />
+                                Visual Site
+                            </Button>
+                        </Link>
+                    )}
                     <Link href={`/dashboard/content/articles/${id}/visual-review`}>
                         <Button variant="outline">
                             Visual Review
@@ -83,7 +85,7 @@ export default async function ArticlePage({ params }: PageProps) {
                             QA Review
                         </Button>
                     </Link>
-                    {article.domain.isDeployed && article.status === 'published' && (
+                    {article.domain?.isDeployed && article.status === 'published' && (
                         <a
                             href={`https://${article.domain.domain}/${article.slug}`}
                             target="_blank"

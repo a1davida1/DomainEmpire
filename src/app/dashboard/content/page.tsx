@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
@@ -21,6 +22,21 @@ interface ProcessResult {
     stats: QueueStats;
 }
 
+type DomainApiRow = {
+    domain: string;
+    articleCount?: number;
+    status: string;
+};
+
+const ARTICLE_STATUS_REDIRECT_VALUES = new Set([
+    'generating',
+    'draft',
+    'review',
+    'approved',
+    'published',
+    'archived',
+]);
+
 export default function QueuePage() {
     const [stats, setStats] = useState<QueueStats | null>(null);
     const [loading, setLoading] = useState(true);
@@ -28,6 +44,14 @@ export default function QueuePage() {
     const [retrying, setRetrying] = useState(false);
     const [lastResult, setLastResult] = useState<{ type: string; message: string } | null>(null);
     const [domainArticles, setDomainArticles] = useState<Array<{ domain: string; articles: number; status: string }>>([]);
+    const router = useRouter();
+    const searchParams = useSearchParams();
+    const requestedStatus = (searchParams.get('status') ?? '').trim().toLowerCase();
+
+    useEffect(() => {
+        if (!ARTICLE_STATUS_REDIRECT_VALUES.has(requestedStatus)) return;
+        router.replace(`/dashboard/content/articles?status=${encodeURIComponent(requestedStatus)}`);
+    }, [requestedStatus, router]);
 
     const fetchStats = useCallback(async () => {
         try {
@@ -46,15 +70,24 @@ export default function QueuePage() {
     useEffect(() => {
         fetchStats();
         fetch('/api/domains?status=active')
-            .then(r => r.ok ? r.json() : [])
-            .then(data => {
-                if (Array.isArray(data)) {
-                    setDomainArticles(data.map((d: { domain: string; articleCount?: number; status: string }) => ({
-                        domain: d.domain,
-                        articles: d.articleCount ?? 0,
-                        status: d.status,
-                    })).sort((a: { articles: number }, b: { articles: number }) => a.articles - b.articles).slice(0, 10));
-                }
+            .then(r => r.ok ? r.json() : null)
+            .then((data: { domains?: DomainApiRow[] } | DomainApiRow[] | null) => {
+                const rows = Array.isArray(data)
+                    ? data
+                    : Array.isArray(data?.domains)
+                        ? data.domains
+                        : [];
+
+                setDomainArticles(
+                    rows
+                        .map((d) => ({
+                            domain: d.domain,
+                            articles: d.articleCount ?? 0,
+                            status: d.status,
+                        }))
+                        .sort((a, b) => a.articles - b.articles)
+                        .slice(0, 10)
+                );
             })
             .catch((err) => console.error('[Content] Stats fetch failed:', err));
         const interval = setInterval(fetchStats, 5000);

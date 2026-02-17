@@ -152,6 +152,9 @@ export async function POST(request: NextRequest) {
 
         const result = await db.transaction(async (tx) => {
             const insertedArticle = await tx.insert(articles).values(newArticle).returning();
+            if (insertedArticle.length === 0) {
+                throw new Error('Article insert returned no rows');
+            }
             const articleId = insertedArticle[0].id;
             const queueJobId = randomUUID();
 

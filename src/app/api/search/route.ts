@@ -18,12 +18,13 @@ export async function GET(request: NextRequest) {
     const types = typesParam
         ? typesParam.split(',').filter((t): t is SearchResultType => VALID_TYPES.has(t as SearchResultType))
         : undefined;
+    const normalizedTypes = types && types.length > 0 ? types : undefined;
 
     const limitParam = searchParams.get('limit');
     const limit = limitParam ? Math.min(Math.max(1, parseInt(limitParam, 10) || 20), 50) : undefined;
 
     try {
-        const results = await globalSearch(q, { types, limit });
+        const results = await globalSearch(q, { types: normalizedTypes, limit });
         return NextResponse.json({ results, query: q });
     } catch (err) {
         console.error('[Search] Error:', err);

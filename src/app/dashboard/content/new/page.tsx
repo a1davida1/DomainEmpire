@@ -96,8 +96,9 @@ export default function NewArticlePage() {
                 throw new Error(result.error || `Failed to create article (${res.status})`);
             }
 
-            if (result.articleId) {
-                router.push(`/dashboard/content/articles/${result.articleId}`);
+            const newId = result.article?.id;
+            if (newId) {
+                router.push(`/dashboard/content/articles/${newId}`);
             } else {
                 router.push('/dashboard/content/articles');
             }

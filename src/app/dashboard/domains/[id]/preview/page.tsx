@@ -163,7 +163,7 @@ export default async function PreviewPage({ params, searchParams }: PageProps) {
                         src={previewUrl}
                         className="h-full w-full border-0"
                         title="Site Preview"
-                        sandbox="allow-same-origin"
+                        sandbox="allow-same-origin allow-scripts"
                     />
                 </div>
             </div>

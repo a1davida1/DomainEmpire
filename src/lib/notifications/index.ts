@@ -10,7 +10,8 @@ import { eq, and, desc, sql } from 'drizzle-orm';
 import { sendNotificationEmail } from './email';
 
 type NotificationType = 'renewal_warning' | 'job_failed' | 'deploy_failed' | 'traffic_drop' |
-    'revenue_milestone' | 'content_stale' | 'domain_expiring' | 'backlink_lost' | 'search_quality' | 'info';
+    'revenue_milestone' | 'content_stale' | 'domain_expiring' | 'backlink_lost' | 'search_quality' |
+    'ssl_expiring' | 'dns_failure' | 'info';
 type Severity = 'info' | 'warning' | 'critical';
 
 interface CreateNotificationOptions {

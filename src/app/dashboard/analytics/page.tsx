@@ -1,6 +1,8 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -62,6 +64,10 @@ export default function AnalyticsPage() {
     const [error, setError] = useState<string | null>(null);
     const [days, setDays] = useState(30);
     const [purging, setPurging] = useState(false);
+    const searchParams = useSearchParams();
+    const activeTab = (searchParams.get('tab') ?? '').trim().toLowerCase();
+    const queueTabActive = activeTab === 'queue';
+    const queueHealthRef = useRef<HTMLDivElement | null>(null);
 
     const fetchData = useCallback(async (signal?: AbortSignal) => {
         setLoading(true);
@@ -98,6 +104,15 @@ export default function AnalyticsPage() {
         fetchData(controller.signal);
         return () => controller.abort();
     }, [fetchData]);
+
+    useEffect(() => {
+        if (!queueTabActive || loading) return;
+        const reduceMotion = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+        queueHealthRef.current?.scrollIntoView({
+            behavior: reduceMotion ? 'auto' : 'smooth',
+            block: 'start',
+        });
+    }, [queueTabActive, loading]);
 
     const handleExport = () => {
         if (!data) return;
@@ -199,80 +214,92 @@ export default function AnalyticsPage() {
                     <h1 className="text-2xl font-bold">AI Cost Tracking</h1>
                     <p className="text-muted-foreground">Monitor API usage, spending, and queue health</p>
                 </div>
-                <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={handleExport} disabled={!data}>
-                        <Download className="mr-2 h-4 w-4" />
-                        Export CSV
+                <div className="flex flex-wrap items-center gap-2">
+                    <Button asChild size="sm" variant={queueTabActive ? 'outline' : 'default'}>
+                        <Link href="/dashboard/analytics">Overview</Link>
                     </Button>
-                    {[7, 30, 90].map(d => (
-                        <Button
-                            key={d}
-                            variant={days === d ? 'default' : 'outline'}
-                            size="sm"
-                            onClick={() => setDays(d)}
-                        >
-                            {d}d
-                        </Button>
-                    ))}
+                    <Button asChild size="sm" variant={queueTabActive ? 'default' : 'outline'}>
+                        <Link href="/dashboard/analytics?tab=queue">Queue</Link>
+                    </Button>
+                    {!queueTabActive && (
+                        <>
+                            <Button variant="outline" size="sm" onClick={handleExport} disabled={!data}>
+                                <Download className="mr-2 h-4 w-4" />
+                                Export CSV
+                            </Button>
+                            {[7, 30, 90].map(d => (
+                                <Button
+                                    key={d}
+                                    variant={days === d ? 'default' : 'outline'}
+                                    size="sm"
+                                    onClick={() => setDays(d)}
+                                >
+                                    {d}d
+                                </Button>
+                            ))}
+                        </>
+                    )}
                 </div>
             </div>
 
-            {/* Summary Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <Card className="bg-gradient-to-br from-emerald-900/30 to-emerald-950/50">
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-muted-foreground">Total Cost</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold text-emerald-400">
-                            ${data.summary.totalCost.toFixed(2)}
-                        </div>
-                        <p className="text-xs text-muted-foreground">Last {days} days</p>
-                    </CardContent>
-                </Card>
+            {!queueTabActive && (
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <Card className="bg-gradient-to-br from-emerald-900/30 to-emerald-950/50">
+                        <CardHeader className="pb-2">
+                            <CardTitle className="text-sm font-medium text-muted-foreground">Total Cost</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-2xl font-bold text-emerald-400">
+                                ${data.summary.totalCost.toFixed(2)}
+                            </div>
+                            <p className="text-xs text-muted-foreground">Last {days} days</p>
+                        </CardContent>
+                    </Card>
 
-                <Card>
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-muted-foreground">Total Tokens</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">
-                            {(data.summary.totalTokens / 1000).toFixed(1)}K
-                        </div>
-                        <p className="text-xs text-muted-foreground">Input + Output</p>
-                    </CardContent>
-                </Card>
+                    <Card>
+                        <CardHeader className="pb-2">
+                            <CardTitle className="text-sm font-medium text-muted-foreground">Total Tokens</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-2xl font-bold">
+                                {(data.summary.totalTokens / 1000).toFixed(1)}K
+                            </div>
+                            <p className="text-xs text-muted-foreground">Input + Output</p>
+                        </CardContent>
+                    </Card>
 
-                <Card>
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-muted-foreground">API Calls</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{data.summary.totalCalls}</div>
-                        <p className="text-xs text-muted-foreground">
-                            ${data.summary.avgCostPerCall.toFixed(4)} avg
-                        </p>
-                    </CardContent>
-                </Card>
+                    <Card>
+                        <CardHeader className="pb-2">
+                            <CardTitle className="text-sm font-medium text-muted-foreground">API Calls</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-2xl font-bold">{data.summary.totalCalls}</div>
+                            <p className="text-xs text-muted-foreground">
+                                ${data.summary.avgCostPerCall.toFixed(4)} avg
+                            </p>
+                        </CardContent>
+                    </Card>
 
-                <Card>
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-muted-foreground">Cost per Article</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">
-                            ${data.articleCosts.avgCostPerArticle?.toFixed(2) || '0.00'}
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                            {data.articleCosts.articleCount || 0} articles
-                        </p>
-                    </CardContent>
-                </Card>
-            </div>
+                    <Card>
+                        <CardHeader className="pb-2">
+                            <CardTitle className="text-sm font-medium text-muted-foreground">Cost per Article</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-2xl font-bold">
+                                ${data.articleCosts.avgCostPerArticle?.toFixed(2) || '0.00'}
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                                {data.articleCosts.articleCount || 0} articles
+                            </p>
+                        </CardContent>
+                    </Card>
+                </div>
+            )}
 
-            {/* Queue Health Panel */}
-            {health && (
-                <Card>
+            <div ref={queueHealthRef} className={queueTabActive ? 'scroll-mt-24' : undefined}>
+                {/* Queue Health Panel */}
+                {health ? (
+                    <Card className={queueTabActive ? 'border-blue-200 dark:border-blue-900' : undefined}>
                     <CardHeader>
                         <div className="flex justify-between items-center">
                             <div>
@@ -334,84 +361,95 @@ export default function AnalyticsPage() {
                             <span>Total Jobs: <strong className="text-foreground">{health.total.toLocaleString()}</strong></span>
                         </div>
                     </CardContent>
-                </Card>
-            )}
-
-            {/* Daily Cost Chart */}
-            <Card>
-                <CardHeader>
-                    <CardTitle>Daily Costs</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    {data.dailyCosts.length === 0 ? (
-                        <p className="text-muted-foreground text-center py-8">No data for this period</p>
-                    ) : (
-                        <div className="flex items-end gap-1 h-32">
-                            {data.dailyCosts.map((day, i) => (
-                                <div
-                                    key={i}
-                                    className="flex-1 bg-emerald-500/80 rounded-t hover:bg-emerald-400 transition-colors"
-                                    style={{ height: `${(day.totalCost / maxDailyCost) * 100}%`, minHeight: '4px' }}
-                                    title={`${day.date}: $${day.totalCost.toFixed(2)} (${day.callCount} calls)`}
-                                />
-                            ))}
-                        </div>
-                    )}
-                </CardContent>
-            </Card>
-
-            {/* Costs by Stage & Model */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Card>
-                    <CardHeader>
-                        <CardTitle>By Pipeline Stage</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="space-y-3">
-                            {data.costsByStage.length === 0 ? (
-                                <p className="text-muted-foreground">No data</p>
-                            ) : (
-                                data.costsByStage.map(stage => (
-                                    <div key={stage.stage} className="flex justify-between items-center">
-                                        <div>
-                                            <span className="font-medium">{stageLabels[stage.stage] || stage.stage}</span>
-                                            <span className="text-xs text-muted-foreground ml-2">({stage.callCount} calls)</span>
-                                        </div>
-                                        <span className="text-emerald-400 font-mono">
-                                            ${stage.totalCost.toFixed(2)}
-                                        </span>
-                                    </div>
-                                ))
-                            )}
-                        </div>
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader>
-                        <CardTitle>By Model</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="space-y-3">
-                            {data.costsByModel.length === 0 ? (
-                                <p className="text-muted-foreground">No data</p>
-                            ) : (
-                                data.costsByModel.map(model => (
-                                    <div key={model.model} className="flex justify-between items-center">
-                                        <div>
-                                            <span className="font-medium text-sm">{model.model}</span>
-                                            <span className="text-xs text-muted-foreground ml-2">({model.callCount})</span>
-                                        </div>
-                                        <span className="text-emerald-400 font-mono">
-                                            ${model.totalCost.toFixed(2)}
-                                        </span>
-                                    </div>
-                                ))
-                            )}
-                        </div>
-                    </CardContent>
-                </Card>
+                    </Card>
+                ) : queueTabActive ? (
+                    <Card>
+                        <CardContent className="pt-6">
+                            <p className="text-sm text-muted-foreground">Queue health is currently unavailable.</p>
+                        </CardContent>
+                    </Card>
+                ) : null}
             </div>
+
+            {!queueTabActive && (
+                <>
+                    {/* Daily Cost Chart */}
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Daily Costs</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            {data.dailyCosts.length === 0 ? (
+                                <p className="text-muted-foreground text-center py-8">No data for this period</p>
+                            ) : (
+                                <div className="flex items-end gap-1 h-32">
+                                    {data.dailyCosts.map((day, i) => (
+                                        <div
+                                            key={i}
+                                            className="flex-1 bg-emerald-500/80 rounded-t hover:bg-emerald-400 transition-colors"
+                                            style={{ height: `${(day.totalCost / maxDailyCost) * 100}%`, minHeight: '4px' }}
+                                            title={`${day.date}: $${day.totalCost.toFixed(2)} (${day.callCount} calls)`}
+                                        />
+                                    ))}
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
+
+                    {/* Costs by Stage & Model */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <Card>
+                            <CardHeader>
+                                <CardTitle>By Pipeline Stage</CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                                <div className="space-y-3">
+                                    {data.costsByStage.length === 0 ? (
+                                        <p className="text-muted-foreground">No data</p>
+                                    ) : (
+                                        data.costsByStage.map(stage => (
+                                            <div key={stage.stage} className="flex justify-between items-center">
+                                                <div>
+                                                    <span className="font-medium">{stageLabels[stage.stage] || stage.stage}</span>
+                                                    <span className="text-xs text-muted-foreground ml-2">({stage.callCount} calls)</span>
+                                                </div>
+                                                <span className="text-emerald-400 font-mono">
+                                                    ${stage.totalCost.toFixed(2)}
+                                                </span>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </CardContent>
+                        </Card>
+
+                        <Card>
+                            <CardHeader>
+                                <CardTitle>By Model</CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                                <div className="space-y-3">
+                                    {data.costsByModel.length === 0 ? (
+                                        <p className="text-muted-foreground">No data</p>
+                                    ) : (
+                                        data.costsByModel.map(model => (
+                                            <div key={model.model} className="flex justify-between items-center">
+                                                <div>
+                                                    <span className="font-medium text-sm">{model.model}</span>
+                                                    <span className="text-xs text-muted-foreground ml-2">({model.callCount})</span>
+                                                </div>
+                                                <span className="text-emerald-400 font-mono">
+                                                    ${model.totalCost.toFixed(2)}
+                                                </span>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </CardContent>
+                        </Card>
+                    </div>
+                </>
+            )}
         </div>
     );
 }

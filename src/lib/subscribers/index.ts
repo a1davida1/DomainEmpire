@@ -282,6 +282,7 @@ export async function archiveStaleSubscribers(options: ArchiveStaleSubscriberOpt
         .set({
             status: 'archived',
             email: sql`'archived+' || ${subscribers.id}::text || '@redacted.local'`,
+            emailHash: sql`encode(digest('archived+' || ${subscribers.id}::text || '@redacted.local', 'sha256'), 'hex')`,
             name: null,
             phone: null,
             phoneHash: null,

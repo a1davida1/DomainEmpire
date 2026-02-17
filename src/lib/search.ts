@@ -20,6 +20,10 @@ export type SearchResult = {
 const MAX_RESULTS_PER_TYPE = 10;
 const MIN_SIMILARITY = 0.15;
 
+function escapeLike(input: string): string {
+    return input.replaceAll(/([\\%_])/g, '\\$1');
+}
+
 /**
  * Search across all entity types with a single query string.
  * Returns results sorted by similarity score (best match first).
@@ -33,7 +37,7 @@ export async function globalSearch(query: string, options?: {
 
     const types = options?.types ?? ['domain', 'article', 'keyword', 'page'];
     const limit = Math.min(options?.limit ?? 20, 50);
-    const pattern = `%${trimmed}%`;
+    const pattern = `%${escapeLike(trimmed)}%`;
 
     const results: SearchResult[] = [];
 

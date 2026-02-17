@@ -281,6 +281,20 @@
       "when": 1771340882000,
       "tag": "0039_freezing_callisto",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1771294036762,
+      "tag": "0040_strong_shockwave",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1771365600000,
+      "tag": "0041_fulltext_trgm_and_rls",
+      "breakpoints": true
     }
   ]
 }

@@ -20,10 +20,8 @@ export function BulkArticleActions({ articles }: BulkArticleActionsProps) {
 
     async function bulkTransition(articleIds: string[], targetStatus: string, label: string) {
         setLoading(label);
-        let success = 0;
-        let failed = 0;
-        for (const id of articleIds) {
-            try {
+        const results = await Promise.allSettled(
+            articleIds.map(async (id) => {
                 const res = await fetch(`/api/articles/${id}/status`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -32,12 +30,14 @@ export function BulkArticleActions({ articles }: BulkArticleActionsProps) {
                         rationale: `Bulk ${label.toLowerCase()} via content review`,
                     }),
                 });
-                if (res.ok) success++;
-                else failed++;
-            } catch {
-                failed++;
-            }
-        }
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error(data.error || `HTTP ${res.status}`);
+                }
+            })
+        );
+        const success = results.filter(r => r.status === 'fulfilled').length;
+        const failed = results.filter(r => r.status === 'rejected').length;
         if (success > 0) toast.success(`${label}: ${success} article(s) updated`);
         if (failed > 0) toast.error(`${failed} article(s) failed to update`);
         setLoading(null);
@@ -48,7 +48,7 @@ export function BulkArticleActions({ articles }: BulkArticleActionsProps) {
     if (!hasActions) return null;
 
     return (
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap gap-1.5 mb-2">
             {drafts.length > 0 && (
                 <Button
                     size="sm"

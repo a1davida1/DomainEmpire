@@ -1,14 +1,23 @@
-import { createHash, createHmac } from 'node:crypto';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 
 const USER_AGENT_MAX_LEN = 256;
 const REFERRER_MAX_LEN = 256;
+let devHashSecret: string | null = null;
 
 function getHashSecret(): string {
     const explicit = process.env.SUBSCRIBER_HASH_SECRET?.trim();
     if (explicit) return explicit;
 
-    // Dev fallback only. In production, DATABASE_URL is always present.
-    return process.env.DATABASE_URL?.trim() || 'domainempire-dev-subscriber-hash-secret';
+    if (process.env.NODE_ENV === 'production') {
+        throw new Error('Missing required environment variable: SUBSCRIBER_HASH_SECRET');
+    }
+
+    if (!devHashSecret) {
+        devHashSecret = randomBytes(32).toString('hex');
+        console.warn('[subscribers/privacy] SUBSCRIBER_HASH_SECRET is not set; using ephemeral dev-only hash secret.');
+    }
+
+    return devHashSecret;
 }
 
 function normalize(value?: string | null): string | null {
@@ -23,7 +32,11 @@ function hashValue(value: string): string {
 }
 
 export function hashEmail(email: string): string {
-    return hashValue(email.toLowerCase().trim());
+    const normalized = normalize(email)?.toLowerCase();
+    if (!normalized) {
+        throw new Error('Cannot hash an empty email');
+    }
+    return hashValue(normalized);
 }
 
 export function hashPhone(phone?: string | null): string | null {

@@ -90,8 +90,12 @@ export async function POST(request: NextRequest) {
         description: typeof body.description === 'string' ? body.description : null,
         blockType,
         variant: typeof body.variant === 'string' ? body.variant : null,
-        config: typeof body.config === 'object' && body.config !== null ? body.config as Record<string, unknown> : {},
-        content: typeof body.content === 'object' && body.content !== null ? body.content as Record<string, unknown> : {},
+        config: typeof body.config === 'object' && body.config !== null && !Array.isArray(body.config)
+            ? body.config as Record<string, unknown>
+            : {},
+        content: typeof body.content === 'object' && body.content !== null && !Array.isArray(body.content)
+            ? body.content as Record<string, unknown>
+            : {},
         tags: Array.isArray(body.tags) ? body.tags.filter((t: unknown) => typeof t === 'string') : [],
         sourceDomainId: typeof body.sourceDomainId === 'string' && UUID_RE.test(body.sourceDomainId) ? body.sourceDomainId : null,
         sourceBlockId: typeof body.sourceBlockId === 'string' && UUID_RE.test(body.sourceBlockId) ? body.sourceBlockId : null,

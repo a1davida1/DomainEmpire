@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth';
+import { getRequestUser, requireAuth } from '@/lib/auth';
 import { db, domains } from '@/lib/db';
 import { inArray } from 'drizzle-orm';
 
@@ -10,7 +10,17 @@ export async function POST(request: NextRequest) {
     const authError = await requireAuth(request);
     if (authError) return authError;
 
-    const body = await request.json();
+    const user = getRequestUser(request);
+    if (user.role !== 'admin') {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    let body: { domainIds?: string[]; status?: string };
+    try {
+        body = await request.json();
+    } catch {
+        return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
     const { domainIds, status } = body as { domainIds?: string[]; status?: string };
 
     if (!Array.isArray(domainIds) || domainIds.length === 0) {

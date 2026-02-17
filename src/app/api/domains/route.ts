@@ -104,7 +104,7 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ error: 'Invalid offset' }, { status: 400 });
         }
 
-        const limit = (Number.isNaN(rawLimit) || rawLimit < 1) ? 50 : Math.min(rawLimit, 100);
+        const limit = (Number.isNaN(rawLimit) || rawLimit < 1) ? 50 : Math.min(rawLimit, 500);
         const offset = rawOffset;
 
         // Build conditions (always exclude soft-deleted)

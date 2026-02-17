@@ -134,6 +134,9 @@ async function processCSVRow(row: CSVRow, result: ImportResult): Promise<void> {
     };
 
     const inserted = await db.insert(domains).values(newDomain).returning();
+    if (inserted.length === 0) {
+        throw new Error('Domain insert returned no rows');
+    }
     result.success++;
     result.created.push({ id: inserted[0].id, domain: domainName });
 }

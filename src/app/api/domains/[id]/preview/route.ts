@@ -122,9 +122,26 @@ export async function GET(request: NextRequest, { params }: PageProps) {
             return new NextResponse('Article not found', { status: 404 });
         }
 
+        const content = article.contentMarkdown || '';
+        const isFullHtmlDocument = /^\s*<!doctype\s+html|^\s*<html[\s>]/i.test(content);
+
+        // For full HTML documents (calculators, interactive types), serve directly
+        // with a small preview banner injected
+        if (isFullHtmlDocument) {
+            const backLink = `/api/domains/${id}/preview`;
+            const banner = `<div style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#7c3aed;color:white;padding:6px 16px;font:600 12px/1.4 system-ui,sans-serif;display:flex;align-items:center;justify-content:space-between">
+                <span>PREVIEW · ${escapeHtml(article.title)}</span>
+                <a href="${backLink}" target="_self" style="color:white;text-decoration:underline;font-weight:400">← Back</a>
+            </div><div style="height:32px"></div>`;
+            const injected = content.replace(/(<body[^>]*>)/i, `$1${banner}`);
+            return new NextResponse(injected, {
+                headers: { 'Content-Type': 'text/html; charset=utf-8' },
+            });
+        }
+
         let bodyHtml = '<p style="color:#6b7280;font-style:italic">No content generated yet.</p>';
-        if (article.contentMarkdown) {
-            const rawHtml = await marked.parse(article.contentMarkdown);
+        if (content) {
+            const rawHtml = await marked.parse(content);
             bodyHtml = sanitizeHtml(rawHtml, {
                 allowedTags: sanitizeHtml.defaults.allowedTags.concat(['img', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'table', 'thead', 'tbody', 'tr', 'th', 'td']),
                 allowedAttributes: { ...sanitizeHtml.defaults.allowedAttributes, img: ['src', 'alt', 'width', 'height'] },
