@@ -149,6 +149,7 @@ class OpenRouterHttpError extends Error {
 }
 
 export class OpenRouterClient {
+    private static readonly FETCH_TIMEOUT_MS = 120_000;
     private apiKey: string;
     private baseUrl = 'https://openrouter.ai/api/v1';
     private maxAttempts = 3;
@@ -242,6 +243,7 @@ export class OpenRouterClient {
                                 temperature: options.temperature ?? 0.7,
                                 max_tokens: options.maxTokens ?? 4096,
                             }),
+                            signal: AbortSignal.timeout(OpenRouterClient.FETCH_TIMEOUT_MS),
                         });
 
                         if (!response.ok) {
@@ -371,6 +373,7 @@ export class OpenRouterClient {
                                 temperature: options.temperature ?? 0.5,
                                 max_tokens: options.maxTokens ?? 2048,
                             }),
+                            signal: AbortSignal.timeout(OpenRouterClient.FETCH_TIMEOUT_MS),
                         });
 
                         if (!res.ok) {

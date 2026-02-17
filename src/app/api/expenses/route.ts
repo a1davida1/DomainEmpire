@@ -80,7 +80,12 @@ export async function POST(request: NextRequest) {
     if (authError) return authError;
 
     try {
-        const body = await request.json();
+        let body: unknown;
+        try {
+            body = await request.json();
+        } catch {
+            return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+        }
         const parsed = expenseSchema.safeParse(body);
         if (!parsed.success) {
             return NextResponse.json({ error: 'Validation failed', details: parsed.error.flatten() }, { status: 400 });

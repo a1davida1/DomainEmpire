@@ -28,7 +28,12 @@ export async function POST(request: NextRequest) {
     if (authError) return authError;
 
     try {
-        const body = await request.json();
+        let body: Record<string, unknown>;
+        try {
+            body = await request.json();
+        } catch {
+            return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+        }
         const { domainId, route, title, metaDescription, theme, skin, blocks, preset, contentType } = body;
 
         if (!domainId || !UUID_RE.test(domainId)) {

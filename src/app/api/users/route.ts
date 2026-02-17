@@ -30,7 +30,12 @@ export async function POST(request: NextRequest) {
     if (authError) return authError;
 
     try {
-        const body = await request.json();
+        let body: Record<string, unknown>;
+        try {
+            body = await request.json();
+        } catch {
+            return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+        }
         const { email, name, password, role, expertise, credentials } = body;
 
         if (!email || !name || !password) {

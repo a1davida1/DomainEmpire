@@ -13,6 +13,7 @@
  */
 
 const GD_API = 'https://api.godaddy.com/v1';
+const GD_FETCH_TIMEOUT_MS = 15_000;
 
 interface GoDaddyConfig {
     apiKey: string;
@@ -57,6 +58,7 @@ async function gdFetch(endpoint: string, options: RequestInit = {}): Promise<Res
             'Content-Type': 'application/json',
             ...options.headers,
         },
+        signal: AbortSignal.timeout(GD_FETCH_TIMEOUT_MS),
     });
 }
 

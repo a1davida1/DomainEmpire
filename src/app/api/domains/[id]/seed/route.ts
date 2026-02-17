@@ -84,7 +84,12 @@ export async function POST(request: NextRequest, { params }: PageProps) {
 
     try {
         // Validate request body
-        const body = await request.json();
+        let body: unknown;
+        try {
+            body = await request.json();
+        } catch {
+            return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+        }
         const { articleCount, priority, contentType } = seedSchema.parse(body);
 
         // Get domain

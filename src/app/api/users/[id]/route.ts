@@ -11,7 +11,12 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
     if (authError) return authError;
 
     try {
-        const body = await request.json();
+        let body: Record<string, unknown>;
+        try {
+            body = await request.json();
+        } catch {
+            return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+        }
         const { name, role, expertise, credentials, isActive, password } = body;
 
         const existing = await db.select({ id: users.id }).from(users).where(eq(users.id, params.id)).limit(1);

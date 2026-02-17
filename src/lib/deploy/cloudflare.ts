@@ -4,6 +4,8 @@
  */
 
 const CF_API = 'https://api.cloudflare.com/client/v4';
+const CF_FETCH_TIMEOUT_MS = 30_000;
+const CF_UPLOAD_TIMEOUT_MS = 120_000;
 
 interface CloudflareConfig {
     apiToken: string;
@@ -108,6 +110,7 @@ async function listCloudflareAccounts(apiToken: string): Promise<ResolvedCloudfl
                 'Authorization': `Bearer ${apiToken}`,
                 'Content-Type': 'application/json',
             },
+            signal: AbortSignal.timeout(CF_FETCH_TIMEOUT_MS),
         });
 
         const data = await response.json() as {
@@ -241,7 +244,7 @@ async function cfFetch(
         },
     };
 
-    let response = await fetch(`${CF_API}${endpoint}`, requestInit);
+    let response = await fetch(`${CF_API}${endpoint}`, { ...requestInit, signal: AbortSignal.timeout(CF_FETCH_TIMEOUT_MS) });
     for (let attempt = 1; attempt <= CLOUDFLARE_API_MAX_RETRIES; attempt += 1) {
         if (!isRetryableStatus(response.status)) {
             return response;
@@ -254,7 +257,7 @@ async function cfFetch(
         );
         const jitterMs = Math.floor(Math.random() * 250);
         await sleep((retryAfterMs ?? fallbackDelay) + jitterMs);
-        response = await fetch(`${CF_API}${endpoint}`, requestInit);
+        response = await fetch(`${CF_API}${endpoint}`, { ...requestInit, signal: AbortSignal.timeout(CF_FETCH_TIMEOUT_MS) });
     }
 
     return response;
@@ -525,6 +528,7 @@ export async function directUploadDeploy(
                     // Don't set Content-Type — fetch sets it with the boundary for FormData
                 },
                 body: formData,
+                signal: AbortSignal.timeout(CF_UPLOAD_TIMEOUT_MS),
             }
         );
 
