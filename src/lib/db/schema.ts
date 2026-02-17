@@ -113,7 +113,7 @@ export const domains = pgTable('domains', {
     tierIdx: index('domain_tier_idx').on(t.tier),
     bucketIdx: index('domain_bucket_idx').on(t.bucket), // Note: This references operational bucket
     verticalIdx: index('domain_vertical_idx').on(t.vertical),
-});
+}));
 
 // ===========================================
 // PAGE DEFINITIONS: Block-based page composition for Template System v2
@@ -1901,13 +1901,14 @@ export const subscribers = pgTable('subscribers', {
     convertedAt: timestamp('converted_at'),
 
     // Metadata
-    // Legacy plaintext columns retained for compatibility; new writes should keep these null.
-    ipAddress: text('ip_address'),
+    // Pseudonymized metadata only (no raw IP / user-agent storage).
     ipHash: text('ip_hash'),
-    userAgent: text('user_agent'),
+    userAgentHash: text('user_agent_hash'),
     userAgentFingerprint: text('user_agent_fingerprint'),
     referrer: text('referrer'),
     referrerFingerprint: text('referrer_fingerprint'),
+    retentionExpiresAt: timestamp('retention_expires_at'),
+    retentionPolicyVersion: text('retention_policy_version').notNull().default('subscriber-v1'),
 
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow(),
@@ -1918,6 +1919,8 @@ export const subscribers = pgTable('subscribers', {
     sourceIdx: index('subscriber_source_idx').on(t.source),
     statusIdx: index('subscriber_status_idx').on(t.status),
     ipHashIdx: index('subscriber_ip_hash_idx').on(t.ipHash),
+    userAgentHashIdx: index('subscriber_user_agent_hash_idx').on(t.userAgentHash),
+    retentionExpiresIdx: index('subscriber_retention_expires_idx').on(t.retentionExpiresAt),
     sourceCampaignIdx: index('subscriber_source_campaign_idx').on(t.sourceCampaignId),
     sourceClickIdx: index('subscriber_source_click_idx').on(t.sourceClickId),
     domainEmailUnq: unique('subscriber_domain_email_unq').on(t.domainId, t.email),

@@ -3,27 +3,31 @@ import postgres from 'postgres';
 import * as schema from './schema';
 
 // ─── Pool configuration (env-driven with sensible defaults) ─────
-const DB_POOL_MAX = Math.max(1, parseInt(process.env.DB_POOL_MAX || '10', 10) || 10);
-const DB_IDLE_TIMEOUT = Math.max(0, parseInt(process.env.DB_IDLE_TIMEOUT || '20', 10) || 20);
-const DB_CONNECT_TIMEOUT = Math.max(1, parseInt(process.env.DB_CONNECT_TIMEOUT || '10', 10) || 10);
-const DB_MAX_LIFETIME = parseInt(process.env.DB_MAX_LIFETIME || '3600', 10) || 3600; // 1 hour
+function parseEnvInt(value: string | undefined, defaultValue: number): number {
+    if (value === undefined) return defaultValue;
+    const parsed = parseInt(value, 10);
+    return Number.isNaN(parsed) ? defaultValue : parsed;
+}
+
+const DB_POOL_MAX = Math.max(1, parseEnvInt(process.env.DB_POOL_MAX, 10));
+const DB_IDLE_TIMEOUT = Math.max(0, parseEnvInt(process.env.DB_IDLE_TIMEOUT, 20));
+const DB_CONNECT_TIMEOUT = Math.max(1, parseEnvInt(process.env.DB_CONNECT_TIMEOUT, 10));
+const DB_MAX_LIFETIME = Math.max(0, parseEnvInt(process.env.DB_MAX_LIFETIME, 3600)); // 1 hour
 
 // ─── Pool exhaustion monitoring ─────────────────────────────────
 let _poolWarningEmitted = false;
-let _activeConnections = 0;
+const _activeConnectionIds = new Set<number>();
 
-function onPoolConnect() {
-    _activeConnections++;
-    const utilization = _activeConnections / DB_POOL_MAX;
+function maybeEmitPoolWarning() {
+    const utilization = _activeConnectionIds.size / DB_POOL_MAX;
     if (utilization >= 0.8 && !_poolWarningEmitted) {
         _poolWarningEmitted = true;
-        console.warn(`[DB Pool] WARNING: ${_activeConnections}/${DB_POOL_MAX} connections in use (${(utilization * 100).toFixed(0)}%). Consider increasing DB_POOL_MAX.`);
+        console.warn(`[DB Pool] WARNING: ${_activeConnectionIds.size}/${DB_POOL_MAX} connections in use (${(utilization * 100).toFixed(0)}%). Consider increasing DB_POOL_MAX.`);
     }
 }
 
-function onPoolRelease() {
-    _activeConnections = Math.max(0, _activeConnections - 1);
-    if (_activeConnections / DB_POOL_MAX < 0.6) {
+function maybeResetPoolWarning() {
+    if (_activeConnectionIds.size / DB_POOL_MAX < 0.6) {
         _poolWarningEmitted = false;
     }
 }
@@ -31,7 +35,6 @@ function onPoolRelease() {
 // Lazy-initialized database instance
 // This prevents build-time errors when DATABASE_URL is not set
 let _db: PostgresJsDatabase<typeof schema> | null = null;
-let _sql: ReturnType<typeof postgres> | null = null;
 
 export function getDb(): PostgresJsDatabase<typeof schema> {
     if (_db) {
@@ -64,22 +67,19 @@ export function getDb(): PostgresJsDatabase<typeof schema> {
         connection: {
             application_name: 'domain-empire',
         },
-        debug: process.env.DB_DEBUG === 'true' ? (connection, query) => {
-            console.log(`[DB] conn=${connection} query=${typeof query === 'string' ? query.slice(0, 120) : 'prepared'}`);
-        } : undefined,
-    });
-
-    // Wrap with pool monitoring via proxy
-    _sql = new Proxy(client, {
-        apply(target, thisArg, args) {
-            onPoolConnect();
-            const result = Reflect.apply(target, thisArg, args);
-            if (result && typeof result === 'object' && 'then' in result) {
-                (result as Promise<unknown>).finally(onPoolRelease);
-            } else {
-                onPoolRelease();
+        debug: (connection, query) => {
+            if (!_activeConnectionIds.has(connection)) {
+                _activeConnectionIds.add(connection);
+                maybeEmitPoolWarning();
             }
-            return result;
+
+            if (process.env.DB_DEBUG === 'true') {
+                console.log(`[DB] conn=${connection} query=${typeof query === 'string' ? query.slice(0, 120) : 'prepared'}`);
+            }
+        },
+        onclose: (connection) => {
+            _activeConnectionIds.delete(connection);
+            maybeResetPoolWarning();
         },
     });
 
@@ -94,10 +94,11 @@ export function getDb(): PostgresJsDatabase<typeof schema> {
 
 /** Get pool stats for health checks */
 export function getPoolStats() {
+    const active = _activeConnectionIds.size;
     return {
         max: DB_POOL_MAX,
-        active: _activeConnections,
-        utilization: _activeConnections / DB_POOL_MAX,
+        active,
+        utilization: active / DB_POOL_MAX,
         warningThreshold: 0.8,
         isWarning: _poolWarningEmitted,
     };

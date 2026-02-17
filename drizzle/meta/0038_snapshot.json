@@ -122,9 +122,20 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {},
+      "policies": {
+        "subscribers_backend_access": {
+          "name": "subscribers_backend_access",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "current_role"
+          ],
+          "using": "(true)",
+          "withCheck": "(true)"
+        }
+      },
       "checkConstraints": {},
-      "isRLSEnabled": false
+      "isRLSEnabled": true
     },
     "public.acquisition_events": {
       "name": "acquisition_events",
@@ -10392,14 +10403,20 @@
           "primaryKey": false,
           "notNull": false
         },
-        "ip_address": {
-          "name": "ip_address",
+        "ip_hash": {
+          "name": "ip_hash",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "user_agent": {
-          "name": "user_agent",
+        "user_agent_hash": {
+          "name": "user_agent_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "user_agent_fingerprint": {
+          "name": "user_agent_fingerprint",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -10409,6 +10426,25 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "referrer_fingerprint": {
+          "name": "referrer_fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "retention_expires_at": {
+          "name": "retention_expires_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "retention_policy_version": {
+          "name": "retention_policy_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'subscriber-v1'"
         },
         "created_at": {
           "name": "created_at",
@@ -10476,6 +10512,51 @@
           "columns": [
             {
               "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "subscriber_ip_hash_idx": {
+          "name": "subscriber_ip_hash_idx",
+          "columns": [
+            {
+              "expression": "ip_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "subscriber_user_agent_hash_idx": {
+          "name": "subscriber_user_agent_hash_idx",
+          "columns": [
+            {
+              "expression": "user_agent_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "subscriber_retention_expires_idx": {
+          "name": "subscriber_retention_expires_idx",
+          "columns": [
+            {
+              "expression": "retention_expires_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

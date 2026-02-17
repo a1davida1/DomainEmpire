@@ -20,7 +20,12 @@ export function CsrfFetchInit() {
         const originalFetch = window.fetch;
 
         window.fetch = function csrfFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-            const method = (input instanceof Request ? input.method : init?.method || 'GET').toUpperCase();
+            const inputMethod = input instanceof Request
+                ? input.method
+                : (typeof input === 'object' && input !== null && 'method' in input && typeof input.method === 'string')
+                    ? input.method
+                    : undefined;
+            const method = (inputMethod || init?.method || 'GET').toUpperCase();
 
             // Only add header for mutating same-origin requests
             if (MUTATION_METHODS.has(method)) {

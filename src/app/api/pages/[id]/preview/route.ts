@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { db, pageDefinitions, domains, previewBuilds } from '@/lib/db';
 import { eq } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
 import {
     assemblePageFromBlocks,
     getConfiguratorBridgeScript,
@@ -32,6 +33,33 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
     const { id } = params;
     if (!UUID_RE.test(id)) {
         return NextResponse.json({ error: 'Invalid page definition ID' }, { status: 400 });
+    }
+
+    const buildId = request.nextUrl.searchParams.get('buildId');
+    if (buildId) {
+        if (!UUID_RE.test(buildId)) {
+            return NextResponse.json({ error: 'Invalid build ID' }, { status: 400 });
+        }
+
+        const builds = await db.select().from(previewBuilds).where(eq(previewBuilds.id, buildId)).limit(1);
+        if (builds.length === 0 || !builds[0].buildLog) {
+            return NextResponse.json({ error: 'Preview build not found' }, { status: 404 });
+        }
+
+        const build = builds[0];
+        const metadata = (build.metadata ?? {}) as Record<string, unknown>;
+        if (metadata.pageDefinitionId !== id) {
+            return NextResponse.json({ error: 'Preview build not found for page' }, { status: 404 });
+        }
+
+        return new NextResponse(build.buildLog, {
+            status: 200,
+            headers: {
+                'Content-Type': 'text/html; charset=utf-8',
+                'Cache-Control': 'private, max-age=300, stale-while-revalidate=60',
+                'X-Frame-Options': 'SAMEORIGIN',
+            },
+        });
     }
 
     const pageDefs = await db.select().from(pageDefinitions).where(eq(pageDefinitions.id, id)).limit(1);
@@ -165,10 +193,12 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
 
     // Create preview build record
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
-    const previewUrl = `/api/pages/${id}/preview?format=html`;
+    const previewBuildId = randomUUID();
+    const previewUrl = `/api/pages/${id}/preview?format=html&buildId=${previewBuildId}`;
 
     try {
         const [build] = await db.insert(previewBuilds).values({
+            id: previewBuildId,
             domainId: pageDef.domainId,
             previewUrl,
             buildStatus: 'ready',

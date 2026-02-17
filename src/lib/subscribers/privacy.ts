@@ -39,6 +39,14 @@ export function hashIpAddress(ipAddress?: string | null): string | null {
     return normalized ? hashValue(normalized) : null;
 }
 
+export function hashUserAgent(userAgent?: string | null): string | null {
+    const normalized = normalize(userAgent);
+    if (!normalized) return null;
+
+    const truncated = normalized.slice(0, USER_AGENT_MAX_LEN);
+    return hashValue(truncated);
+}
+
 export function fingerprintUserAgent(userAgent?: string | null): string | null {
     const normalized = normalize(userAgent);
     if (!normalized) return null;

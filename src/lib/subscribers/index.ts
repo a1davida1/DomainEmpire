@@ -10,9 +10,17 @@ import {
     hashEmail,
     hashPhone,
     hashIpAddress,
+    hashUserAgent,
     fingerprintUserAgent,
     fingerprintReferrer,
 } from '@/lib/subscribers/privacy';
+
+const DEFAULT_SUBSCRIBER_RETENTION_DAYS = 180;
+const SUBSCRIBER_RETENTION_POLICY_VERSION = 'subscriber-v1';
+
+function computeRetentionExpiresAt(retentionDays: number): Date {
+    return new Date(Date.now() + retentionDays * 24 * 60 * 60 * 1000);
+}
 
 interface CaptureInput {
     domainId: string;
@@ -39,8 +47,10 @@ export async function captureSubscriber(input: CaptureInput) {
     const emailHash = hashEmail(email);
     const phoneHash = hashPhone(input.phone);
     const ipHash = hashIpAddress(input.ipAddress);
+    const userAgentHash = hashUserAgent(input.userAgent);
     const userAgentFingerprint = fingerprintUserAgent(input.userAgent);
     const referrerFingerprint = fingerprintReferrer(input.referrer);
+    const retentionExpiresAt = computeRetentionExpiresAt(DEFAULT_SUBSCRIBER_RETENTION_DAYS);
 
     // Look up estimated value from monetization profile
     let estimatedValue: number | null = null;
@@ -72,13 +82,14 @@ export async function captureSubscriber(input: CaptureInput) {
         formData: input.formData || {},
         articleId: input.articleId || null,
         estimatedValue,
-        // Plaintext metadata is intentionally not persisted.
-        ipAddress: null,
+        // Pseudonymized metadata only (no raw IP/user-agent storage).
         ipHash,
-        userAgent: null,
+        userAgentHash,
         userAgentFingerprint,
         referrer: null,
         referrerFingerprint,
+        retentionExpiresAt,
+        retentionPolicyVersion: SUBSCRIBER_RETENTION_POLICY_VERSION,
     };
 
     // Upsert: insert or update on conflict
@@ -96,12 +107,13 @@ export async function captureSubscriber(input: CaptureInput) {
                 sourceCampaignId: sql`COALESCE(${record.sourceCampaignId}, ${subscribers.sourceCampaignId})`,
                 sourceClickId: sql`COALESCE(${record.sourceClickId}, ${subscribers.sourceClickId})`,
                 originalUtm: sql`${subscribers.originalUtm} || ${JSON.stringify(record.originalUtm)}::jsonb`,
-                ipAddress: null,
                 ipHash: sql`COALESCE(${record.ipHash}, ${subscribers.ipHash})`,
-                userAgent: null,
+                userAgentHash: sql`COALESCE(${record.userAgentHash}, ${subscribers.userAgentHash})`,
                 userAgentFingerprint: sql`COALESCE(${record.userAgentFingerprint}, ${subscribers.userAgentFingerprint})`,
                 referrer: null,
                 referrerFingerprint: sql`COALESCE(${record.referrerFingerprint}, ${subscribers.referrerFingerprint})`,
+                retentionExpiresAt: record.retentionExpiresAt,
+                retentionPolicyVersion: SUBSCRIBER_RETENTION_POLICY_VERSION,
                 updatedAt: new Date(),
             },
         })
@@ -257,14 +269,13 @@ type ArchiveStaleSubscriberOptions = {
     retentionDays?: number;
 };
 
-const DEFAULT_SUBSCRIBER_RETENTION_DAYS = 180;
-
 /**
  * Archive + anonymize stale subscribers beyond retention threshold.
  */
 export async function archiveStaleSubscribers(options: ArchiveStaleSubscriberOptions = {}) {
     const retentionDays = Math.max(1, Math.floor(options.retentionDays ?? DEFAULT_SUBSCRIBER_RETENTION_DAYS));
-    const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - retentionDays * 24 * 60 * 60 * 1000);
 
     const archived = await db
         .update(subscribers)
@@ -274,14 +285,26 @@ export async function archiveStaleSubscribers(options: ArchiveStaleSubscriberOpt
             name: null,
             phone: null,
             phoneHash: null,
-            ipAddress: null,
-            userAgent: null,
+            ipHash: null,
+            userAgentHash: null,
+            userAgentFingerprint: null,
             referrer: null,
+            referrerFingerprint: null,
+            retentionExpiresAt: now,
             updatedAt: new Date(),
         })
         .where(and(
             ne(subscribers.status, 'archived'),
-            lte(subscribers.createdAt, cutoff),
+            or(
+                and(
+                    sql`${subscribers.retentionExpiresAt} IS NOT NULL`,
+                    lte(subscribers.retentionExpiresAt, now),
+                ),
+                and(
+                    sql`${subscribers.retentionExpiresAt} IS NULL`,
+                    lte(subscribers.createdAt, cutoff),
+                ),
+            ),
             or(
                 sql`${subscribers.convertedAt} IS NULL`,
                 lte(subscribers.convertedAt, cutoff),
