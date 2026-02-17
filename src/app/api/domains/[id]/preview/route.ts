@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
-import { db, domains, articles } from '@/lib/db';
+import { db, domains, articles, pageDefinitions } from '@/lib/db';
 import { eq, and, isNull } from 'drizzle-orm';
-import { marked } from 'marked';
-import sanitizeHtml from 'sanitize-html';
-import { getThemeStyles } from '@/lib/deploy/themes/theme-definitions';
+import {
+    assemblePageFromBlocks,
+    type RenderContext,
+} from '@/lib/deploy/blocks/assembler';
+import type { BlockEnvelope } from '@/lib/deploy/blocks/schemas';
+// Side-effect: register interactive block renderers
+import '@/lib/deploy/blocks/renderers-interactive';
+import { generateV2GlobalStyles } from '@/lib/deploy/themes';
+import { extractSiteTitle, escapeHtml } from '@/lib/deploy/templates/shared';
 
 interface PageProps {
     params: Promise<{ id: string }>;
@@ -13,48 +19,152 @@ interface PageProps {
 function previewHtmlHeaders(): HeadersInit {
     return {
         'Content-Type': 'text/html; charset=utf-8',
-        // Isolate preview documents from first-party origin privileges.
         'Content-Security-Policy': "sandbox allow-scripts allow-forms",
         'X-Content-Type-Options': 'nosniff',
         'Referrer-Policy': 'no-referrer',
     };
 }
 
-function escapeHtml(str: string): string {
-    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+/**
+ * Build an article-preview block sequence: Header + ArticleBody + Footer,
+ * using the same theme/skin as the homepage page definition.
+ */
+function buildArticleBlocks(
+    siteTitle: string,
+    article: { title: string; contentMarkdown: string | null; status: string | null; targetKeyword: string | null; wordCount: number | null; contentType: string | null },
+    backHref: string,
+): BlockEnvelope[] {
+    const content = article.contentMarkdown || '';
+
+    const statusLabel = (article.status || 'draft').toUpperCase();
+    const metaParts: string[] = [];
+    if (article.targetKeyword) metaParts.push(`Keyword: **${article.targetKeyword}**`);
+    if (article.wordCount) metaParts.push(`${article.wordCount.toLocaleString()} words`);
+    if (article.contentType) metaParts.push(`Type: ${article.contentType}`);
+    const metaLine = metaParts.length > 0 ? `\n\n*${metaParts.join(' · ')}*` : '';
+
+    const markdown = `# ${article.title} <span class="status-badge" style="display:inline-block;font-size:0.55em;padding:0.15rem 0.5rem;border-radius:999px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;vertical-align:middle;background:var(--color-accent-hover,#1d4ed8);color:#fff">${statusLabel}</span>${metaLine}\n\n${content}`;
+
+    return [
+        {
+            id: 'preview-header',
+            type: 'Header',
+            variant: 'topbar',
+            config: { sticky: true },
+            content: {
+                siteName: siteTitle,
+                navLinks: [{ label: '← Back', href: backHref }],
+            },
+        },
+        {
+            id: 'preview-article',
+            type: 'ArticleBody',
+            variant: 'default',
+            config: {},
+            content: { title: '', markdown },
+        },
+        {
+            id: 'preview-footer',
+            type: 'Footer',
+            variant: 'minimal',
+            config: {},
+            content: {
+                siteName: siteTitle,
+                copyright: `© ${new Date().getFullYear()} ${siteTitle} · Preview Mode`,
+            },
+        },
+    ] as BlockEnvelope[];
 }
 
-function extractSiteTitle(domain: string): string {
-    const ccTlds = ['.co.uk', '.com.au', '.co.nz', '.co.za', '.com.br', '.co.in', '.org.uk', '.net.au'];
-    let sld = domain;
-    for (const ccTld of ccTlds) {
-        if (domain.endsWith(ccTld)) {
-            sld = domain.slice(0, -ccTld.length);
-            break;
-        }
-    }
-    if (sld === domain) {
-        const lastDot = domain.lastIndexOf('.');
-        sld = lastDot > 0 ? domain.slice(0, lastDot) : domain;
-    }
-    return sld.replaceAll('-', ' ').replaceAll(/\b\w/g, c => c.toUpperCase());
+/**
+ * Build a homepage block sequence that includes the article listing,
+ * used when no page_definition exists yet.
+ */
+function buildHomepageBlocks(
+    siteTitle: string,
+    niche: string,
+    allArticles: { id: string; title: string; status: string | null; targetKeyword: string | null; wordCount: number | null; contentType: string | null }[],
+    domainId: string,
+): BlockEnvelope[] {
+    const articleListMarkdown = allArticles.length > 0
+        ? allArticles.map(a => {
+            const meta: string[] = [];
+            if (a.targetKeyword) meta.push(a.targetKeyword);
+            if (a.wordCount) meta.push(`${a.wordCount.toLocaleString()} words`);
+            meta.push(a.contentType || 'article');
+            return `- [${a.title}](/api/domains/${domainId}/preview?articleId=${a.id}) — *${(a.status || 'draft').toUpperCase()}* · ${meta.join(' · ')}`;
+        }).join('\n')
+        : '*No articles yet. Generate content from the pipeline card.*';
+
+    return [
+        {
+            id: 'home-header',
+            type: 'Header',
+            variant: 'topbar',
+            config: { sticky: true },
+            content: { siteName: siteTitle, navLinks: [] },
+        },
+        {
+            id: 'home-hero',
+            type: 'Hero',
+            variant: 'centered-text',
+            config: {},
+            content: {
+                heading: siteTitle,
+                subheading: `Expert guides about ${niche}`,
+                badge: 'PREVIEW',
+                ctaText: '',
+                ctaUrl: '',
+            },
+        },
+        {
+            id: 'home-articles',
+            type: 'ArticleBody',
+            variant: 'default',
+            config: {},
+            content: {
+                title: '',
+                markdown: `## Articles (${allArticles.length})\n\n${articleListMarkdown}`,
+            },
+        },
+        {
+            id: 'home-footer',
+            type: 'Footer',
+            variant: 'minimal',
+            config: {},
+            content: {
+                siteName: siteTitle,
+                copyright: `© ${new Date().getFullYear()} ${siteTitle} · Preview Mode`,
+            },
+        },
+    ] as BlockEnvelope[];
 }
 
-const STATUS_BADGE: Record<string, string> = {
-    generating: 'background:#fef3c7;color:#92400e;',
-    draft: 'background:#dbeafe;color:#1e40af;',
-    review: 'background:#fce7f3;color:#9d174d;',
-    approved: 'background:#d1fae5;color:#065f46;',
-    published: 'background:#dcfce7;color:#166534;',
-    archived: 'background:#f3f4f6;color:#6b7280;',
-};
+/**
+ * Render blocks through the v2 assembler with inline CSS.
+ */
+function renderV2Preview(
+    blocks: BlockEnvelope[],
+    ctx: RenderContext,
+    themeName: string,
+    skinName: string,
+    siteTemplate: string,
+    domainName: string,
+): string {
+    const html = assemblePageFromBlocks(blocks, ctx);
+    const css = generateV2GlobalStyles(themeName, skinName, siteTemplate, domainName);
+    return html.replace(
+        '<link rel="stylesheet" href="/styles.css">',
+        `<style>${css}</style>`,
+    );
+}
 
 /**
  * GET /api/domains/[id]/preview
- * Returns a full HTML page previewing the site.
+ * Returns a full HTML page previewing the site using the v2 block system.
  * Query params:
  *   ?articleId=xxx — preview a single article
- *   (no params) — preview the homepage with article list
+ *   (no params) — preview the homepage
  */
 export async function GET(request: NextRequest, { params }: PageProps) {
     const authError = await requireAuth(request);
@@ -73,7 +183,7 @@ export async function GET(request: NextRequest, { params }: PageProps) {
     }
 
     const siteTitle = extractSiteTitle(domainRow.domain);
-    const themeCSS = getThemeStyles(domainRow.themeStyle || undefined);
+    const siteTemplate = domainRow.siteTemplate || 'authority';
 
     // Fetch articles — include all non-archived for preview purposes
     const allArticles = await db.select({
@@ -91,42 +201,17 @@ export async function GET(request: NextRequest, { params }: PageProps) {
         .from(articles)
         .where(and(eq(articles.domainId, id), isNull(articles.deletedAt)));
 
-    const baseStyles = `
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { max-width: 900px; margin: 0 auto; padding: 1rem 1.5rem; line-height: 1.7; color: #1f2937; font-family: system-ui, sans-serif; }
-        header { padding: 1rem 0; margin-bottom: 2rem; border-bottom: 2px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; }
-        .logo { font-size: 1.25rem; font-weight: 700; text-decoration: none; color: inherit; }
-        .preview-badge { background: #7c3aed; color: white; font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 999px; font-weight: 600; letter-spacing: 0.05em; }
-        h1 { font-size: 2rem; margin: 1rem 0 0.5rem; line-height: 1.3; }
-        h2 { font-size: 1.5rem; margin: 1.5rem 0 0.75rem; }
-        h3 { font-size: 1.2rem; margin: 1.25rem 0 0.5rem; }
-        p { margin: 0.75rem 0; }
-        a { color: #2563eb; }
-        ul, ol { margin: 0.75rem 0; padding-left: 1.5rem; }
-        li { margin: 0.3rem 0; }
-        .hero { padding: 3rem 2rem; margin-bottom: 2rem; border-radius: 0.75rem; background: #f9fafb; }
-        .hero h1 { font-size: 2.25rem; margin-bottom: 0.5rem; }
-        .hero p { font-size: 1.1rem; opacity: 0.85; }
-        .articles { list-style: none; padding: 0; }
-        .articles li { padding: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; margin-bottom: 0.75rem; }
-        .articles li a { font-weight: 600; font-size: 1.05rem; text-decoration: none; }
-        .articles li a:hover { text-decoration: underline; }
-        .articles .meta { font-size: 0.8rem; color: #6b7280; margin-top: 0.25rem; }
-        .status-badge { display: inline-block; font-size: 0.65rem; padding: 0.15rem 0.4rem; border-radius: 999px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; margin-left: 0.5rem; }
-        footer { margin-top: 3rem; padding: 1.5rem 0; border-top: 1px solid #e5e7eb; font-size: 0.85rem; color: #6b7280; }
-        article img { max-width: 100%; border-radius: 0.5rem; }
-        article blockquote { border-left: 3px solid #d1d5db; padding-left: 1rem; color: #4b5563; margin: 1rem 0; }
-        article code { background: #f3f4f6; padding: 0.15rem 0.3rem; border-radius: 0.25rem; font-size: 0.9em; }
-        article pre { background: #f3f4f6; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; }
-        article table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
-        article th, article td { border: 1px solid #e5e7eb; padding: 0.5rem 0.75rem; text-align: left; }
-        article th { background: #f9fafb; font-weight: 600; }
-        .back-link { display: inline-block; margin-bottom: 1rem; font-size: 0.85rem; color: #6b7280; }
-        .article-meta { color: #6b7280; font-size: 0.85rem; margin-bottom: 1.5rem; }
-    `;
+    // Look up the homepage page_definition for theme/skin resolution
+    const homepageDefs = await db.select().from(pageDefinitions)
+        .where(and(eq(pageDefinitions.domainId, id), eq(pageDefinitions.route, '/')))
+        .limit(1);
+    const homepageDef = homepageDefs[0] ?? null;
+
+    const themeName = homepageDef?.theme || 'clean';
+    const skinName = homepageDef?.skin || (domainRow as Record<string, unknown>).skin as string || 'slate';
 
     if (articleId) {
-        // Single article preview
+        // ---------- Single article preview ----------
         const article = allArticles.find(a => a.id === articleId);
         if (!article) {
             return new NextResponse('Article not found', { status: 404 });
@@ -149,95 +234,52 @@ export async function GET(request: NextRequest, { params }: PageProps) {
             });
         }
 
-        let bodyHtml = '<p style="color:#6b7280;font-style:italic">No content generated yet.</p>';
-        if (content) {
-            const rawHtml = await marked.parse(content);
-            bodyHtml = sanitizeHtml(rawHtml, {
-                allowedTags: sanitizeHtml.defaults.allowedTags.concat(['img', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'table', 'thead', 'tbody', 'tr', 'th', 'td']),
-                allowedAttributes: { ...sanitizeHtml.defaults.allowedAttributes, img: ['src', 'alt', 'width', 'height'] },
-            });
-        }
+        // Build article preview using v2 block system
+        const blocks = buildArticleBlocks(
+            siteTitle,
+            article,
+            `/api/domains/${id}/preview`,
+        );
 
-        const statusStyle = STATUS_BADGE[article.status || 'draft'] || STATUS_BADGE.draft;
+        const ctx: RenderContext = {
+            domain: domainRow.domain,
+            siteTitle,
+            route: `/${article.slug || 'preview'}`,
+            theme: themeName,
+            skin: skinName,
+            pageTitle: article.title,
+            pageDescription: article.metaDescription || undefined,
+            headScripts: '',
+            bodyScripts: '',
+        };
 
-        const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>${escapeHtml(article.title)} — ${escapeHtml(siteTitle)}</title>
-    <style>${baseStyles}${themeCSS}</style>
-</head>
-<body>
-    <header>
-        <a href="/api/domains/${id}/preview" class="logo" target="_self">${escapeHtml(siteTitle)}</a>
-        <span class="preview-badge">PREVIEW</span>
-    </header>
-    <a href="/api/domains/${id}/preview" class="back-link" target="_self">← Back to all articles</a>
-    <article>
-        <h1>${escapeHtml(article.title)} <span class="status-badge" style="${statusStyle}">${escapeHtml(article.status || 'draft')}</span></h1>
-        <div class="article-meta">
-            ${article.targetKeyword ? `Keyword: <strong>${escapeHtml(article.targetKeyword)}</strong> · ` : ''}
-            ${article.wordCount ? `${article.wordCount.toLocaleString()} words · ` : ''}
-            ${article.contentType ? `Type: ${escapeHtml(article.contentType)}` : ''}
-        </div>
-        ${bodyHtml}
-    </article>
-    <footer>
-        <p>&copy; ${new Date().getFullYear()} ${escapeHtml(siteTitle)} · Preview Mode</p>
-    </footer>
-</body>
-</html>`;
-
-        return new NextResponse(html, {
-            headers: previewHtmlHeaders(),
-        });
+        const previewHtml = renderV2Preview(blocks, ctx, themeName, skinName, siteTemplate, domainRow.domain);
+        return new NextResponse(previewHtml, { headers: previewHtmlHeaders() });
     }
 
-    // Homepage preview — list all articles
-    const articleListHtml = allArticles.length > 0
-        ? allArticles.map(a => {
-            const statusStyle = STATUS_BADGE[a.status || 'draft'] || STATUS_BADGE.draft;
-            return `<li>
-                <a href="/api/domains/${id}/preview?articleId=${a.id}" target="_self">${escapeHtml(a.title)}</a>
-                <span class="status-badge" style="${statusStyle}">${escapeHtml(a.status || 'draft')}</span>
-                <div class="meta">
-                    ${a.targetKeyword ? `${escapeHtml(a.targetKeyword)} · ` : ''}
-                    ${a.wordCount ? `${a.wordCount.toLocaleString()} words · ` : ''}
-                    ${a.contentType || 'article'}
-                </div>
-            </li>`;
-        }).join('\n')
-        : '<li style="color:#6b7280;font-style:italic;border:none;padding:2rem;text-align:center">No articles yet. Generate content from the pipeline card.</li>';
+    // ---------- Homepage preview ----------
+    let blocks: BlockEnvelope[];
 
-    const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>${escapeHtml(siteTitle)} — Site Preview</title>
-    <style>${baseStyles}${themeCSS}</style>
-</head>
-<body>
-    <header>
-        <a href="/api/domains/${id}/preview" class="logo" target="_self">${escapeHtml(siteTitle)}</a>
-        <span class="preview-badge">PREVIEW</span>
-    </header>
-    <div class="hero">
-        <h1>${escapeHtml(siteTitle)}</h1>
-        <p>Expert guides about ${escapeHtml(domainRow.niche || 'various topics')}</p>
-    </div>
-    <h2>Articles (${allArticles.length})</h2>
-    <ul class="articles">
-        ${articleListHtml}
-    </ul>
-    <footer>
-        <p>&copy; ${new Date().getFullYear()} ${escapeHtml(siteTitle)} · Preview Mode · Theme: ${escapeHtml(domainRow.themeStyle || 'default')}</p>
-    </footer>
-</body>
-</html>`;
+    if (homepageDef && Array.isArray(homepageDef.blocks) && (homepageDef.blocks as unknown[]).length > 0) {
+        // Use the actual page definition blocks
+        blocks = homepageDef.blocks as BlockEnvelope[];
+    } else {
+        // No page definition or empty blocks — build a synthetic homepage
+        blocks = buildHomepageBlocks(siteTitle, domainRow.niche || 'various topics', allArticles, id);
+    }
 
-    return new NextResponse(html, {
-        headers: previewHtmlHeaders(),
-    });
+    const ctx: RenderContext = {
+        domain: domainRow.domain,
+        siteTitle,
+        route: '/',
+        theme: themeName,
+        skin: skinName,
+        pageTitle: homepageDef?.title || siteTitle,
+        pageDescription: homepageDef?.metaDescription || `Expert guides about ${domainRow.niche || 'various topics'}`,
+        headScripts: '',
+        bodyScripts: '',
+    };
+
+    const previewHtml = renderV2Preview(blocks, ctx, themeName, skinName, siteTemplate, domainRow.domain);
+    return new NextResponse(previewHtml, { headers: previewHtmlHeaders() });
 }

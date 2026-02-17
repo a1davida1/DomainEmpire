@@ -71,11 +71,11 @@ export function getDefaultBlockContent(
         ArticleBody: {
             content: {
                 title: `Understanding ${capitalize(nicheLabel)}`,
-                markdown: `<p>Welcome to ${siteName} — your comprehensive resource for everything related to ${nicheLabel}. Our team of experts has put together this guide to help you navigate the most important decisions.</p>` +
-                    `<h2>What You Need to Know</h2>` +
-                    `<p>Whether you're a first-time buyer or an experienced professional, understanding the fundamentals of ${nicheLabel} is essential. In this guide, we cover the key factors that affect quality, cost, and long-term satisfaction.</p>` +
-                    `<h2>How We Research</h2>` +
-                    `<p>Every recommendation on ${siteName} is backed by thorough research, expert interviews, and real-world testing. We update our content regularly to ensure accuracy and relevance.</p>`,
+                markdown: `Welcome to ${siteName} — your comprehensive resource for everything related to ${nicheLabel}. Our team of experts has put together this guide to help you navigate the most important decisions.\n\n` +
+                    `## What You Need to Know\n\n` +
+                    `Whether you're a first-time buyer or an experienced professional, understanding the fundamentals of ${nicheLabel} is essential. In this guide, we cover the key factors that affect quality, cost, and long-term satisfaction.\n\n` +
+                    `## How We Research\n\n` +
+                    `Every recommendation on ${siteName} is backed by thorough research, expert interviews, and real-world testing. We update our content regularly to ensure accuracy and relevance.`,
             },
         },
         FAQ: {
@@ -365,14 +365,14 @@ export function mergeBlockDefaults(
 
 function domainToSiteName(domain: string): string {
     return domain
-        .replace(/\.(com|net|org|io|co|info|biz|us|uk|ca|au|de|fr)$/i, '')
+        .replace(/\.[a-z]{2,}(?:\.[a-z]{2,})?$/i, '')
         .replace(/[-_]/g, ' ')
         .replace(/\b\w/g, c => c.toUpperCase());
 }
 
 function inferNiche(domain: string): string {
     const name = domain
-        .replace(/\.(com|net|org|io|co|info|biz|us|uk|ca|au|de|fr)$/i, '')
+        .replace(/\.[a-z]{2,}(?:\.[a-z]{2,})?$/i, '')
         .replace(/[-_]/g, ' ');
     return name || 'services';
 }

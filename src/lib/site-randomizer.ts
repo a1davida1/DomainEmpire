@@ -23,6 +23,7 @@ export function createSeededRng(seed: number): () => number {
 }
 
 function seededPick<T>(rng: () => number, arr: readonly T[]): T {
+    if (arr.length === 0) throw new Error('seededPick: empty array');
     return arr[Math.floor(rng() * arr.length)];
 }
 
@@ -375,7 +376,7 @@ export function generateRandomizePlan(
             homepageUpdate.blocks.splice(
                 Math.max(homepageUpdate.blocks.length - 1, 0),
                 0,
-                makeBlock('CTABanner', ctaVariant, domainName),
+                makeBlock(rng, 'CTABanner', ctaVariant, domainName),
             );
         }
     }
@@ -386,7 +387,7 @@ export function generateRandomizePlan(
             homepageUpdate.blocks.splice(
                 Math.max(homepageUpdate.blocks.length - 1, 0),
                 0,
-                makeBlock('TrustBadges', undefined, domainName),
+                makeBlock(rng, 'TrustBadges', undefined, domainName),
             );
         }
     }
@@ -397,7 +398,7 @@ export function generateRandomizePlan(
             homepageUpdate.blocks.splice(
                 Math.max(homepageUpdate.blocks.length - 1, 0),
                 0,
-                makeBlock('FAQ', undefined, domainName),
+                makeBlock(rng, 'FAQ', undefined, domainName),
             );
         }
     }
@@ -431,20 +432,20 @@ function ensureMustHaveBlocks(
     // Header must be first
     if (!types.has('Header')) {
         const variant = seededPick(rng, VARIANT_OPTIONS.Header!);
-        blocks.unshift(makeBlock('Header', variant, domainName));
+        blocks.unshift(makeBlock(rng, 'Header', variant, domainName));
     }
 
     // Hero after Header
     if (!types.has('Hero')) {
         const variant = seededPick(rng, VARIANT_OPTIONS.Hero!);
         const insertIdx = blocks.findIndex(b => b.type === 'Header') + 1;
-        blocks.splice(insertIdx, 0, makeBlock('Hero', variant, domainName));
+        blocks.splice(insertIdx, 0, makeBlock(rng, 'Hero', variant, domainName));
     }
 
     // Footer must be last
     if (!types.has('Footer')) {
         const variant = seededPick(rng, VARIANT_OPTIONS.Footer!);
-        blocks.push(makeBlock('Footer', variant, domainName));
+        blocks.push(makeBlock(rng, 'Footer', variant, domainName));
     }
 }
 
@@ -460,24 +461,24 @@ function generateHomepageBlocks(
     const ctaVariant = seededPick(rng, VARIANT_OPTIONS.CTABanner ?? ['banner']);
 
     const blocks: BlockSnapshot[] = [
-        makeBlock('Header', headerVariant, domainName),
-        makeBlock('Hero', heroVariant, domainName),
+        makeBlock(rng, 'Header', headerVariant, domainName),
+        makeBlock(rng, 'Hero', heroVariant, domainName),
     ];
 
     // Template-specific middle blocks
     const templateBlocks = getTemplateMiddleBlocks(siteTemplate);
     const shuffled = seededShuffle(rng, templateBlocks);
     for (const tb of shuffled) {
-        blocks.push(makeBlock(tb.type, tb.variant, domainName));
+        blocks.push(makeBlock(rng, tb.type, tb.variant, domainName));
     }
 
     // Always include FAQ + CTA + trust
     const existingTypes = new Set(blocks.map(b => b.type));
-    if (!existingTypes.has('FAQ')) blocks.push(makeBlock('FAQ', undefined, domainName));
-    if (!existingTypes.has('CTABanner')) blocks.push(makeBlock('CTABanner', ctaVariant, domainName));
-    if (!existingTypes.has('TrustBadges')) blocks.push(makeBlock('TrustBadges', undefined, domainName));
+    if (!existingTypes.has('FAQ')) blocks.push(makeBlock(rng, 'FAQ', undefined, domainName));
+    if (!existingTypes.has('CTABanner')) blocks.push(makeBlock(rng, 'CTABanner', ctaVariant, domainName));
+    if (!existingTypes.has('TrustBadges')) blocks.push(makeBlock(rng, 'TrustBadges', undefined, domainName));
 
-    blocks.push(makeBlock('Footer', footerVariant, domainName));
+    blocks.push(makeBlock(rng, 'Footer', footerVariant, domainName));
     return blocks;
 }
 
@@ -515,11 +516,12 @@ function resetBlockCounter(): void {
     blockCounter = 0;
 }
 
-function makeBlock(type: string, variant?: string, domain?: string, niche?: string): BlockSnapshot {
+function makeBlock(rng: () => number, type: string, variant?: string, domain?: string, niche?: string): BlockSnapshot {
     blockCounter++;
     const defaults = getDefaultBlockContent(type, domain, niche, variant);
+    const rngHex = Math.floor(rng() * 0xFFFFFF).toString(36);
     return {
-        id: `blk_${Date.now().toString(36)}_${blockCounter.toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+        id: `blk_${blockCounter.toString(36)}_${rngHex}`,
         type,
         ...(variant ? { variant } : {}),
         ...(defaults.content ? { content: defaults.content } : {}),
@@ -529,7 +531,7 @@ function makeBlock(type: string, variant?: string, domain?: string, niche?: stri
 
 function extractTitleFromDomain(domain: string): string {
     return domain
-        .replace(/\.(com|net|org|io|co|info|biz|us|uk|ca|au|de|fr)$/i, '')
+        .replace(/\.[a-z]{2,}(?:\.[a-z]{2,})?$/i, '')
         .replace(/[-_]/g, ' ')
         .replace(/\b\w/g, c => c.toUpperCase());
 }

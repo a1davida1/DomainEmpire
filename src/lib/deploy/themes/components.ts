@@ -32,7 +32,8 @@ export const componentStyles = `
 .comparison-table th[data-sort-key]:hover{background:var(--color-border)}
 .sort-indicator{color:var(--color-text-muted);margin-left:0.25rem}
 .comparison-table td{padding:0.75rem;border-bottom:1px solid var(--color-border)}
-.comparison-table tr:hover{background:var(--color-bg-surface)}
+.comparison-table tr:nth-child(even){background:var(--color-bg-surface,#f8fafc)}
+.comparison-table tr:hover{background:color-mix(in srgb,var(--color-accent,#2563eb) 5%,var(--color-bg-surface,#f8fafc))}
 .comparison-badge{background:var(--color-success);color:white;padding:0.125rem 0.5rem;border-radius:var(--radius-full);font-size:0.75rem;font-weight:600}
 .comparison-verdict{background:var(--color-bg-surface);border:var(--border-width) solid var(--color-success);border-radius:var(--radius-md);padding:1.25rem;margin:1.5rem 0}
 .cta-button{display:inline-block;background:var(--color-accent);color:white;padding:0.625rem 1.5rem;border-radius:var(--radius-md);text-decoration:none;font-size:0.9rem;font-weight:600;transition:transform var(--transition-speed),box-shadow var(--transition-speed)}
@@ -199,6 +200,9 @@ export const componentStyles = `
 .trust-badge{background:var(--color-bg-surface,#f8fafc);border:var(--border-width,1px) solid var(--color-border,#e2e8f0);border-radius:var(--radius-md,.5rem);padding:1rem 1.25rem;text-align:center;flex:1;min-width:140px;max-width:220px}
 .trust-badge strong{display:block;color:var(--color-text);margin-bottom:0.25rem}
 .trust-badge p{font-size:0.85rem;color:var(--color-text-muted);margin:0}
+.trust-badge[data-tooltip]{position:relative;cursor:help}
+.trust-badge[data-tooltip]::after{content:attr(data-tooltip);position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%) scale(0.9);background:var(--color-primary,#1e293b);color:#fff;padding:0.5rem 0.75rem;border-radius:var(--radius-md,.5rem);font-size:0.8rem;font-weight:400;white-space:nowrap;max-width:280px;white-space:normal;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:10;box-shadow:var(--shadow-md)}
+.trust-badge[data-tooltip]:hover::after{opacity:1;transform:translateX(-50%) scale(1)}
 
 /* Medical disclaimer */
 .medical-disclaimer{background:var(--color-warning-light,#fef3c7);border:2px solid var(--color-warning,#f59e0b);padding:1.25rem;border-radius:var(--radius-md,.5rem);margin:1.5rem 0;font-size:0.9rem;line-height:1.6}

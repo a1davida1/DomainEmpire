@@ -387,12 +387,22 @@ registerBlockRenderer('StatGrid', (block, _ctx) => {
 
     const cards = items.map(item => {
         const pct = Math.max(0, Math.min(100, Math.round(item.metricValue)));
+        const r = 36;
+        const circ = Math.round(2 * Math.PI * r);
+        const offset = Math.round(circ * (1 - pct / 100));
         return `<div class="infographic-card" data-group="${escapeAttr(item.group)}">
+  <div class="stat-ring-wrap">
+    <svg class="stat-ring" viewBox="0 0 80 80" width="80" height="80">
+      <circle cx="40" cy="40" r="${r}" fill="none" stroke="var(--color-border,#e2e8f0)" stroke-width="6"/>
+      <circle class="stat-ring-fill" cx="40" cy="40" r="${r}" fill="none" stroke="var(--color-accent,#2563eb)" stroke-width="6" stroke-linecap="round" stroke-dasharray="${circ}" stroke-dashoffset="${offset}" transform="rotate(-90 40 40)"/>
+    </svg>
+    <span class="stat-ring-value" data-count="${pct}" data-suffix="%">${pct}%</span>
+  </div>
   <h3>${escapeHtml(item.title)}</h3>
   <p class="infographic-summary">${escapeHtml(item.summary)}</p>
   <div class="infographic-meter">
     <span class="infographic-meter-label">${escapeHtml(item.metricLabel)}</span>
-    <span>${pct}%</span>
+    <span data-count="${pct}" data-suffix="%">${pct}%</span>
   </div>
   <div class="infographic-bar"><span style="width:${pct}%"></span></div>
 </div>`;

@@ -30,7 +30,7 @@ h3{font-size:clamp(1.1rem,2.5vw,1.35rem);margin-top:2rem;margin-bottom:0.75rem}
 
 /* Article body */
 article h1{font-size:clamp(1.75rem,4vw,2.25rem);margin-bottom:1.5rem}
-article h2{margin-top:2.5rem;margin-bottom:1rem;padding-bottom:0.5rem;border-bottom:var(--border-width,1px) solid var(--color-border,#e2e8f0)}
+article h2{margin-top:2.5rem;margin-bottom:1rem;padding-left:1rem;border-left:4px solid var(--color-accent,#2563eb);border-bottom:none}
 article h3{margin-top:2rem;margin-bottom:0.75rem}
 article p{margin-bottom:1.25rem;max-width:72ch}
 article ul,article ol{margin-bottom:1.25rem;padding-left:1.75rem}
@@ -40,6 +40,7 @@ article code{font-family:var(--font-mono,ui-monospace,monospace);background:var(
 article pre{margin:1.5rem 0;padding:1.25rem;background:var(--color-bg-surface,#f8fafc);border:1px solid var(--color-border,#e2e8f0);border-radius:var(--radius-md,.5rem);overflow-x:auto}
 article pre code{background:none;border:none;padding:0}
 article img{border-radius:var(--radius-md,.5rem);margin:1.5rem 0}
+.article-featured-img{width:100%;height:auto;border-radius:var(--radius-lg,.75rem);margin:0 0 2rem 0;box-shadow:var(--shadow-md,0 4px 6px -1px rgba(0,0,0,.1));display:block}
 article table{width:100%;border-collapse:collapse;margin:1.5rem 0;font-size:0.925rem}
 article table th{text-align:left;padding:0.75rem;border-bottom:2px solid var(--color-border-strong,#cbd5e1);font-weight:700;color:var(--color-text-muted,#64748b);text-transform:uppercase;font-size:0.8rem;letter-spacing:0.04em}
 article table td{padding:0.75rem;border-bottom:1px solid var(--color-border,#e2e8f0)}

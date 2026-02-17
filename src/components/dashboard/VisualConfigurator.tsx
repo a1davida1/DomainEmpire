@@ -136,7 +136,7 @@ const DEFAULT_BLOCK_CONTENT: Record<string, { config?: Record<string, unknown>; 
         content: { heading: 'Welcome to Our Site', subheading: 'Expert guides and resources to help you make informed decisions.', badge: 'Updated 2026', ctaText: 'Get Started', ctaUrl: '#' },
     },
     ArticleBody: {
-        content: { title: 'Article Title', markdown: '<p>Start writing your article content here. This block supports full HTML including headings, paragraphs, lists, images, and more.</p><h2>Getting Started</h2><p>Replace this placeholder with your actual content.</p>' },
+        content: { title: 'Article Title', markdown: 'Start writing your article content here. This block supports Markdown including headings, paragraphs, lists, images, and more.\n\n## Getting Started\n\nReplace this placeholder with your actual content.' },
     },
     FAQ: {
         config: { openFirst: true, emitJsonLd: true },

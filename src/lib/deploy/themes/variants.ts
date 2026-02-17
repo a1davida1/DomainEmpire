@@ -17,6 +17,10 @@ function pick<T>(items: T[], seed: number, offset = 0): T {
     return items[(seed + offset) % items.length];
 }
 
+function escapeCssComment(value: string): string {
+    return value.replace(/\*\//g, '*\\/').replace(/\/\*/g, '/\\*');
+}
+
 /**
  * Generate deterministic CSS overrides using the domain as a seed.
  */
@@ -83,7 +87,7 @@ export function generateDomainVariantStyles(domain: string): string {
     const cardHover = pick(cardHovers, seed, 17);
 
     return `
-/* Domain variant: ${domain} */
+/* Domain variant: ${escapeCssComment(domain)} */
 :root{
   --de-card-radius:${cardRadius};
   --de-input-radius:${inputRadius};
@@ -133,6 +137,9 @@ article p,article li{margin-bottom:var(--de-section-gap)}
   border-radius:var(--de-card-radius);
   border-width:var(--de-card-border-width);
   box-shadow:var(--de-card-shadow);
+}
+.review-card,.pricing-card,.testimonial-card,.ranking-item,.articles li{
+  transition:transform 150ms ease-in-out;
 }
 .review-card:hover,.pricing-card:hover,.testimonial-card:hover,.ranking-item:hover,.articles li:hover{
   transform:var(--de-card-hover);

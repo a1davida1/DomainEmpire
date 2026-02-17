@@ -19,6 +19,9 @@ export const blockVariantStyles = `
   padding:4rem 0;
   position:relative;
   overflow:hidden;
+  background-image:url('/images/hero-bg.svg');
+  background-size:cover;
+  background-position:center;
 }
 .hero .site-container{position:relative;z-index:1}
 .hero h1{
@@ -459,7 +462,6 @@ section + section{margin-top:calc(var(--spacing-unit,1.6rem) * 2)}
   border-radius:var(--radius-lg,.75rem);
   padding:2rem;
 }
-.vs-side h3{font-size:1.1rem;margin-bottom:0.75rem}
 .vs-points{list-style:none;padding:0}
 .vs-points li{padding:0.375rem 0;font-size:0.9rem;color:var(--color-text-muted)}
 .vs-divider{
@@ -486,7 +488,6 @@ section + section{margin-top:calc(var(--spacing-unit,1.6rem) * 2)}
 }
 
 /* Ranking list polish */
-.ranking-list{margin:2rem 0}
 .ranking-item{
   display:flex;
   align-items:flex-start;
@@ -717,7 +718,7 @@ section + section{margin-top:calc(var(--spacing-unit,1.6rem) * 2)}
 
 .ranking-section{margin:2rem 0;padding:2rem 0}
 .ranking-section h2{margin-bottom:1.25rem}
-.ranking-list{list-style:none;padding:0;margin:0}
+.ranking-list{list-style:none;padding:0;margin:2rem 0}
 
 /* ================================================================
    COMPARISON SECTION enhancements
@@ -757,5 +758,84 @@ section + section{margin-top:calc(var(--spacing-unit,1.6rem) * 2)}
   border-radius:var(--radius-md,.375rem);
   font-weight:600;
   cursor:pointer;
+}
+
+/* ================================================================
+   GLASSMORPHISM HERO VARIANT
+   ================================================================ */
+
+.hero--glass{
+  background:linear-gradient(135deg,var(--color-primary),var(--color-accent,var(--color-primary-hover)));
+  color:#fff;
+  padding:5rem 2rem;
+  position:relative;
+  overflow:hidden;
+}
+.hero--glass::before{
+  content:'';
+  position:absolute;
+  top:-50%;left:-50%;
+  width:200%;height:200%;
+  background:radial-gradient(ellipse at 30% 50%,rgba(255,255,255,.12) 0%,transparent 60%),
+             radial-gradient(ellipse at 80% 20%,rgba(255,255,255,.08) 0%,transparent 50%);
+  pointer-events:none;
+}
+.hero--glass h1{color:#fff}
+.hero--glass .hero-sub{color:rgba(255,255,255,.8)}
+.hero--glass .hero-badge{background:rgba(255,255,255,.12);color:#fff;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.15)}
+.hero--glass .hero-cta{background:rgba(255,255,255,.15);color:#fff;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.2)}
+.hero--glass .hero-cta:hover{background:rgba(255,255,255,.25);color:#fff;box-shadow:0 8px 32px rgba(0,0,0,.2)}
+
+/* Glassmorphism utility for any card */
+.glass-card{
+  background:rgba(255,255,255,.06);
+  backdrop-filter:blur(12px);
+  -webkit-backdrop-filter:blur(12px);
+  border:1px solid rgba(255,255,255,.1);
+  border-radius:var(--radius-lg,.75rem);
+}
+
+/* ================================================================
+   TYPING EFFECT HERO VARIANT (CSS-only)
+   ================================================================ */
+
+.hero--typing h1{
+  overflow:hidden;
+  white-space:nowrap;
+  border-right:3px solid var(--color-accent,#2563eb);
+  width:0;
+  animation:typewriter 2s steps(30) 0.5s forwards,blink-caret .5s step-end infinite;
+}
+@keyframes typewriter{
+  from{width:0}
+  to{width:100%}
+}
+@keyframes blink-caret{
+  50%{border-color:transparent}
+}
+@media(prefers-reduced-motion:reduce){
+  .hero--typing h1{width:100%;animation:none;border-right:none;white-space:normal}
+}
+
+/* ================================================================
+   SVG PROGRESS RING (StatGrid)
+   ================================================================ */
+
+.stat-ring-wrap{
+  position:relative;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  margin-bottom:0.75rem;
+}
+.stat-ring{display:block}
+.stat-ring-fill{
+  transition:stroke-dashoffset 1s ease;
+}
+.stat-ring-value{
+  position:absolute;
+  font-size:1.1rem;
+  font-weight:800;
+  color:var(--color-accent,#2563eb);
 }
 `;

@@ -39,6 +39,7 @@ import { generateEmbedPage } from './templates/embed';
 import { generateGeoBlocks } from './templates/geo-content';
 import { generateScrollCta } from './templates/scroll-cta';
 import { generateGlobalStyles, generateV2GlobalStyles, resolveDomainTheme } from './themes';
+import { generateSiteImages, getOgImagePath } from './image-gen';
 import { getLayoutConfig, type LayoutConfig } from './layouts';
 import { pageDefinitions } from '@/lib/db';
 import { assemblePageFromBlocks, type RenderContext } from './blocks/assembler';
@@ -239,6 +240,19 @@ async function generateV2SiteFiles(
     const skinName = homeDef.skin || domain.skin || 'slate';
 
     const files: GeneratedFile[] = [];
+    const niche = domain.niche || 'general';
+
+    // Generate site images (OG cards, hero background, article featured images)
+    const siteImages = generateSiteImages({
+        domain: domain.domain,
+        siteTitle,
+        niche,
+        skin: skinName,
+        pages: pageDefs.map(pd => ({ route: pd.route, title: pd.title || siteTitle })),
+    });
+    for (const img of siteImages) {
+        files.push({ path: img.path, content: img.content });
+    }
 
     // Generate HTML for each page definition
     for (const pageDef of pageDefs) {
@@ -252,6 +266,7 @@ async function generateV2SiteFiles(
             pageDescription: pageDef.metaDescription || undefined,
             publishedAt: pageDef.createdAt ? new Date(pageDef.createdAt).toISOString() : undefined,
             updatedAt: pageDef.updatedAt ? new Date(pageDef.updatedAt).toISOString() : undefined,
+            ogImagePath: getOgImagePath(pageDef.route),
             headScripts: scripts.head,
             bodyScripts: scripts.body,
         };
@@ -291,11 +306,10 @@ async function generateV2SiteFiles(
     }
 
     // Static files (same as v1)
-    const niche = domain.niche || 'general';
     files.push(
         { path: '404.html', content: generateV2ErrorPage(siteTitle, themeName, skinName) },
         { path: 'robots.txt', content: `User-agent: *\nAllow: /\nSitemap: https://${domain.domain}/sitemap.xml` },
-        { path: 'favicon.svg', content: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${niche === 'health' ? '\u2695' : '\u{1F310}'}</text></svg>` },
+        { path: 'favicon.svg', content: generateNicheFavicon(niche) },
         { path: '_headers', content: generateHeaders() },
         {
             path: 'sitemap.xml',
@@ -304,6 +318,34 @@ async function generateV2SiteFiles(
     );
 
     return files;
+}
+
+/** Generate niche-aware SVG favicon */
+function generateNicheFavicon(niche: string): string {
+    const nicheEmojis: Record<string, string> = {
+        health: '\u2695\uFE0F',
+        medical: '\u2695\uFE0F',
+        finance: '\uD83D\uDCB0',
+        insurance: '\uD83D\uDEE1\uFE0F',
+        home: '\uD83C\uDFE0',
+        real_estate: '\uD83C\uDFE0',
+        technology: '\uD83D\uDCBB',
+        tech: '\uD83D\uDCBB',
+        education: '\uD83C\uDF93',
+        travel: '\u2708\uFE0F',
+        food: '\uD83C\uDF7D\uFE0F',
+        fitness: '\uD83C\uDFCB\uFE0F',
+        pets: '\uD83D\uDC3E',
+        automotive: '\uD83D\uDE97',
+        legal: '\u2696\uFE0F',
+        beauty: '\u2728',
+        gaming: '\uD83C\uDFAE',
+        sports: '\u26BD',
+        gardening: '\uD83C\uDF31',
+        diy: '\uD83D\uDD27',
+    };
+    const emoji = nicheEmojis[niche.toLowerCase()] || '\uD83C\uDF10';
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${emoji}</text></svg>`;
 }
 
 /** Simple 404 page for v2 block-based sites */

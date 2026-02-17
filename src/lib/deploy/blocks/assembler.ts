@@ -12,6 +12,7 @@ import {
     escapeAttr,
     sanitizeArticleHtml,
 } from '../templates/shared';
+import { marked } from 'marked';
 
 // Google Fonts URLs for each theme
 const THEME_FONT_URLS: Record<string, string> = {
@@ -35,6 +36,7 @@ export interface RenderContext {
     pageDescription?: string;
     publishedAt?: string;
     updatedAt?: string;
+    ogImagePath?: string;
     headScripts: string;
     bodyScripts: string;
 }
@@ -172,6 +174,39 @@ function getEnhancementScript(): string {
     },{passive:true});
     btn.addEventListener('click',function(){window.scrollTo({top:0,behavior:'smooth'})});
   }
+
+  /* Animated number counters for stat values */
+  if('IntersectionObserver' in window){
+    var cio=new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if(!e.isIntersecting)return;
+        cio.unobserve(e.target);
+        var target=parseInt(e.target.getAttribute('data-count')||'0',10);
+        if(!target)return;
+        var start=0;var dur=800;var t0=null;
+        function step(ts){
+          if(!t0)t0=ts;
+          var p=Math.min((ts-t0)/dur,1);
+          var ease=1-Math.pow(1-p,3);
+          e.target.textContent=Math.round(start+(target-start)*ease)+(e.target.getAttribute('data-suffix')||'');
+          if(p<1)requestAnimationFrame(step);
+        }
+        requestAnimationFrame(step);
+      });
+    },{threshold:0.3});
+    document.querySelectorAll('[data-count]').forEach(function(el){cio.observe(el)});
+  }
+
+  /* Parallax scroll on hero */
+  var hero=document.querySelector('.hero');
+  if(hero&&!window.matchMedia('(prefers-reduced-motion:reduce)').matches){
+    window.addEventListener('scroll',function(){
+      var y=window.scrollY;
+      if(y<hero.offsetHeight*1.5){
+        hero.style.backgroundPositionY=Math.round(y*0.3)+'px';
+      }
+    },{passive:true});
+  }
 })();
 </script>`;
 }
@@ -186,6 +221,8 @@ function buildOpenGraphMeta(ctx: RenderContext, pageUrl: string): string {
     const domain = escapeAttr(ctx.domain);
     const isHomepage = ctx.route === '/';
 
+    const ogImageUrl = ctx.ogImagePath ? `https://${ctx.domain}${ctx.ogImagePath}` : '';
+
     const tags = [
         `<meta property="og:title" content="${title}">`,
         `<meta property="og:description" content="${description}">`,
@@ -193,10 +230,17 @@ function buildOpenGraphMeta(ctx: RenderContext, pageUrl: string): string {
         `<meta property="og:type" content="${isHomepage ? 'website' : 'article'}">`,
         `<meta property="og:site_name" content="${domain}">`,
         `<meta property="og:locale" content="en_US">`,
-        `<meta name="twitter:card" content="summary">`,
+        `<meta name="twitter:card" content="summary_large_image">`,
         `<meta name="twitter:title" content="${title}">`,
         `<meta name="twitter:description" content="${description}">`,
     ];
+
+    if (ogImageUrl) {
+        tags.push(`<meta property="og:image" content="${escapeAttr(ogImageUrl)}">`);
+        tags.push(`<meta property="og:image:width" content="1200">`);
+        tags.push(`<meta property="og:image:height" content="630">`);
+        tags.push(`<meta name="twitter:image" content="${escapeAttr(ogImageUrl)}">`);
+    }
 
     if (ctx.publishedAt) {
         tags.push(`<meta property="article:published_time" content="${escapeAttr(ctx.publishedAt)}">`);
@@ -452,10 +496,19 @@ registerBlockRenderer('ArticleBody', (block, ctx) => {
         ? '<button type="button" class="print-btn" onclick="window.print()">Print</button>'
         : '';
 
+    // Convert Markdown to HTML, then sanitize
+    const parsedHtml = marked.parse(markdown, { async: false }) as string;
+
+    const slug = ctx.route.replace(/^\//, '').replace(/\/$/, '').replace(/\//g, '-');
+    const featuredImg = isArticlePage
+        ? `<img class="article-featured-img" src="/images/featured/${escapeAttr(slug)}.svg" alt="${escapeAttr(title || ctx.pageTitle || '')}" width="1200" height="400" loading="eager">`
+        : '';
+
     return `<article class="article-body">
+  ${featuredImg}
   ${titleHtml}
   ${printBtn}
-  ${sanitizeArticleHtml(markdown)}
+  ${sanitizeArticleHtml(parsedHtml)}
 </article>`;
 });
 
@@ -623,7 +676,8 @@ registerBlockRenderer('TrustBadges', (block, _ctx) => {
 
     const items = badges.map(b => {
         const desc = b.description ? `<p>${escapeHtml(b.description)}</p>` : '';
-        return `<div class="trust-badge"><strong>${escapeHtml(b.label)}</strong>${desc}</div>`;
+        const tooltip = b.description ? ` data-tooltip="${escapeAttr(b.description)}"` : '';
+        return `<div class="trust-badge"${tooltip}><strong>${escapeHtml(b.label)}</strong>${desc}</div>`;
     }).join('');
 
     return `<section class="trust-badges"><div class="trust-badges-row">${items}</div></section>`;
