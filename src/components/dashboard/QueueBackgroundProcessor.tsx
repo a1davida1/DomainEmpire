@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { usePathname } from 'next/navigation';
 
 const PROCESS_INTERVAL_MS = 15_000;
 const LEASE_TTL_MS = 45_000;
