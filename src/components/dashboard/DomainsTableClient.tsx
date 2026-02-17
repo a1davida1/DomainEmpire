@@ -487,6 +487,16 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints
                                     <Link href={`/dashboard/queue?domainId=${domain.id}`} className="text-[10px] text-blue-600 hover:underline">
                                         Queue
                                     </Link>
+                                    <Link href={`/dashboard/domains/${domain.id}/pages`} className="text-[10px] text-indigo-600 hover:underline">
+                                        Pages
+                                    </Link>
+                                </div>
+                            )}
+                            {(!queueHint || queueHint.total === 0) && (
+                                <div className="flex flex-wrap gap-1">
+                                    <Link href={`/dashboard/domains/${domain.id}/pages`} className="text-[10px] text-indigo-600 hover:underline">
+                                        Pages
+                                    </Link>
                                 </div>
                             )}
                             {domain.renewalDate && domain.renewalDate !== '—' && (
@@ -572,6 +582,16 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints
                                         )}
                                         <Link href={`/dashboard/queue?domainId=${domain.id}`} className="text-[10px] text-blue-600 hover:underline">
                                             Queue
+                                        </Link>
+                                        <Link href={`/dashboard/domains/${domain.id}/pages`} className="text-[10px] text-indigo-600 hover:underline">
+                                            Pages
+                                        </Link>
+                                    </div>
+                                )}
+                                {(!queueHint || queueHint.total === 0) && (
+                                    <div className="flex flex-wrap gap-1">
+                                        <Link href={`/dashboard/domains/${domain.id}/pages`} className="text-[10px] text-indigo-600 hover:underline">
+                                            Pages
                                         </Link>
                                     </div>
                                 )}
@@ -695,6 +715,7 @@ export function DomainsTableClient({ domains, headerSlot, hasFilters, queueHints
                                                 </DomainHoverCard>
                                                 <CopyButton text={domain.domain} />
                                                 <Link href={`/dashboard/queue?domainId=${domain.id}`} className="ml-2 text-xs text-blue-600 hover:underline">Queue</Link>
+                                                <Link href={`/dashboard/domains/${domain.id}/pages`} className="ml-1 text-xs text-indigo-600 hover:underline">Pages</Link>
                                                 <Link href={`/dashboard/domains/${domain.id}/preview`} className="ml-1 text-xs text-violet-600 hover:underline">Preview</Link>
                                                 {queueHint && queueHint.total > 0 && (
                                                     <>
