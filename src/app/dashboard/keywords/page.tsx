@@ -117,7 +117,7 @@ export default function KeywordsPage() {
                     <Card>
                         <CardContent className="p-4 text-center">
                             <p className="text-2xl font-bold text-orange-600">{summary.unassignedCount}</p>
-                            <p className="text-sm text-muted-foreground">Unassigned</p>
+                            <p className="text-sm text-muted-foreground">No Article</p>
                         </CardContent>
                     </Card>
                 </div>
@@ -167,7 +167,7 @@ export default function KeywordsPage() {
                                 checked={unassignedOnly}
                                 onChange={e => setUnassignedOnly(e.target.checked)}
                             />
-                            <span className="text-sm">Unassigned only</span>
+                            <span className="text-sm">No article only</span>
                         </label>
                     </div>
                 </CardContent>
@@ -235,11 +235,11 @@ export default function KeywordsPage() {
                                         <td className="p-3">
                                             {kw.articleId ? (
                                                 <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
-                                                    assigned
+                                                    has article
                                                 </span>
                                             ) : (
                                                 <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
-                                                    unassigned
+                                                    no article
                                                 </span>
                                             )}
                                         </td>

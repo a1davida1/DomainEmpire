@@ -444,8 +444,16 @@ export async function createDirectUploadProject(
         const data = await response.json();
 
         if (!data.success) {
-            // Project already exists — reuse it
-            if (data.errors?.[0]?.code === 8000007) {
+            // Project already exists — reuse it.
+            // Check error code (number or string) and message text as fallback.
+            const errCode = data.errors?.[0]?.code;
+            const errMsg = (data.errors?.[0]?.message || '') as string;
+            const alreadyExists = errCode === 8000007
+                || errCode === '8000007'
+                || /already exists/i.test(errMsg);
+
+            if (alreadyExists) {
+                console.log(`[CF] Project "${projectName}" already exists, reusing.`);
                 const existing = await getPagesProject(projectName, clientOptions);
                 if (existing) {
                     return {
@@ -454,6 +462,13 @@ export async function createDirectUploadProject(
                         deploymentUrl: existing.subdomain,
                     };
                 }
+                // getPagesProject failed — might be on a different account.
+                // Try proceeding with the project name anyway.
+                return {
+                    success: true,
+                    projectName,
+                    deploymentUrl: `${projectName}.pages.dev`,
+                };
             }
             return { success: false, error: data.errors?.[0]?.message || 'Failed to create project' };
         }

@@ -50,6 +50,8 @@ export interface RenderContext {
     ogImagePath?: string;
     headScripts: string;
     bodyScripts: string;
+    /** Dashboard /api/collect URL for form submission data collection */
+    collectUrl?: string;
 }
 
 // ============================================================
@@ -509,24 +511,34 @@ export function assemblePageFromBlocks(
     ctx: RenderContext,
     cssHref: string = '/styles.css',
 ): string {
-    // Separate structural blocks from content blocks
+    // Separate structural blocks from content blocks.
+    // Full-width blocks (Hero, ResourceGrid, LatestArticles) render outside the
+    // sidebar grid so they aren't cramped into a narrow column.
     let headerHtml = '';
     let footerHtml = '';
     let sidebarHtml = '';
-    const contentBlocks: string[] = [];
+    const preGridBlocks: string[] = [];   // Hero — full-width above sidebar grid
+    const contentBlocks: string[] = [];   // Inside sidebar grid's page-main column
+    const postGridBlocks: string[] = [];  // ResourceGrid, LatestArticles — full-width below grid
+
+    const FULL_WIDTH_PRE = new Set(['Hero']);
+    const FULL_WIDTH_POST = new Set(['ResourceGrid', 'LatestArticles']);
 
     for (const block of blocks) {
         const html = renderBlock(block, ctx);
+        const wrapped = `<section data-block-id="${escapeAttr(block.id)}" data-block-type="${escapeAttr(block.type)}"${block.variant ? ` data-block-variant="${escapeAttr(block.variant)}"` : ''} data-animate>${html}</section>`;
         if (block.type === 'Header') {
             headerHtml = `<div data-block-id="${escapeAttr(block.id)}" data-block-type="Header">${html}</div>`;
         } else if (block.type === 'Footer') {
             footerHtml = `<div data-block-id="${escapeAttr(block.id)}" data-block-type="Footer">${html}</div>`;
         } else if (block.type === 'Sidebar') {
             sidebarHtml = `<aside data-block-id="${escapeAttr(block.id)}" data-block-type="Sidebar" class="page-sidebar">${html}</aside>`;
+        } else if (FULL_WIDTH_PRE.has(block.type)) {
+            preGridBlocks.push(wrapped);
+        } else if (FULL_WIDTH_POST.has(block.type)) {
+            postGridBlocks.push(wrapped);
         } else {
-            contentBlocks.push(
-                `<section data-block-id="${escapeAttr(block.id)}" data-block-type="${escapeAttr(block.type)}"${block.variant ? ` data-block-variant="${escapeAttr(block.variant)}"` : ''} data-animate>${html}</section>`,
-            );
+            contentBlocks.push(wrapped);
         }
     }
 
@@ -563,19 +575,25 @@ export function assemblePageFromBlocks(
     // Related pages nav for sub-pages
     const relatedHtml = buildRelatedPagesHtml(ctx);
 
-    // Sidebar layout: wrap content in a grid when sidebar is present
+    // Sidebar layout: wrap content in a grid when sidebar is present.
+    // Full-width blocks (Hero, ResourceGrid, LatestArticles) render outside the
+    // grid so they aren't constrained to the narrow page-main column.
     const hasSidebar = sidebarHtml.length > 0;
     const mainContent = hasSidebar
-        ? `<div class="page-layout">
+        ? `${preGridBlocks.join('\n')}
+<div class="page-layout">
   ${sidebarHtml}
   <div class="page-main">
     ${breadcrumbHtml}
 ${contentBlocks.join('\n')}
 ${relatedHtml}
   </div>
-</div>`
-        : `${breadcrumbHtml}
+</div>
+${postGridBlocks.join('\n')}`
+        : `${preGridBlocks.join('\n')}
+${breadcrumbHtml}
 ${contentBlocks.join('\n')}
+${postGridBlocks.join('\n')}
 ${relatedHtml}`;
 
     const raw = `<!DOCTYPE html>
@@ -714,12 +732,17 @@ registerBlockRenderer('Footer', (block, ctx) => {
         const endpoint = (content.newsletterEndpoint as string) || '';
         const headline = (content.newsletterHeadline as string) || 'Stay updated';
         if (endpoint) {
+            const collectUrl = ctx.collectUrl || '';
+            const collectScript = collectUrl
+                ? `<script>(function(){var f=document.querySelector('.newsletter-form');if(!f)return;f.addEventListener('submit',function(){try{var e=f.querySelector('input[name=email]');fetch(${JSON.stringify(collectUrl)},{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({formType:'newsletter',route:location.pathname,domain:location.hostname,email:e?e.value:null,data:{}})})}catch(x){}})})()</script>`
+                : '';
             newsletterHtml = `<div class="footer-newsletter">
   <h4>${escapeHtml(headline)}</h4>
   <form action="${escapeAttr(endpoint)}" method="POST" class="newsletter-form" aria-label="Newsletter signup">
     <input type="email" name="email" placeholder="your@email.com" required autocomplete="email" inputmode="email" aria-label="Email address">
     <button type="submit">Subscribe</button>
   </form>
+  ${collectScript}
 </div>`;
         }
     }

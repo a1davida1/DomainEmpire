@@ -584,7 +584,7 @@ registerBlockRenderer('CostBreakdown', (block, _ctx) => {
 // LeadForm
 // ============================================================
 
-registerBlockRenderer('LeadForm', (block, _ctx) => {
+registerBlockRenderer('LeadForm', (block, ctx) => {
     const content = (block.content || {}) as Record<string, unknown>;
     const config = (block.config || {}) as Record<string, unknown>;
     const fields = (content.fields as Array<{
@@ -600,6 +600,7 @@ registerBlockRenderer('LeadForm', (block, _ctx) => {
     const heading = (content.heading as string) || '';
     const subheading = (content.subheading as string) || '';
     const endpoint = (config.endpoint as string) || '';
+    const collectUrl = ctx.collectUrl || '';
     const submitLabel = (config.submitLabel as string) || 'GET STARTED';
 
     if (fields.length === 0 || !endpoint) return '';
@@ -711,6 +712,8 @@ registerBlockRenderer('LeadForm', (block, _ctx) => {
     btn.disabled=true;btn.textContent='Sending...';
     var data={};
     new FormData(form).forEach(function(v,k){data[k]=v});
+    var collectUrl=${JSON.stringify(collectUrl)};
+    if(collectUrl){try{fetch(collectUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({formType:'lead',route:location.pathname,domain:location.hostname,data:data,email:data.email||null})})}catch(e){}}
     fetch(${JSON.stringify(endpoint)},{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify(data)

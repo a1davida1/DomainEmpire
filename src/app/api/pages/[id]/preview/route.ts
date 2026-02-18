@@ -98,11 +98,39 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
     const html = assemblePageFromBlocks(blocks, ctx);
     const css = generateV2GlobalStyles(themeName, skinName, domain.siteTemplate || 'authority', domain.domain);
 
+    // Build route → preview URL map so internal links work in preview
+    const siblingPages = await db.select({ id: pageDefinitions.id, route: pageDefinitions.route })
+        .from(pageDefinitions)
+        .where(eq(pageDefinitions.domainId, pageDef.domainId));
+    const routeMap: Record<string, string> = {};
+    for (const sp of siblingPages) {
+        const normalRoute = sp.route === '/' ? '/' : sp.route.replace(/\/$/, '');
+        routeMap[normalRoute] = `/api/pages/${sp.id}/preview`;
+    }
+
     // Inject CSS inline for self-contained preview
     let previewHtml = html.replace(
         '<link rel="stylesheet" href="/styles.css">',
         `<style>${css}</style>`,
     );
+
+    // Inject link-interception script so internal nav links open sibling previews
+    // instead of 404ing on the dashboard domain.
+    const linkScript = `<script>
+(function(){
+  var routes=${JSON.stringify(routeMap)};
+  document.addEventListener('click',function(e){
+    var a=e.target.closest('a[href]');
+    if(!a)return;
+    var href=a.getAttribute('href');
+    if(!href||href.startsWith('http')||href.startsWith('//')||href.startsWith('#')||href.startsWith('mailto:'))return;
+    var path=href.replace(/\\/$/,'');
+    if(!path.startsWith('/'))path='/'+path;
+    if(routes[path]){e.preventDefault();window.location.href=routes[path]}
+  });
+})();
+</script>`;
+    previewHtml = previewHtml.replace('</body>', linkScript + '</body>');
 
     // When loaded inside the Visual Configurator, inject a bridge script
     // that enables click-to-select and hover-highlight on blocks.

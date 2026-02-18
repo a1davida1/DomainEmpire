@@ -305,6 +305,9 @@ async function generateV2SiteFiles(
             ogImagePath: getOgImagePath(pageDef.route),
             headScripts: scripts.head,
             bodyScripts: scripts.body,
+            collectUrl: process.env.NEXT_PUBLIC_APP_URL
+                ? `${process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, '')}/api/collect`
+                : undefined,
         };
 
         const blocks = (pageDef.blocks || []) as BlockEnvelope[];
