@@ -734,7 +734,7 @@ registerBlockRenderer('Footer', (block, ctx) => {
         if (endpoint) {
             const collectUrl = ctx.collectUrl || '';
             const collectScript = collectUrl
-                ? `<script>(function(){var f=document.querySelector('.newsletter-form');if(!f)return;f.addEventListener('submit',function(){try{var e=f.querySelector('input[name=email]');fetch(${JSON.stringify(collectUrl)},{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({formType:'newsletter',route:location.pathname,domain:location.hostname,email:e?e.value:null,data:{}})})}catch(x){}})})()</script>`
+                ? `<script>(function(){var f=document.querySelector('.newsletter-form');if(!f)return;f.addEventListener('submit',function(){try{var e=f.querySelector('input[name=email]');var payload=JSON.stringify({formType:'newsletter',route:location.pathname,domain:location.hostname,email:e?e.value:null,data:{}});if(navigator.sendBeacon){navigator.sendBeacon(${JSON.stringify(collectUrl)},new Blob([payload],{type:'application/json'}))}else{fetch(${JSON.stringify(collectUrl)},{method:'POST',headers:{'Content-Type':'application/json'},body:payload,keepalive:true})}}catch(x){}})})()</script>`
                 : '';
             newsletterHtml = `<div class="footer-newsletter">
   <h4>${escapeHtml(headline)}</h4>

@@ -638,9 +638,16 @@ export async function processStagingDeploy(domainId: string): Promise<{
             return { success: false, fileCount: files.length, error: projectResult.error || 'Project create failed' };
         }
 
+        // Convert base64-encoded files to Buffers for binary upload
+        const uploadFiles = files.map(f =>
+            f.isBase64
+                ? { path: f.path, content: Buffer.from(f.content as string, 'base64') }
+                : { path: f.path, content: f.content },
+        );
+
         const uploadResult = await directUploadDeploy(
             projectResult.projectName || projectName,
-            files,
+            uploadFiles,
             shard.cloudflare,
             { branch: 'staging' },
         );

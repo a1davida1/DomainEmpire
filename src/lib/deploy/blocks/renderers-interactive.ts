@@ -599,11 +599,13 @@ registerBlockRenderer('LeadForm', (block, ctx) => {
     const disclosureAboveFold = (content.disclosureAboveFold as string) || '';
     const heading = (content.heading as string) || '';
     const subheading = (content.subheading as string) || '';
-    const endpoint = (config.endpoint as string) || '';
+    const rawEndpoint = (config.endpoint as string) || '';
+    // Treat '#' placeholder as no endpoint — it's the default seed value
+    const endpoint = rawEndpoint && rawEndpoint !== '#' ? rawEndpoint : '';
     const collectUrl = ctx.collectUrl || '';
     const submitLabel = (config.submitLabel as string) || 'GET STARTED';
 
-    if (fields.length === 0 || !endpoint) return '';
+    if (fields.length === 0 || (!endpoint && !collectUrl)) return '';
 
     const disclosureHtml = disclosureAboveFold
         ? `<div class="disclosure-above">${escapeHtml(disclosureAboveFold)}</div>`
@@ -714,10 +716,9 @@ registerBlockRenderer('LeadForm', (block, ctx) => {
     new FormData(form).forEach(function(v,k){data[k]=v});
     var collectUrl=${JSON.stringify(collectUrl)};
     if(collectUrl){try{fetch(collectUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({formType:'lead',route:location.pathname,domain:location.hostname,data:data,email:data.email||null})})}catch(e){}}
-    fetch(${JSON.stringify(endpoint)},{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(data)
-    }).then(function(r){
+    var ep=${JSON.stringify(endpoint)};
+    var mainFetch=ep?fetch(ep,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}):collectUrl?fetch(collectUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({formType:'lead',route:location.pathname,domain:location.hostname,data:data,email:data.email||null})}):Promise.resolve({ok:true});
+    mainFetch.then(function(r){
       if(r.ok){
         form.style.display='none';
         document.getElementById('lead-success').style.display='';

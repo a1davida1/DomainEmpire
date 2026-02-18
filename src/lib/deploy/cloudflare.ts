@@ -406,7 +406,13 @@ export async function addCustomDomain(
         const data = await response.json();
 
         if (!data.success) {
-            return { success: false, error: data.errors?.[0]?.message || 'Failed to add domain' };
+            const errMsg = (data.errors?.[0]?.message || '') as string;
+            // Domain already attached to this project — treat as success
+            if (/already.*exist/i.test(errMsg) || /already.*active/i.test(errMsg) || /already.*registered/i.test(errMsg)) {
+                console.log(`[CF] Domain "${domain}" already linked to project "${projectName}", continuing.`);
+                return { success: true };
+            }
+            return { success: false, error: errMsg || 'Failed to add domain' };
         }
 
         return { success: true };

@@ -328,18 +328,22 @@ async function generateV2SiteFiles(
         content: generateV2GlobalStyles(themeName, skinName, domain.siteTemplate || 'authority', domain.domain),
     });
 
-    // Auto-inject trust pages from disclosure config
+    // Auto-inject trust pages from disclosure config.
+    // Skip if a block-based page_definition already covers that route —
+    // the user's custom page blocks take priority over auto-generated trust pages.
     const disclosure = await getDisclosureConfig(domain.id);
     const trustPageSlugs: string[] = [];
-    if (disclosure.aboutPage) {
+    const existingRoutes = new Set(pageDefs.map(p => p.route.replace(/\/$/, '') || '/'));
+
+    if (disclosure.aboutPage && !existingRoutes.has('/about')) {
         files.push({ path: 'about/index.html', content: await generateV2TrustPage('About', disclosure.aboutPage, domain.domain, 'about', themeName, skinName, siteTitle) });
         trustPageSlugs.push('about');
     }
-    if (disclosure.editorialPolicyPage) {
+    if (disclosure.editorialPolicyPage && !existingRoutes.has('/editorial-policy')) {
         files.push({ path: 'editorial-policy/index.html', content: await generateV2TrustPage('Editorial Policy', disclosure.editorialPolicyPage, domain.domain, 'editorial-policy', themeName, skinName, siteTitle) });
         trustPageSlugs.push('editorial-policy');
     }
-    if (disclosure.howWeMoneyPage) {
+    if (disclosure.howWeMoneyPage && !existingRoutes.has('/how-we-make-money')) {
         files.push({ path: 'how-we-make-money/index.html', content: await generateV2TrustPage('How We Make Money', disclosure.howWeMoneyPage, domain.domain, 'how-we-make-money', themeName, skinName, siteTitle) });
         trustPageSlugs.push('how-we-make-money');
     }
