@@ -357,7 +357,7 @@ export const blockVariantStyles = `
   z-index:100;
   padding:0.5rem 0;
 }
-.nav-dropdown:hover .nav-dropdown-menu{display:block}
+.nav-dropdown:hover .nav-dropdown-menu,.nav-dropdown:focus-within .nav-dropdown-menu{display:block}
 .nav-dropdown-menu a{
   display:block;
   padding:0.5rem 1rem;

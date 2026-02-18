@@ -428,7 +428,7 @@ function aboutPage(niche: string, siteName: string): SubPageDefinition {
     };
 }
 
-function contactPage(niche: string, siteName: string): SubPageDefinition {
+function contactPage(niche: string, siteName: string, domain: string): SubPageDefinition {
     const _n = capitalize(niche);
     return {
         route: '/contact',
@@ -449,7 +449,7 @@ function contactPage(niche: string, siteName: string): SubPageDefinition {
             { type: 'ArticleBody', content: {
                 title: 'Other Ways to Reach Us',
                 markdown: `## Additional Contact Methods\n\n` +
-                    `- **Email** — info@${siteName.toLowerCase().replace(/\s/g, '')}.com\n` +
+                    `- **Email** — info@${domain}\n` +
                     `- **Response Time** — We typically respond within 24 business hours\n\n` +
                     `## What We Can Help With\n\n` +
                     `- Personalized ${niche} recommendations\n` +
@@ -664,7 +664,7 @@ export function generateSubPages(domain: string, niche?: string): SubPageResult[
     const nicheLabel = niche || domain.replace(/\.[a-z]{2,}(?:\.[a-z]{2,})?$/i, '').replace(/[-_]/g, ' ');
     const siteName = domainToSiteName(domain);
 
-    const generators: Array<(n: string, s: string) => SubPageDefinition> = [
+    const generators: Array<(n: string, s: string, d: string) => SubPageDefinition> = [
         guidesHub,
         guideComplete,
         guideSaveMoney,
@@ -683,7 +683,7 @@ export function generateSubPages(domain: string, niche?: string): SubPageResult[
     ];
 
     return generators.map(gen => {
-        const def = gen(nicheLabel, siteName);
+        const def = gen(nicheLabel, siteName, domain);
         const blocks = def.blocks.map(b => {
             const merged = mergeBlockDefaults(b, domain, niche);
             return {

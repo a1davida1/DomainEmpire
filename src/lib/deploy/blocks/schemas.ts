@@ -789,6 +789,36 @@ export type PdfDownloadBlock = TypedBlock<'PdfDownload', PdfDownloadContent, Pdf
 export type ScrollCTABlock = TypedBlock<'ScrollCTA', ScrollCTAContent, ScrollCTAConfig>;
 export type EmbedWidgetBlock = TypedBlock<'EmbedWidget', EmbedWidgetContent, EmbedWidgetConfig>;
 
+// --- ResourceGrid ---
+export const ResourceGridContentSchema = z.object({
+  heading: z.string().optional(),
+  items: z.array(z.object({
+    icon: z.string(),
+    title: z.string(),
+    description: z.string(),
+    href: z.string(),
+  })).default([]),
+});
+export const ResourceGridConfigSchema = z.object({}).passthrough();
+export type ResourceGridContent = z.infer<typeof ResourceGridContentSchema>;
+export type ResourceGridConfig = z.infer<typeof ResourceGridConfigSchema>;
+export type ResourceGridBlock = TypedBlock<'ResourceGrid', ResourceGridContent, ResourceGridConfig>;
+
+// --- LatestArticles ---
+export const LatestArticlesContentSchema = z.object({
+  heading: z.string().optional(),
+  articles: z.array(z.object({
+    title: z.string(),
+    excerpt: z.string(),
+    href: z.string(),
+    image: z.string().optional(),
+  })).default([]),
+});
+export const LatestArticlesConfigSchema = z.object({}).passthrough();
+export type LatestArticlesContent = z.infer<typeof LatestArticlesContentSchema>;
+export type LatestArticlesConfig = z.infer<typeof LatestArticlesConfigSchema>;
+export type LatestArticlesBlock = TypedBlock<'LatestArticles', LatestArticlesContent, LatestArticlesConfig>;
+
 export type AnyBlock =
   | HeaderBlock
   | FooterBlock
@@ -820,7 +850,9 @@ export type AnyBlock =
   | InteractiveMapBlock
   | PdfDownloadBlock
   | ScrollCTABlock
-  | EmbedWidgetBlock;
+  | EmbedWidgetBlock
+  | ResourceGridBlock
+  | LatestArticlesBlock;
 
 // ============================================================
 // Page Definition (stored in DB)
@@ -874,8 +906,8 @@ export const BLOCK_SCHEMA_REGISTRY: Record<BlockType, {
   PdfDownload: { content: PdfDownloadContentSchema, config: PdfDownloadConfigSchema },
   ScrollCTA: { content: ScrollCTAContentSchema, config: ScrollCTAConfigSchema },
   EmbedWidget: { content: EmbedWidgetContentSchema, config: EmbedWidgetConfigSchema },
-  ResourceGrid: { content: z.record(z.string(), z.unknown()), config: z.record(z.string(), z.unknown()) },
-  LatestArticles: { content: z.record(z.string(), z.unknown()), config: z.record(z.string(), z.unknown()) },
+  ResourceGrid: { content: ResourceGridContentSchema, config: ResourceGridConfigSchema },
+  LatestArticles: { content: LatestArticlesContentSchema, config: LatestArticlesConfigSchema },
 };
 
 /**
@@ -911,7 +943,7 @@ export function validateBlock(block: BlockEnvelope): {
 }
 
 // ============================================================
-// Logical Block Categories — groups 31 blocks into ~12 sections
+// Logical Block Categories — groups 33 blocks into ~12 sections
 // ============================================================
 
 export type SectionCategory =

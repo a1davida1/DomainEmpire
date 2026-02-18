@@ -24,7 +24,7 @@ export interface ThemeTokens {
     containerMax: string;
     borderWidth: string;
     transitionSpeed: string;
-    /** 8px baseline spacing scale: sp1=0.5rem(8px) … sp8=4rem(64px) */
+    /** 8px baseline spacing scale: sp1=0.5rem(8px) … sp8=4rem–5rem (varies by theme) */
     spacingScale: [string, string, string, string, string, string, string, string];
     /** Default vertical padding for each <section> */
     sectionPadding: string;

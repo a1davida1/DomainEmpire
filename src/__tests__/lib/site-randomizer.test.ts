@@ -313,7 +313,7 @@ describe('block variant CSS in v2 pipeline', () => {
         const domain = 'test.com';
         const p = getDomainPrefix(domain);
         const css = generateV2GlobalStyles('clean', 'slate', 'authority', domain);
-        // Check for hero variant selectors (randomized with domain prefix)
+        // Check for hero variant selectors (not domain-prefixed — excluded to avoid HTML tag conflicts)
         expect(css).toContain('.hero--centered');
         expect(css).toContain('.hero--gradient');
         expect(css).toContain('.hero--split');

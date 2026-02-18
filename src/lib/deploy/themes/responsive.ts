@@ -40,10 +40,13 @@ export const responsiveStyles = `
   .trust-badges-row{flex-direction:column}
   .trust-badge{max-width:100%}
   .toc{padding:1rem}
-  .toc-list{max-height:0;overflow:hidden;transition:max-height .3s ease}
-  .toc:focus-within .toc-list,.toc:hover .toc-list{max-height:80vh}
-  .toc-title{cursor:pointer;margin-bottom:0}
+  .toc-details{border:none}
+  .toc-details:not([open]) .toc-list{display:none}
+  .toc-details .toc-list{max-height:80vh;overflow-y:auto}
+  .toc-title{cursor:pointer;margin-bottom:0;list-style:none}
+  .toc-title::-webkit-details-marker{display:none}
   .toc-title::after{content:' ▾';font-size:0.7em;opacity:0.5}
+  .toc-details[open] .toc-title::after{content:' ▴'}
 }
 /* Print */
 @media print{

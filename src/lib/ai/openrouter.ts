@@ -20,6 +20,8 @@ const QUALITY_MODEL = envModel('OPENROUTER_MODEL_QUALITY', 'openrouter/auto');
 const REVIEW_MODEL = envModel('OPENROUTER_MODEL_REVIEW', 'anthropic/claude-opus-4.1');
 const RESEARCH_MODEL = envModel('OPENROUTER_MODEL_RESEARCH', 'openrouter/auto');
 const VISION_MODEL = envModel('OPENROUTER_MODEL_VISION', 'google/gemini-2.0-flash-001');
+const IMAGE_GEN_FAST_MODEL = envModel('OPENROUTER_MODEL_IMAGE_GEN_FAST', 'google/gemini-2.0-flash-exp:free');
+const IMAGE_GEN_QUALITY_MODEL = envModel('OPENROUTER_MODEL_IMAGE_GEN_QUALITY', 'google/gemini-2.5-pro-preview');
 const EMERGENCY_FALLBACK_MODEL = envModel('OPENROUTER_MODEL_FALLBACK', 'openrouter/auto');
 
 export const MODEL_CONFIG = {
@@ -49,6 +51,10 @@ export const MODEL_CONFIG = {
 
     // Vision (Gemini Flash)
     vision: VISION_MODEL,
+
+    // Image generation (Gemini)
+    imageGenFast: IMAGE_GEN_FAST_MODEL,
+    imageGenQuality: IMAGE_GEN_QUALITY_MODEL,
 } as const;
 
 export type AIModelTask = keyof typeof MODEL_CONFIG;
@@ -75,6 +81,8 @@ const MODEL_ROUTING_REGISTRY: Record<AIModelTask, RoutingProfile> = {
     research: { fallbackTasks: ['seoOptimize'], promptVersion: 'research.v1' },
     blockContent: { fallbackTasks: ['draftGeneration', 'humanization'], promptVersion: 'block-content.v1' },
     vision: { fallbackTasks: [], promptVersion: 'vision.v1' },
+    imageGenFast: { fallbackTasks: ['imageGenQuality'], promptVersion: 'image-gen.v1' },
+    imageGenQuality: { fallbackTasks: ['imageGenFast'], promptVersion: 'image-gen.v1' },
 };
 
 // Pricing per 1K tokens (approximate, check OpenRouter for current)
@@ -84,6 +92,8 @@ const MODEL_PRICING: Record<string, { input: number; output: number; perRequestF
     'anthropic/claude-3-5-haiku-20241022': { input: 0.0008, output: 0.004 },
     'perplexity/sonar-reasoning': { input: 0.001, output: 0.005, perRequestFee: 0.01 },
     'google/gemini-2.0-flash-001': { input: 0.0001, output: 0.0004 },
+    'google/gemini-2.0-flash-exp:free': { input: 0, output: 0 },
+    'google/gemini-2.5-pro-preview': { input: 0.00125, output: 0.01 },
 };
 
 interface BaseAIResponse {
@@ -136,6 +146,38 @@ interface OpenRouterResponse {
         total_tokens: number;
     };
     model: string;
+}
+
+interface OpenRouterImageResponsePart {
+    type: string;
+    text?: string;
+    image_url?: { url: string };
+}
+
+interface OpenRouterImageResponse {
+    id?: string;
+    choices?: Array<{
+        message?: {
+            content: string | OpenRouterImageResponsePart[];
+            role?: string;
+        };
+        finish_reason?: string;
+    }>;
+    usage?: {
+        prompt_tokens: number;
+        completion_tokens: number;
+    };
+    model?: string;
+}
+
+export interface ImageGenResponse {
+    base64: string;
+    mimeType: string;
+    model: string;
+    inputTokens: number;
+    outputTokens: number;
+    cost: number;
+    durationMs: number;
 }
 
 class OpenRouterHttpError extends Error {
@@ -421,6 +463,118 @@ export class OpenRouterClient {
             fallbackUsed: false,
             fallbackIndex: 0,
         };
+    }
+
+    /**
+     * Generate an image using a Gemini model via OpenRouter.
+     * Returns base64-encoded image data (PNG) or null if generation fails.
+     */
+    async generateImage(
+        task: AIModelTask,
+        prompt: string,
+        options: GenerateOptions & { width?: number; height?: number } = {},
+    ): Promise<ImageGenResponse | null> {
+        const model = options.model || MODEL_CONFIG[task];
+        const startTime = Date.now();
+
+        try {
+            const response = await withCircuitBreaker(
+                'openrouter',
+                () =>
+                    withRetry(
+                        async () => {
+                            const res = await fetch(`${this.baseUrl}/chat/completions`, {
+                                method: 'POST',
+                                headers: {
+                                    Authorization: `Bearer ${this.apiKey}`,
+                                    'Content-Type': 'application/json',
+                                    'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'https://localhost:3000',
+                                    'X-Title': 'Domain Empire',
+                                },
+                                body: JSON.stringify({
+                                    model,
+                                    messages: [
+                                        {
+                                            role: 'user',
+                                            content: prompt,
+                                        },
+                                    ],
+                                    temperature: options.temperature ?? 0.8,
+                                    max_tokens: options.maxTokens ?? 4096,
+                                    // Request image output from Gemini
+                                    modalities: ['text', 'image'],
+                                    ...(options.width && options.height
+                                        ? { image_size: { width: options.width, height: options.height } }
+                                        : {}),
+                                }),
+                                signal: AbortSignal.timeout(OpenRouterClient.FETCH_TIMEOUT_MS),
+                            });
+
+                            if (!res.ok) {
+                                const errorText = await res.text();
+                                throw new OpenRouterHttpError(
+                                    res.status,
+                                    `OpenRouter Image Gen error: ${res.status} - ${errorText}`,
+                                );
+                            }
+
+                            return res.json();
+                        },
+                        {
+                            maxRetries: Math.max(0, this.maxAttempts - 1),
+                            baseDelayMs: this.baseDelay,
+                            maxDelayMs: 30_000,
+                            label: `openrouter-imagegen:${model}`,
+                            retryOn: (error: unknown) => this.isRetryableError(error),
+                        },
+                    ),
+            );
+
+            const durationMs = Date.now() - startTime;
+            const data = response as OpenRouterImageResponse;
+            const choice = data.choices?.[0];
+
+            if (!choice) return null;
+
+            // Extract base64 image from multimodal response
+            const content = choice.message?.content;
+            let imageBase64: string | null = null;
+
+            if (typeof content === 'string') {
+                // Check for inline base64 data URI in the text
+                const b64Match = content.match(/data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)/);
+                if (b64Match) {
+                    imageBase64 = b64Match[2];
+                }
+            } else if (Array.isArray(content)) {
+                // Multimodal parts: look for image_url with base64
+                for (const part of content) {
+                    if (part.type === 'image_url' && part.image_url?.url) {
+                        const urlMatch = part.image_url.url.match(/^data:image\/(png|jpeg|webp);base64,(.+)$/);
+                        if (urlMatch) {
+                            imageBase64 = urlMatch[2];
+                        }
+                    }
+                }
+            }
+
+            if (!imageBase64) return null;
+
+            const usage = data.usage || { prompt_tokens: 0, completion_tokens: 0 };
+            const resolvedModel = data.model || model;
+            return {
+                base64: imageBase64,
+                mimeType: 'image/png',
+                model: resolvedModel,
+                inputTokens: usage.prompt_tokens,
+                outputTokens: usage.completion_tokens,
+                cost: this.calculateCost(resolvedModel, usage.prompt_tokens, usage.completion_tokens),
+                durationMs,
+            };
+        } catch (error) {
+            console.error(`[ImageGen] Failed with model ${model}:`, error instanceof Error ? error.message : error);
+            return null;
+        }
     }
 
     /**

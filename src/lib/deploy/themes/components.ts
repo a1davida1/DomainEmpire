@@ -97,7 +97,9 @@ export const componentStyles = `
 .amort-pagination{display:flex;gap:0.25rem;justify-content:center;margin-top:1rem;flex-wrap:wrap}
 .amort-page-btn{background:var(--color-bg-surface);border:1px solid var(--color-border);border-radius:var(--radius-sm,.25rem);padding:0.375rem 0.75rem;font-size:0.8rem;cursor:pointer;transition:all .1s}
 .amort-page-btn:hover{border-color:var(--color-accent);color:var(--color-accent)}
+.amort-page-btn:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
 .amort-page-btn.active{background:var(--color-accent);color:#fff;border-color:var(--color-accent)}
+.amort-dl-btn:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
 
 /* Calculator breakdown line items */
 .calc-breakdown{margin-top:1.25rem;border-top:1px solid var(--color-border);padding-top:1rem}
@@ -192,6 +194,7 @@ export const componentStyles = `
 .cta-icon{font-size:1.3rem;vertical-align:middle;margin-right:0.25rem}
 .cta-button{display:inline-block;background:var(--color-accent,#2563eb);color:#fff;padding:0.75rem 1.75rem;border-radius:var(--radius-md,.5rem);font-weight:600;font-size:0.95rem;text-decoration:none;white-space:nowrap;transition:transform .15s,box-shadow .15s;border:none;cursor:pointer}
 .cta-button:hover{transform:translateY(-1px);box-shadow:var(--shadow-md,0 4px 12px rgba(0,0,0,.15));color:#fff}
+.cta-button:focus-visible{outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--color-accent) 40%,transparent);transform:translateY(-1px)}
 @media(max-width:640px){.cta-section .site-container{flex-direction:column;text-align:center}.cta-button{width:100%;text-align:center}}
 
 /* Lead form components — BusyBusy quality */
@@ -215,6 +218,7 @@ export const componentStyles = `
 .lead-form button[type="submit"]{width:100%;background:var(--color-accent);color:white;padding:1rem 2rem;border:none;border-radius:var(--radius-md);font-size:1.1rem;font-weight:800;letter-spacing:0.05em;text-transform:uppercase;cursor:pointer;transition:transform .15s,box-shadow .2s;box-shadow:0 2px 8px rgba(0,0,0,.08);margin-top:0.5rem}
 .lead-form button[type="submit"]:disabled{opacity:0.5;cursor:not-allowed}
 .lead-form button[type="submit"]:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.15)}
+.lead-form button[type="submit"]:focus-visible:not(:disabled){outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--color-accent) 40%,transparent);transform:translateY(-2px)}
 .lead-trust{text-align:center;font-size:0.78rem;color:var(--color-text-muted,#64748b);margin:0.75rem 0 0;font-weight:400}
 .btn-lock{font-size:0.9rem;margin-right:0.25rem}
 .success-msg{color:var(--color-success);font-weight:600;margin-top:0.75rem;text-align:center;font-size:1.1rem;padding:1.5rem;background:var(--color-success-light,#dcfce7);border-radius:var(--radius-md,.5rem)}
@@ -229,6 +233,7 @@ export const componentStyles = `
 .faq-item[open]{border-color:var(--color-accent);box-shadow:0 2px 12px rgba(0,0,0,.05)}
 .faq-question{padding:1.125rem 1.5rem;cursor:pointer;font-weight:600;font-size:1.025rem;background:var(--color-bg);list-style:none;color:var(--color-text);transition:background .15s;display:flex;align-items:center;gap:0.75rem}
 .faq-question:hover{background:var(--color-bg-surface)}
+.faq-question:focus-visible{outline:2px solid var(--color-accent);outline-offset:-2px;background:var(--color-bg-surface)}
 .faq-question::-webkit-details-marker{display:none}
 .faq-question::before{content:'';display:inline-block;width:0.5rem;height:0.5rem;border-right:2px solid var(--color-accent);border-bottom:2px solid var(--color-accent);transform:rotate(-45deg);transition:transform 0.2s;flex-shrink:0}
 .faq-item[open] .faq-question::before{transform:rotate(45deg)}

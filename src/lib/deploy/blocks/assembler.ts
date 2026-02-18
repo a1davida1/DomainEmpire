@@ -159,25 +159,6 @@ function getEnhancementScript(): string {
     document.querySelectorAll('section[data-animate]').forEach(function(s){s.classList.add('is-visible')});
   }
 
-  /* Reading progress bar */
-  var bar=document.querySelector('.reading-progress');
-  if(bar){
-    window.addEventListener('scroll',function(){
-      var h=document.documentElement;
-      var pct=h.scrollTop/(h.scrollHeight-h.clientHeight)*100;
-      bar.style.width=Math.min(pct,100)+'%';
-    },{passive:true});
-  }
-
-  /* Back-to-top button */
-  var btn=document.querySelector('.back-to-top');
-  if(btn){
-    window.addEventListener('scroll',function(){
-      btn.classList.toggle('visible',window.scrollY>400);
-    },{passive:true});
-    btn.addEventListener('click',function(){window.scrollTo({top:0,behavior:'smooth'})});
-  }
-
   /* Animated number counters for stat values */
   if('IntersectionObserver' in window){
     var cio=new IntersectionObserver(function(entries){
@@ -289,16 +270,6 @@ function getEnhancementScript(): string {
     });
   }
 
-  /* Reading progress bar */
-  var progressBar=document.querySelector('.reading-progress');
-  if(progressBar){
-    window.addEventListener('scroll',function(){
-      var h=document.documentElement;
-      var pct=Math.min(100,Math.round(h.scrollTop/(h.scrollHeight-h.clientHeight)*100));
-      progressBar.style.width=pct+'%';
-    },{passive:true});
-  }
-
   /* Scroll-reveal: fade-up sections on scroll */
   if('IntersectionObserver' in window&&!window.matchMedia('(prefers-reduced-motion:reduce)').matches){
     var revealObs=new IntersectionObserver(function(entries){
@@ -309,14 +280,6 @@ function getEnhancementScript(): string {
     });
   }
 
-  /* Back-to-top button */
-  var btt=document.querySelector('.back-to-top');
-  if(btt){
-    window.addEventListener('scroll',function(){
-      btt.classList.toggle('btt-visible',window.scrollY>400);
-    },{passive:true});
-    btt.addEventListener('click',function(){window.scrollTo({top:0,behavior:'smooth'})});
-  }
 })();
 </script>`;
 }
@@ -427,29 +390,8 @@ function buildStructuredData(ctx: RenderContext, canonicalUrl: string, blocks: B
     };
     scripts.push(`<script type="application/ld+json">${JSON.stringify(breadcrumb)}</script>`);
 
-    // FAQPage schema — extract Q&A from FAQ blocks
-    const faqBlocks = blocks.filter(b => b.type === 'FAQ');
-    const allFaqItems: Array<{ question: string; answer: string }> = [];
-    for (const fb of faqBlocks) {
-        const c = (fb.content || {}) as Record<string, unknown>;
-        const items = (c.items as Array<{ question: string; answer: string }>) || [];
-        allFaqItems.push(...items);
-    }
-    if (allFaqItems.length > 0) {
-        const faqSchema = {
-            '@context': 'https://schema.org',
-            '@type': 'FAQPage',
-            mainEntity: allFaqItems.map(item => ({
-                '@type': 'Question',
-                name: item.question,
-                acceptedAnswer: {
-                    '@type': 'Answer',
-                    text: item.answer,
-                },
-            })),
-        };
-        scripts.push(`<script type="application/ld+json">${JSON.stringify(faqSchema)}</script>`);
-    }
+    // NOTE: FAQPage JSON-LD is emitted by the FAQ block renderer itself
+    // (when emitJsonLd !== false), so we don't duplicate it here.
 
     // HowTo schema — extract from StepByStep/Checklist blocks
     const howToBlocks = blocks.filter(b => b.type === 'StepByStep' || b.type === 'Checklist');
@@ -648,8 +590,6 @@ ${relatedHtml}`;
   <title>${fullTitle}</title>
   <link rel="canonical" href="${escapeAttr(canonicalUrl)}">
   <link rel="preload" href="${escapeAttr(cssHref)}" as="style">
-  <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="dns-prefetch" href="https://fonts.googleapis.com">
   <link rel="dns-prefetch" href="https://fonts.gstatic.com">
   ${ogMeta}
@@ -807,14 +747,20 @@ registerBlockRenderer('Footer', (block, ctx) => {
   <p>We use cookies to improve your experience. By continuing to browse, you agree to our <a href="/privacy">privacy policy</a>. <button class="cookie-ok" type="button">Accept</button></p>
 </div>` : '';
 
-    // Bottom bar with copyright + legal links
+    // Bottom bar with copyright + configurable legal links
+    const legalLinks = (content.legalLinks as Array<{ label: string; href: string }>) || [];
+    const defaultLegalLinks = [
+        { label: 'Privacy Policy', href: '/privacy' },
+        { label: 'Terms of Service', href: '/terms' },
+    ];
+    const activeLegalLinks = legalLinks.length > 0 ? legalLinks : defaultLegalLinks;
+    const legalLinksHtml = activeLegalLinks
+        .filter(l => l.href && l.label)
+        .map(l => `<a href="${escapeAttr(l.href)}">${escapeHtml(l.label)}</a>`)
+        .join('');
     const bottomBar = `<div class="footer-bottom">
   <p>&copy; ${year} ${escapeHtml(siteName)}. All rights reserved.</p>
-  <div class="footer-legal">
-    <a href="/privacy">Privacy Policy</a>
-    <a href="/terms">Terms of Service</a>
-    <a href="/disclaimer">Disclaimer</a>
-  </div>
+  ${legalLinksHtml ? `<div class="footer-legal">${legalLinksHtml}</div>` : ''}
 </div>`;
 
     return `<footer class="footer footer--${escapeAttr(String(variant))}" role="contentinfo">
@@ -864,9 +810,10 @@ registerBlockRenderer('Hero', (block, ctx) => {
         ? `<div class="hero-trust">${trustItems.map(t => `<span class="hero-trust-item">✓ ${escapeHtml(t)}</span>`).join('')}</div>`
         : '';
 
-    // Star rating
-    const ratingHtml = rating && rating > 0
-        ? `<div class="hero-rating"><span class="hero-stars">${'★'.repeat(Math.round(rating))}${'☆'.repeat(5 - Math.round(rating))}</span> <span class="hero-rating-text">${rating.toFixed(1)} / 5</span></div>`
+    // Star rating (clamped to 0–5)
+    const clamped = rating ? Math.max(0, Math.min(5, rating)) : 0;
+    const ratingHtml = clamped > 0
+        ? `<div class="hero-rating"><span class="hero-stars">${'★'.repeat(Math.round(clamped))}${'☆'.repeat(5 - Math.round(clamped))}</span> <span class="hero-rating-text">${clamped.toFixed(1)} / 5</span></div>`
         : '';
 
     return `<section class="hero hero--${escapeAttr(String(variant))}">
@@ -899,18 +846,28 @@ registerBlockRenderer('ArticleBody', (block, ctx) => {
 
     // Auto-generate heading IDs and Table of Contents
     const tocItems: Array<{ id: string; text: string; level: number }> = [];
+    const idCounts: Record<string, number> = {};
     parsedHtml = parsedHtml.replace(/<h([23])>(.*?)<\/h\1>/gi, (_match, level, text) => {
         const clean = text.replace(/<[^>]+>/g, '').trim();
-        const id = clean.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        let id = clean.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        // Ensure unique IDs for duplicate headings
+        if (idCounts[id] !== undefined) {
+            idCounts[id]++;
+            id = `${id}-${idCounts[id]}`;
+        } else {
+            idCounts[id] = 1;
+        }
         tocItems.push({ id, text: clean, level: parseInt(level) });
         return `<h${level} id="${id}">${text}</h${level}>`;
     });
 
     const tocHtml = tocItems.length >= 3 ? `<nav class="toc" aria-label="Table of Contents">
-  <h3 class="toc-title">On This Page</h3>
-  <ul class="toc-list">${tocItems.map(t =>
+  <details class="toc-details" open>
+    <summary class="toc-title">On This Page</summary>
+    <ul class="toc-list">${tocItems.map(t =>
         `<li class="toc-item toc-item--h${t.level}"><a href="#${escapeAttr(t.id)}">${escapeHtml(t.text)}</a></li>`
     ).join('')}</ul>
+  </details>
 </nav>` : '';
 
     const slug = ctx.route.replace(/^\//, '').replace(/\/$/, '').replace(/\//g, '-');

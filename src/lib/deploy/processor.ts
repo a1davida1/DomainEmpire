@@ -127,7 +127,7 @@ async function doneStep(ctx: DeployContext, stepIndex: number, detail: string) {
 /**
  * Step 1: Generate site files (plain HTML)
  */
-async function stepGenerateFiles(ctx: DeployContext): Promise<{ path: string; content: string }[]> {
+async function stepGenerateFiles(ctx: DeployContext): Promise<{ path: string; content: string | Buffer; isBase64?: boolean }[]> {
     await startStep(ctx, 0);
 
     const files = await generateSiteFiles(ctx.domainId);
@@ -137,14 +137,18 @@ async function stepGenerateFiles(ctx: DeployContext): Promise<{ path: string; co
         throw new Error('Site generator produced zero files');
     }
 
-    await doneStep(ctx, 0, `${files.length} files generated`);
+    const binaryCount = files.filter(f => f.isBase64).length;
+    const detail = binaryCount > 0
+        ? `${files.length} files generated (${binaryCount} AI images)`
+        : `${files.length} files generated`;
+    await doneStep(ctx, 0, detail);
     return files;
 }
 
 /**
  * Step 2: Upload to Cloudflare Pages via Direct Upload
  */
-async function stepDirectUpload(ctx: DeployContext, files: { path: string; content: string }[]): Promise<void> {
+async function stepDirectUpload(ctx: DeployContext, files: { path: string; content: string | Buffer; isBase64?: boolean }[]): Promise<void> {
     if (!ctx.payload.triggerBuild) {
         await doneStep(ctx, 1, 'Skipped — deploy not requested');
         return;
@@ -184,9 +188,16 @@ async function stepDirectUpload(ctx: DeployContext, files: { path: string; conte
             updatedAt: new Date(),
         }).where(eq(domains.id, ctx.domainId));
 
+        // Convert base64-encoded files to Buffers for binary upload
+        const uploadFiles = files.map(f =>
+            f.isBase64
+                ? { path: f.path, content: Buffer.from(f.content as string, 'base64') }
+                : { path: f.path, content: f.content },
+        );
+
         const uploadResult = await directUploadDeploy(
             ctx.cfProject || ctx.projectName,
-            files,
+            uploadFiles,
             shard.cloudflare,
             ctx.deployTarget === 'staging' ? { branch: 'staging' } : undefined,
         );

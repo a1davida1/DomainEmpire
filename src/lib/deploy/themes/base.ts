@@ -72,6 +72,9 @@ section + section{margin-top:0}
 
 /* Content-visibility for rendering performance — defer off-screen sections */
 section[data-block-type]:nth-child(n+3){content-visibility:auto;contain-intrinsic-size:auto 500px}
+/* Ensure anchor-targetable sections are not deferred (prevents scroll jumps on TOC/#id nav) */
+section[data-block-type][id]{content-visibility:visible;contain-intrinsic-size:none}
+section[data-block-type]:target{content-visibility:visible;contain-intrinsic-size:none}
 
 /* Badge utility */
 .badge{display:inline-flex;align-items:center;gap:0.375rem;font-size:0.78rem;font-weight:600;padding:0.25rem 0.75rem;border-radius:var(--radius-full,999px);background:var(--color-badge-bg,#1e293b);color:var(--color-badge-text,#fff)}

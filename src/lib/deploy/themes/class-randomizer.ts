@@ -158,7 +158,7 @@ const FINGERPRINT_CLASSES = [
     'wizard-quiz-score', 'wizard-restart', 'wizard-lead-form',
     // Sidebar
     'sidebar', 'sidebar--categories', 'sidebar-heading', 'sidebar-section',
-    'sidebar-cat-nav', 'sidebar-cat-icon', 'sidebar-cat-label',
+    'sidebar-cat--active', 'sidebar-cat-nav', 'sidebar-cat-icon', 'sidebar-cat-label', 'sidebar-cat',
     'sidebar-search', 'sidebar-search-input',
     // Structural (avoid 'header','footer','hero' — conflict with HTML tags/test patterns)
     'footer-bottom', 'footer-legal',
@@ -219,12 +219,15 @@ export function randomizeCSS(css: string, domain: string): string {
 export function randomizeHTML(html: string, domain: string): string {
     const prefix = getDomainPrefix(domain);
     let result = html;
-    // Replace longer class names first to avoid partial matches
+    // Replace class names using word-boundary regex to prevent cascading
+    // double-prefixing. Without \b, replacing 'pros' after 'pros-heading'
+    // would turn 'xyz-pros-heading' into 'xyz-xyz-pros-heading'.
     for (const cls of FINGERPRINT_CLASSES) {
         const prefixed = `${prefix}-${cls}`;
-        // In HTML: class attributes, querySelector strings, etc.
-        // Use word-boundary-aware replacement
-        result = result.replaceAll(cls, prefixed);
+        // Escape regex special characters in class name (e.g. '--')
+        const escaped = cls.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const re = new RegExp(`(?<![a-zA-Z0-9_-])${escaped}(?![a-zA-Z0-9_])`, 'g');
+        result = result.replace(re, prefixed);
     }
     return result;
 }

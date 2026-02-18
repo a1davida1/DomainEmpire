@@ -217,8 +217,12 @@ registerBlockRenderer('QuoteCalculator', (block, _ctx) => {
 
     const headingHtml = heading ? `<h2>${escapeHtml(heading)}</h2>` : '';
 
-    // Sanitize formula: only allow safe math expression characters to prevent code injection
-    const safeFormula = formula.replace(/[^a-zA-Z0-9_\s+\-*/%().,:{}[\]]/g, '');
+    // SECURITY: Sanitize formula for use in new Function() evaluation.
+    // Only allow identifiers, numbers, basic math operators, parens, commas, dots, and colons.
+    // Braces/brackets are stripped to prevent object/array injection vectors.
+    // Residual risk: crafted identifier names could shadow globals; formulas come from
+    // trusted admin content (default-content.ts or AI pipeline), not user input.
+    const safeFormula = formula.replace(/[^a-zA-Z0-9_\s+\-*/%().,:\s]/g, '');
 
     const calcScript = safeFormula ? `<script>
 (function(){
@@ -672,9 +676,15 @@ registerBlockRenderer('LeadForm', (block, _ctx) => {
         i++;
     }
 
-    const consentHtml = consentText
-        ? `<div class="consent"><label><input type="checkbox" name="consent" required> ${escapeHtml(consentText).replace(/Privacy Policy/gi, `<a href="${escapeAttr(privacyUrl)}" target="_blank" rel="noopener noreferrer">Privacy Policy</a>`)}</label></div>`
-        : '';
+    let consentHtml = '';
+    if (consentText) {
+        const escaped = escapeHtml(consentText);
+        const linked = escaped.replace(/Privacy Policy/gi, `<a href="${escapeAttr(privacyUrl)}" target="_blank" rel="noopener noreferrer">Privacy Policy</a>`);
+        // If no "Privacy Policy" phrase was found, append a link so consent always includes one
+        const hasLink = linked !== escaped;
+        const finalText = hasLink ? linked : `${linked} <a href="${escapeAttr(privacyUrl)}" target="_blank" rel="noopener noreferrer">Privacy Policy</a>`;
+        consentHtml = `<div class="consent"><label><input type="checkbox" name="consent" required> ${finalText}</label></div>`;
+    }
 
     return `<section class="lead-section">
   ${disclosureHtml}
@@ -1131,7 +1141,7 @@ registerBlockRenderer('TestimonialGrid', (block, _ctx) => {
             : '';
         const titleHtml = t.title ? `<span class="testimonial-title">${escapeHtml(t.title)}</span>` : '';
         const initials = t.author.split(' ').map(w => w.charAt(0).toUpperCase()).slice(0, 2).join('');
-        const verifiedHtml = t.verified !== false ? '<span class="testimonial-verified" title="Verified">✓</span>' : '';
+        const verifiedHtml = t.verified === true ? '<span class="testimonial-verified" title="Verified">✓</span>' : '';
         return `<div class="testimonial-card">
   ${ratingHtml}
   <blockquote class="testimonial-quote"><span class="testimonial-mark">"</span>${escapeHtml(t.quote)}</blockquote>
@@ -1551,8 +1561,10 @@ registerBlockRenderer('LatestArticles', (block, _ctx) => {
     if (articles.length === 0) return '';
 
     const cardsHtml = articles.map(article => {
-        const imgHtml = article.image
-            ? `<div class="article-card-img" style="background-image:url('${escapeAttr(article.image)}')"></div>`
+        // Validate image URL: only allow http(s) or root-relative paths to prevent CSS injection
+        const isValidImage = article.image && /^(https?:\/\/|\/)[^'"()]+$/.test(article.image);
+        const imgHtml = isValidImage
+            ? `<div class="article-card-img" style="background-image:url('${escapeAttr(article.image as string)}')"></div>`
             : `<div class="article-card-img article-card-img--placeholder"></div>`;
         return `<a href="${escapeAttr(article.href)}" class="article-card">
   ${imgHtml}

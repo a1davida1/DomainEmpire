@@ -2662,3 +2662,31 @@ export type NewSubscriber = typeof subscribers.$inferInsert;
 export type AbTest = typeof abTests.$inferSelect;
 export type NewAbTest = typeof abTests.$inferInsert;
 export type CompetitorSnapshot = typeof competitorSnapshots.$inferSelect;
+
+// ===========================================
+// FORM SUBMISSIONS: Data collected from deployed site forms
+// ===========================================
+export const formSubmissions = pgTable('form_submissions', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    domainId: uuid('domain_id').references(() => domains.id, { onDelete: 'set null' }),
+    domain: text('domain').notNull(),
+    formType: text('form_type', {
+        enum: ['lead', 'newsletter', 'contact', 'calculator', 'quiz', 'survey'],
+    }).notNull().default('lead'),
+    route: text('route').notNull().default('/'),
+    data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
+    email: text('email'),
+    ip: text('ip'),
+    userAgent: text('user_agent'),
+    referrer: text('referrer'),
+    createdAt: timestamp('created_at').defaultNow(),
+}, (t) => ({
+    domainIdx: index('form_sub_domain_idx').on(t.domain),
+    domainIdIdx: index('form_sub_domain_id_idx').on(t.domainId),
+    formTypeIdx: index('form_sub_type_idx').on(t.formType),
+    emailIdx: index('form_sub_email_idx').on(t.email),
+    createdAtIdx: index('form_sub_created_idx').on(t.createdAt),
+}));
+
+export type FormSubmission = typeof formSubmissions.$inferSelect;
+export type NewFormSubmission = typeof formSubmissions.$inferInsert;

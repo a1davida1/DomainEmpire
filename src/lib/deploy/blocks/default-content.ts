@@ -663,7 +663,7 @@ function getCalculatorDefaults(niche: string, year: number): BlockContentDefault
     const nicheLabel = niche;
 
     // Finance / loan / mortgage — proper amortization calculator
-    if (n.match(/loan|mortgage|financ|insur|credit|bank|invest|debt|budget|lending|refinanc|401k|ira/)) {
+    if (n.match(/loan|mortgage|financ|insur|credit|bank|invest|tax|account|debt|budget|lending|refinanc|401k|ira/)) {
         return {
             config: { scheduleType: 'amortization' },
             content: {
@@ -786,7 +786,7 @@ function getLeadFormFields(niche: string): LeadField[] {
     }
 
     // Finance / insurance / loans
-    if (n.match(/loan|mortgage|financ|insur|credit|bank|invest|tax|account|debt|budget|lending|refinanc/)) {
+    if (n.match(/loan|mortgage|financ|insur|credit|bank|invest|tax|account|debt|budget|lending|refinanc|401k|ira/)) {
         return [
             ...nameFields,
             emailField,
