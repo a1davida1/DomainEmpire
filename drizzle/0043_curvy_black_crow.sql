@@ -1,0 +1,1 @@
+ALTER TABLE "page_definitions" ADD CONSTRAINT "page_def_status_chk" CHECK ("page_definitions"."status" IN ('draft', 'review', 'approved', 'published'));

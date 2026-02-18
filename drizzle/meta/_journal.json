@@ -302,6 +302,20 @@
       "when": 1771387557877,
       "tag": "0042_hard_magma",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1771436067736,
+      "tag": "0043_curvy_black_crow",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1771436235699,
+      "tag": "0044_serious_kronos",
+      "breakpoints": true
     }
   ]
 }

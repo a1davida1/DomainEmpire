@@ -322,17 +322,25 @@ export async function processOutlineJob(jobId: string): Promise<void> {
     // Get job details (Worker handles missing job)
     const jobs = await db.select().from(contentQueue).where(eq(contentQueue.id, jobId)).limit(1);
     const job = jobs[0];
+    if (!job.domainId) {
+        throw new Error(`Job ${job.id} (outline) requires domainId but it is null`);
+    }
+    const domainId = job.domainId;
+    if (!job.articleId) {
+        throw new Error(`Job ${job.id} (outline) requires articleId but it is null`);
+    }
+    const articleId = job.articleId;
     const payload = job.payload as { targetKeyword: string; secondaryKeywords: string[]; domainName: string; contentType?: string };
 
     // Fetch article to get research data
-    const articleRecord = await db.select().from(articles).where(eq(articles.id, job.articleId!)).limit(1);
+    const articleRecord = await db.select().from(articles).where(eq(articles.id, articleId)).limit(1);
     const article = articleRecord[0];
     const researchData = article?.researchData;
 
-    const domainRecord = await db.select().from(domains).where(eq(domains.id, job.domainId!)).limit(1);
+    const domainRecord = await db.select().from(domains).where(eq(domains.id, domainId)).limit(1);
     const domain = domainRecord[0];
     if (!domain) {
-        throw new Error(`Domain not found: ${job.domainId}`);
+        throw new Error(`Domain not found: ${domainId}`);
     }
 
     const differentiationInstructions = buildDomainDifferentiationInstructions({
@@ -644,10 +652,10 @@ Respond with JSON:
             console.warn(`[Pipeline] Invalid geoData from AI for article ${job.articleId}:`, parsed.error.issues);
         }
     }
-    await db.update(articles).set(outlineUpdate).where(eq(articles.id, job.articleId!));
+    await db.update(articles).set(outlineUpdate).where(eq(articles.id, job.articleId ?? (() => { throw new Error(`Job ${job.id} requires articleId`); })()));
 
     await createRevision({
-        articleId: job.articleId!,
+        articleId: job.articleId ?? (() => { throw new Error(`Job ${job.id} requires articleId`); })(),
         title: response.data.title,
         contentMarkdown: null,
         metaDescription: response.data.metaDescription,
@@ -683,10 +691,14 @@ export async function processDraftJob(jobId: string): Promise<void> {
     const ai = getAIClient();
     const jobs = await db.select().from(contentQueue).where(eq(contentQueue.id, jobId)).limit(1);
     const job = jobs[0];
+    if (!job.domainId) {
+        throw new Error(`Job ${job.id} (draft) requires domainId but it is null`);
+    }
+    const domainId = job.domainId;
     const payload = job.payload as { targetKeyword: string; domainName: string };
 
     // Load outline from DB to avoid payload bloat
-    const articleRecord = await db.select().from(articles).where(eq(articles.id, job.articleId!)).limit(1);
+    const articleRecord = await db.select().from(articles).where(eq(articles.id, job.articleId ?? (() => { throw new Error(`Job ${job.id} requires articleId`); })())).limit(1);
     const article = articleRecord[0];
 
     if (!article) {
@@ -698,14 +710,14 @@ export async function processDraftJob(jobId: string): Promise<void> {
     if (!outline) throw new Error('Outline not found for article');
 
     // Fetch domain for voice seed
-    const domainRecord = await db.select().from(domains).where(eq(domains.id, job.domainId!)).limit(1);
+    const domainRecord = await db.select().from(domains).where(eq(domains.id, domainId)).limit(1);
     const domain = domainRecord[0];
 
     if (!domain) {
-        throw new Error(`Domain not found: ${job.domainId}`);
+        throw new Error(`Domain not found: ${domainId}`);
     }
 
-    const voiceSeed = await getOrCreateVoiceSeed(job.domainId!, domain.domain, domain.niche || 'general');
+    const voiceSeed = await getOrCreateVoiceSeed(domainId, domain.domain, domain.niche || 'general');
 
     // Use contentType already set by outline stage if valid; fall back to re-detection
     const contentType = isContentType(article.contentType)
@@ -784,10 +796,10 @@ export async function processDraftJob(jobId: string): Promise<void> {
         contentMarkdown: sanitizedDraft,
         wordCount,
         generationPasses: 1,
-    }).where(eq(articles.id, job.articleId!));
+    }).where(eq(articles.id, job.articleId ?? (() => { throw new Error(`Job ${job.id} requires articleId`); })()));
 
     await createRevision({
-        articleId: job.articleId!,
+        articleId: job.articleId ?? (() => { throw new Error(`Job ${job.id} requires articleId`); })(),
         title: article.title,
         contentMarkdown: sanitizedDraft,
         metaDescription: article.metaDescription,
@@ -818,23 +830,27 @@ export async function processHumanizeJob(jobId: string): Promise<void> {
     const ai = getAIClient();
     const jobs = await db.select().from(contentQueue).where(eq(contentQueue.id, jobId)).limit(1);
     const job = jobs[0];
+    if (!job.domainId) {
+        throw new Error(`Job ${job.id} (humanize) requires domainId but it is null`);
+    }
+    const domainId = job.domainId;
 
     // Load draft from DB
-    const articleRecord = await db.select().from(articles).where(eq(articles.id, job.articleId!)).limit(1);
+    const articleRecord = await db.select().from(articles).where(eq(articles.id, job.articleId ?? (() => { throw new Error(`Job ${job.id} requires articleId`); })())).limit(1);
     const draft = articleRecord[0]?.contentMarkdown;
 
     if (!draft) throw new Error('Draft not found for humanization');
 
     // Fetch domain for voice seed persistence
-    const domainRecord = await db.select().from(domains).where(eq(domains.id, job.domainId!)).limit(1);
+    const domainRecord = await db.select().from(domains).where(eq(domains.id, domainId)).limit(1);
     const domain = domainRecord[0];
 
     if (!domain) {
-        console.error(`[Pipeline] Domain lookup failed for jobId: ${job.id}, domainId: ${job.domainId}`);
-        throw new Error(`Domain lookup failed for article: ${job.domainId}`);
+        console.error(`[Pipeline] Domain lookup failed for jobId: ${job.id}, domainId: ${domainId}`);
+        throw new Error(`Domain lookup failed for article: ${domainId}`);
     }
 
-    const voiceSeed = await getOrCreateVoiceSeed(job.domainId!, domain.domain, domain.niche || 'general');
+    const voiceSeed = await getOrCreateVoiceSeed(domainId, domain.domain, domain.niche || 'general');
 
     const differentiationInstructions = buildDomainDifferentiationInstructions({
         domainId: domain.id,
@@ -883,10 +899,10 @@ You MUST aggressively rewrite to evade AI detection. Apply ALL of these techniqu
         contentMarkdown: sanitizedHumanized,
         wordCount,
         generationPasses: 2,
-    }).where(eq(articles.id, job.articleId!));
+    }).where(eq(articles.id, job.articleId ?? (() => { throw new Error(`Job ${job.id} requires articleId`); })()));
 
     await createRevision({
-        articleId: job.articleId!,
+        articleId: job.articleId ?? (() => { throw new Error(`Job ${job.id} requires articleId`); })(),
         title: articleRecord[0]?.title || null,
         contentMarkdown: sanitizedHumanized,
         metaDescription: articleRecord[0]?.metaDescription || null,
@@ -922,24 +938,28 @@ export async function processSeoOptimizeJob(jobId: string): Promise<void> {
     const ai = getAIClient();
     const jobs = await db.select().from(contentQueue).where(eq(contentQueue.id, jobId)).limit(1);
     const job = jobs[0];
+    if (!job.domainId) {
+        throw new Error(`Job ${job.id} (seo) requires domainId but it is null`);
+    }
+    const domainId = job.domainId;
 
     // Get article for content and keyword info
-    const articleRecord = await db.select().from(articles).where(eq(articles.id, job.articleId!)).limit(1);
+    const articleRecord = await db.select().from(articles).where(eq(articles.id, job.articleId ?? (() => { throw new Error(`Job ${job.id} requires articleId`); })())).limit(1);
     const article = articleRecord[0];
 
     if (!article.contentMarkdown) throw new Error('Content not found for SEO optimization');
 
-    const domainRecord = await db.select().from(domains).where(eq(domains.id, job.domainId!)).limit(1);
+    const domainRecord = await db.select().from(domains).where(eq(domains.id, domainId)).limit(1);
     const domain = domainRecord[0];
     if (!domain) {
-        throw new Error(`Domain not found: ${job.domainId}`);
+        throw new Error(`Domain not found: ${domainId}`);
     }
 
     let availableLinks: Array<{ title: string; url: string }> = [];
     if (isInternalLinkingEnabled()) {
         const publishedArticles = await db.select({ title: articles.title, slug: articles.slug })
             .from(articles)
-            .where(and(eq(articles.domainId, job.domainId!), eq(articles.status, 'published')))
+            .where(and(eq(articles.domainId, domainId), eq(articles.status, 'published')))
             .limit(20);
 
         availableLinks = publishedArticles.map((a) => ({
@@ -980,10 +1000,10 @@ export async function processSeoOptimizeJob(jobId: string): Promise<void> {
         contentMarkdown: sanitizedSeoContent,
         wordCount,
         generationPasses: 3,
-    }).where(eq(articles.id, job.articleId!));
+    }).where(eq(articles.id, job.articleId ?? (() => { throw new Error(`Job ${job.id} requires articleId`); })()));
 
     await createRevision({
-        articleId: job.articleId!,
+        articleId: job.articleId ?? (() => { throw new Error(`Job ${job.id} requires articleId`); })(),
         title: article.title,
         contentMarkdown: sanitizedSeoContent,
         metaDescription: article.metaDescription,
@@ -1104,7 +1124,7 @@ export async function processResolveExternalLinksJob(jobId: string): Promise<voi
     const jobs = await db.select().from(contentQueue).where(eq(contentQueue.id, jobId)).limit(1);
     const job = jobs[0];
 
-    const articleRecord = await db.select().from(articles).where(eq(articles.id, job.articleId!)).limit(1);
+    const articleRecord = await db.select().from(articles).where(eq(articles.id, job.articleId ?? (() => { throw new Error(`Job ${job.id} requires articleId`); })())).limit(1);
     const article = articleRecord[0];
     if (!article.contentMarkdown) throw new Error('Content not found for external link resolution');
 
@@ -1175,10 +1195,10 @@ export async function processResolveExternalLinksJob(jobId: string): Promise<voi
     await db.update(articles).set({
         contentMarkdown: updatedMarkdown,
         externalLinks: externalLinksPayload.length > 0 ? externalLinksPayload : null,
-    }).where(eq(articles.id, job.articleId!));
+    }).where(eq(articles.id, job.articleId ?? (() => { throw new Error(`Job ${job.id} requires articleId`); })()));
 
     await createRevision({
-        articleId: job.articleId!,
+        articleId: job.articleId ?? (() => { throw new Error(`Job ${job.id} requires articleId`); })(),
         title: article.title,
         contentMarkdown: updatedMarkdown,
         metaDescription: article.metaDescription,
@@ -1190,13 +1210,13 @@ export async function processResolveExternalLinksJob(jobId: string): Promise<voi
         try {
             await db.delete(citations).where(
                 and(
-                    eq(citations.articleId, job.articleId!),
+                    eq(citations.articleId, job.articleId ?? (() => { throw new Error(`Job ${job.id} requires articleId`); })()),
                     ilike(citations.notes, 'Auto-resolved external link%'),
                 ),
             );
             await db.insert(citations).values(
                 resolvedLinks.map((l, i) => ({
-                    articleId: job.articleId!,
+                    articleId: job.articleId ?? (() => { throw new Error(`Job ${job.id} requires articleId`); })(),
                     claimText: l.anchorText,
                     sourceUrl: l.url,
                     sourceTitle: l.sourceTitle,
@@ -1246,7 +1266,7 @@ export async function processAiDetectionCheckJob(jobId: string): Promise<void> {
     const jobs = await db.select().from(contentQueue).where(eq(contentQueue.id, jobId)).limit(1);
     const job = jobs[0];
 
-    const articleRecord = await db.select().from(articles).where(eq(articles.id, job.articleId!)).limit(1);
+    const articleRecord = await db.select().from(articles).where(eq(articles.id, job.articleId ?? (() => { throw new Error(`Job ${job.id} requires articleId`); })())).limit(1);
     const article = articleRecord[0];
 
     if (!article?.contentMarkdown) {
@@ -1368,9 +1388,13 @@ export async function processMetaJob(jobId: string): Promise<void> {
     const ai = getAIClient();
     const jobs = await db.select().from(contentQueue).where(eq(contentQueue.id, jobId)).limit(1);
     const job = jobs[0];
+    if (!job.domainId) {
+        throw new Error(`Job ${job.id} (meta) requires domainId but it is null`);
+    }
+    const domainId = job.domainId;
 
     // Load content
-    const articleRecord = await db.select().from(articles).where(eq(articles.id, job.articleId!)).limit(1);
+    const articleRecord = await db.select().from(articles).where(eq(articles.id, job.articleId ?? (() => { throw new Error(`Job ${job.id} requires articleId`); })())).limit(1);
     const article = articleRecord[0];
 
     if (!article.contentMarkdown) throw new Error('Content not found for meta generation');
@@ -1403,7 +1427,7 @@ export async function processMetaJob(jobId: string): Promise<void> {
     }
 
     // Classify YMYL level
-    const domainForYmyl = await db.select({ niche: domains.niche }).from(domains).where(eq(domains.id, job.domainId!)).limit(1);
+    const domainForYmyl = await db.select({ niche: domains.niche }).from(domains).where(eq(domains.id, domainId)).limit(1);
     const ymylLevel = classifyYmylLevel({
         niche: domainForYmyl[0]?.niche,
         keyword: article.targetKeyword,
@@ -1456,7 +1480,7 @@ export async function processMetaJob(jobId: string): Promise<void> {
         lastReviewedAt: nextStatus === 'approved' ? reviewTimestamp : null,
         generationPasses: nextGenerationPasses,
         ymylLevel,
-    }).where(eq(articles.id, job.articleId!));
+    }).where(eq(articles.id, job.articleId ?? (() => { throw new Error(`Job ${job.id} requires articleId`); })()));
 
     const revisionSummary = autoApprovedByAi
         ? 'Meta generated, approved by AI reviewer fallback (Opus)'
@@ -1465,7 +1489,7 @@ export async function processMetaJob(jobId: string): Promise<void> {
             : 'Meta generated, moved to review';
 
     await createRevision({
-        articleId: job.articleId!,
+        articleId: job.articleId ?? (() => { throw new Error(`Job ${job.id} requires articleId`); })(),
         title: response.data.title,
         contentMarkdown: normalizedContent,
         metaDescription: response.data.metaDescription,
@@ -1547,7 +1571,7 @@ export async function processResearchJob(jobId: string): Promise<void> {
 
     await db.update(articles).set({
         researchData: response.data,
-    }).where(eq(articles.id, job.articleId!));
+    }).where(eq(articles.id, job.articleId ?? (() => { throw new Error(`Job ${job.id} requires articleId`); })()));
 
     // Accumulate knowledge into the domain's persistent knowledge base
     if (job.domainId && job.articleId) {
@@ -1639,12 +1663,16 @@ export async function processKeywordResearchJob(jobId: string): Promise<void> {
     const ai = getAIClient();
     const jobs = await db.select().from(contentQueue).where(eq(contentQueue.id, jobId)).limit(1);
     const job = jobs[0];
+    if (!job.domainId) {
+        throw new Error(`Job ${job.id} (keyword_research) requires domainId but it is null`);
+    }
+    const domainId = job.domainId;
     const payload = job.payload as { domain: string; niche: string | null; subNiche: string | null; targetCount: number };
 
-    const domainRecord = await db.select().from(domains).where(eq(domains.id, job.domainId!)).limit(1);
+    const domainRecord = await db.select().from(domains).where(eq(domains.id, domainId)).limit(1);
     const domain = domainRecord[0];
     if (!domain) {
-        throw new Error(`Domain not found: ${job.domainId}`);
+        throw new Error(`Domain not found: ${domainId}`);
     }
 
     const existingIntentRows = await db
@@ -1653,7 +1681,7 @@ export async function processKeywordResearchJob(jobId: string): Promise<void> {
             count: sql<number>`count(*)::int`,
         })
         .from(keywords)
-        .where(eq(keywords.domainId, job.domainId!))
+        .where(eq(keywords.domainId, domainId))
         .groupBy(keywords.intent);
 
     const intentCounts = existingIntentRows.reduce<Record<string, number>>((acc, row) => {
@@ -1705,7 +1733,7 @@ export async function processKeywordResearchJob(jobId: string): Promise<void> {
             : 'informational';
 
         await db.insert(keywords).values({
-            domainId: job.domainId!,
+            domainId: domainId,
             keyword: kw.keyword,
             monthlyVolume: kw.searchVolume,
             difficulty: kw.difficulty,
@@ -1742,7 +1770,7 @@ export async function processKeywordResearchJob(jobId: string): Promise<void> {
         for (let attempt = 0; attempt < 25; attempt += 1) {
             const slug = attempt === 0 ? baseSlug : `${baseSlug}-${attempt + 1}`;
             const created = await db.insert(articles).values({
-                domainId: job.domainId!,
+                domainId: domainId,
                 targetKeyword: bestKeyword.keyword,
                 secondaryKeywords: bestKeyword.variations,
                 title: bestKeyword.keyword,
@@ -1762,7 +1790,7 @@ export async function processKeywordResearchJob(jobId: string): Promise<void> {
 
         await enqueueContentJob({
             jobType: 'research', // Now using proper Research stage
-            domainId: job.domainId!,
+            domainId: domainId,
             articleId: newArticleId,
             payload: {
                 targetKeyword: bestKeyword.keyword,

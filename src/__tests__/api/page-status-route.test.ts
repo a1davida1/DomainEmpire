@@ -47,6 +47,7 @@ vi.mock('@/lib/db/schema', () => ({
     reviewEvents: {
         $inferInsert: { eventType: 'string' },
     },
+    PAGE_STATUSES: ['draft', 'review', 'approved', 'published', 'archived'],
 }));
 
 const { POST } = await import('@/app/api/pages/[id]/status/route');

@@ -12,7 +12,7 @@ import { deriveAllowedParentOrigin } from '@/lib/deploy/allowed-parent-origin';
 import type { BlockEnvelope } from '@/lib/deploy/blocks/schemas';
 // Side-effect: register interactive block renderers
 import '@/lib/deploy/blocks/renderers-interactive';
-import { generateV2GlobalStyles } from '@/lib/deploy/themes';
+import { generateV2GlobalStyles, resolveV2DomainTheme, type BrandingOverrides } from '@/lib/deploy/themes';
 import { extractSiteTitle } from '@/lib/deploy/templates/shared';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -77,8 +77,16 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
 
     const domain = domainRows[0];
     const siteTitle = extractSiteTitle(domain.domain);
-    const themeName = pageDef.theme || 'clean';
-    const skinName = pageDef.skin || domain.skin || 'slate';
+    const v2Resolution = resolveV2DomainTheme({
+        theme: pageDef.theme,
+        skin: pageDef.skin || domain.skin,
+        themeStyle: domain.themeStyle,
+        vertical: domain.vertical,
+        niche: domain.niche,
+    });
+    const themeName = v2Resolution.theme;
+    const skinName = v2Resolution.skin;
+    const branding: BrandingOverrides | undefined = (domain.contentConfig as Record<string, unknown> | null)?.branding as BrandingOverrides | undefined;
 
     const ctx: RenderContext = {
         domain: domain.domain,
@@ -96,7 +104,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
 
     const blocks = (pageDef.blocks || []) as BlockEnvelope[];
     const html = assemblePageFromBlocks(blocks, ctx);
-    const css = generateV2GlobalStyles(themeName, skinName, domain.siteTemplate || 'authority', domain.domain);
+    const css = generateV2GlobalStyles(themeName, skinName, domain.siteTemplate || 'authority', domain.domain, branding);
 
     // Build route → preview URL map so internal links work in preview
     const siblingPages = await db.select({ id: pageDefinitions.id, route: pageDefinitions.route })
@@ -198,8 +206,16 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
 
     const domain = domainRows[0];
     const siteTitle = extractSiteTitle(domain.domain);
-    const themeName = pageDef.theme || 'clean';
-    const skinName = pageDef.skin || domain.skin || 'slate';
+    const v2Res = resolveV2DomainTheme({
+        theme: pageDef.theme,
+        skin: pageDef.skin || domain.skin,
+        themeStyle: domain.themeStyle,
+        vertical: domain.vertical,
+        niche: domain.niche,
+    });
+    const themeName = v2Res.theme;
+    const skinName = v2Res.skin;
+    const postBranding: BrandingOverrides | undefined = (domain.contentConfig as Record<string, unknown> | null)?.branding as BrandingOverrides | undefined;
 
     const ctx: RenderContext = {
         domain: domain.domain,
@@ -217,7 +233,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
 
     const blocks = (pageDef.blocks || []) as BlockEnvelope[];
     const html = assemblePageFromBlocks(blocks, ctx);
-    const css = generateV2GlobalStyles(themeName, skinName, domain.siteTemplate || 'authority', domain.domain);
+    const css = generateV2GlobalStyles(themeName, skinName, domain.siteTemplate || 'authority', domain.domain, postBranding);
 
     const previewHtml = html.replace(
         '<link rel="stylesheet" href="/styles.css">',

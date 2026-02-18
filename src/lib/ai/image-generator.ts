@@ -10,35 +10,47 @@
  */
 
 import { getAIClient } from './openrouter';
+import { skins } from '@/lib/deploy/themes/skin-definitions';
 
 // ============================================================
-// Prompt templates
+// Prompt templates — incorporate skin palette for visual cohesion
 // ============================================================
 
-function heroPrompt(niche: string, domain: string): string {
-    return `Generate a high-quality, professional hero background image for a ${niche} website (${domain}).
-
-Requirements:
-- Photographic style, modern and clean
-- Suitable as a website hero banner background (wide aspect ratio, ~1440x600)
-- Subtle, not too busy — text will be overlaid on top
-- Professional color palette appropriate for the ${niche} industry
-- No text, logos, or watermarks in the image
-- Slight gradient or vignette toward edges for text readability
-- High production value, looks like a premium stock photo`;
+function skinColorHints(skinName: string): string {
+    const skin = skins[skinName];
+    if (!skin) return '';
+    return `Color direction: accent tones near ${skin.accent}, primary tones near ${skin.primary}. The overall palette should harmonize with these colors without being monochromatic.`;
 }
 
-function articlePrompt(title: string, niche: string): string {
+function heroPrompt(niche: string, domain: string, skinName?: string): string {
+    const colorHint = skinName ? skinColorHints(skinName) : '';
+    const siteName = domain.replace(/\.[a-z]{2,}$/i, '').replace(/[-_]/g, ' ');
+    return `Generate a high-quality, professional hero background image for a ${niche} website called "${siteName}".
+
+Requirements:
+- Photographic or high-end illustrative style, modern and polished
+- Wide aspect ratio (1440x600), suitable as a full-width website hero banner
+- Subtle and atmospheric — white or light text will be overlaid, so keep the center-left area less busy
+- Professional color palette appropriate for the ${niche} industry
+${colorHint ? `- ${colorHint}\n` : ''}- Absolutely no text, logos, watermarks, or UI elements in the image
+- Slight gradient or vignette toward edges for improved text readability
+- Should feel like a premium editorial photograph or high-end stock image
+- Unique composition — avoid generic handshake photos, stock smile faces, or cliché imagery
+- Think: the kind of hero image you'd see on a well-funded startup's landing page`;
+}
+
+function articlePrompt(title: string, niche: string, skinName?: string): string {
+    const colorHint = skinName ? skinColorHints(skinName) : '';
     return `Generate a high-quality featured image for a ${niche} article titled: "${title}"
 
 Requirements:
-- Photographic style, editorially appropriate for the topic
-- Wide aspect ratio (~1200x630), suitable as an article header image
-- Visually represents the topic without being literal or clichéd
-- Professional, modern aesthetic
-- No text, logos, or watermarks in the image
-- Clean composition with good lighting
-- Looks like a premium editorial photograph`;
+- Photographic or editorial illustration style
+- Wide aspect ratio (1200x630), suitable as an article header / social sharing image
+- Visually represents the topic conceptually without being overly literal
+- Professional, modern aesthetic with good composition and lighting
+${colorHint ? `- ${colorHint}\n` : ''}- Absolutely no text, logos, watermarks, or UI elements in the image
+- Clean composition with balanced negative space
+- Should feel distinctive — avoid the top-5 most common stock image concepts for this topic`;
 }
 
 // ============================================================
@@ -61,26 +73,35 @@ export async function generateHeroImageAI(
     niche: string,
     domain: string,
     quality: 'fast' | 'quality' = 'fast',
+    skin?: string,
 ): Promise<AIImageResult | null> {
     const client = getAIClient();
-    const task = quality === 'quality' ? 'imageGenQuality' : 'imageGenFast';
-    const prompt = heroPrompt(niche, domain);
+    const tasks: Array<'imageGenFast' | 'imageGenQuality'> = quality === 'quality'
+        ? ['imageGenQuality', 'imageGenFast']
+        : ['imageGenFast', 'imageGenQuality'];
+    const prompt = heroPrompt(niche, domain, skin);
 
-    const result = await client.generateImage(task, prompt, {
-        width: 1440,
-        height: 600,
-        temperature: 0.9,
-    });
-
-    if (!result) return null;
-
-    return {
-        base64: result.base64,
-        mimeType: result.mimeType,
-        model: result.model,
-        cost: result.cost,
-        durationMs: result.durationMs,
-    };
+    for (const task of tasks) {
+        try {
+            const result = await client.generateImage(task, prompt, {
+                width: 1440,
+                height: 600,
+                temperature: 0.9,
+            });
+            if (result) {
+                return {
+                    base64: result.base64,
+                    mimeType: result.mimeType,
+                    model: result.model,
+                    cost: result.cost,
+                    durationMs: result.durationMs,
+                };
+            }
+        } catch {
+            console.warn(`[ImageGen] Hero attempt with ${task} failed, trying next model`);
+        }
+    }
+    return null;
 }
 
 /**
@@ -91,26 +112,35 @@ export async function generateArticleImageAI(
     title: string,
     niche: string,
     quality: 'fast' | 'quality' = 'fast',
+    skin?: string,
 ): Promise<AIImageResult | null> {
     const client = getAIClient();
-    const task = quality === 'quality' ? 'imageGenQuality' : 'imageGenFast';
-    const prompt = articlePrompt(title, niche);
+    const tasks: Array<'imageGenFast' | 'imageGenQuality'> = quality === 'quality'
+        ? ['imageGenQuality', 'imageGenFast']
+        : ['imageGenFast', 'imageGenQuality'];
+    const prompt = articlePrompt(title, niche, skin);
 
-    const result = await client.generateImage(task, prompt, {
-        width: 1200,
-        height: 630,
-        temperature: 0.85,
-    });
-
-    if (!result) return null;
-
-    return {
-        base64: result.base64,
-        mimeType: result.mimeType,
-        model: result.model,
-        cost: result.cost,
-        durationMs: result.durationMs,
-    };
+    for (const task of tasks) {
+        try {
+            const result = await client.generateImage(task, prompt, {
+                width: 1200,
+                height: 630,
+                temperature: 0.85,
+            });
+            if (result) {
+                return {
+                    base64: result.base64,
+                    mimeType: result.mimeType,
+                    model: result.model,
+                    cost: result.cost,
+                    durationMs: result.durationMs,
+                };
+            }
+        } catch {
+            console.warn(`[ImageGen] Article "${title}" attempt with ${task} failed, trying next model`);
+        }
+    }
+    return null;
 }
 
 // ============================================================
@@ -149,7 +179,7 @@ export async function generateAISiteImages(
 
     // 1. Hero background (one per site)
     console.log(`[ImageGen] Generating hero image for ${opts.domain}...`);
-    const hero = await generateHeroImageAI(opts.niche, opts.domain, opts.quality);
+    const hero = await generateHeroImageAI(opts.niche, opts.domain, opts.quality, opts.skin);
     if (hero) {
         images.push({
             path: 'images/hero-bg.png',
@@ -169,7 +199,7 @@ export async function generateAISiteImages(
         const slug = page.route.replace(/^\//, '').replace(/\/$/, '').replace(/\//g, '-');
         console.log(`[ImageGen] Generating featured image for /${slug}...`);
 
-        const article = await generateArticleImageAI(page.title, opts.niche, opts.quality);
+        const article = await generateArticleImageAI(page.title, opts.niche, opts.quality, opts.skin);
         if (article) {
             images.push({
                 path: `images/featured/${slug}.png`,

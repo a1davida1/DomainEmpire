@@ -1,4 +1,4 @@
-import { pgTable, text, integer, bigint, real, boolean, timestamp, jsonb, uuid, index, uniqueIndex, unique, check, numeric, type AnyPgColumn } from 'drizzle-orm/pg-core';
+import { pgTable, pgEnum, text, integer, bigint, real, boolean, timestamp, jsonb, uuid, index, uniqueIndex, unique, check, numeric, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 export { sql };
 
@@ -119,6 +119,13 @@ export const domains = pgTable('domains', {
 // ===========================================
 // PAGE DEFINITIONS: Block-based page composition for Template System v2
 // ===========================================
+export const pageStatusEnum = pgEnum('page_status', [
+    'draft', 'review', 'approved', 'published', 'archived',
+]);
+
+export const PAGE_STATUSES = pageStatusEnum.enumValues;
+export type PageStatus = (typeof PAGE_STATUSES)[number];
+
 export const pageDefinitions = pgTable('page_definitions', {
     id: uuid('id').primaryKey().defaultRandom(),
     domainId: uuid('domain_id').notNull().references(() => domains.id, { onDelete: 'cascade' }),
@@ -135,7 +142,7 @@ export const pageDefinitions = pgTable('page_definitions', {
         config?: Record<string, unknown>;
     }>>().notNull().default([]),
     isPublished: boolean('is_published').notNull().default(false),
-    status: text('status').notNull().default('draft'),
+    status: pageStatusEnum('status').notNull().default('draft'),
     reviewRequestedAt: timestamp('review_requested_at'),
     lastReviewedAt: timestamp('last_reviewed_at'),
     lastReviewedBy: uuid('last_reviewed_by').references(() => users.id, { onDelete: 'set null' }),
@@ -148,7 +155,6 @@ export const pageDefinitions = pgTable('page_definitions', {
     publishedIdx: index('page_def_published_idx').on(t.isPublished),
     statusIdx: index('page_def_status_idx').on(t.status),
 }));
-
 export type PageDefinition = typeof pageDefinitions.$inferSelect;
 export type NewPageDefinition = typeof pageDefinitions.$inferInsert;
 

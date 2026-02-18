@@ -25,12 +25,14 @@ import { skins } from '../themes/skin-definitions';
 // Safe now because renderers-interactive imports from renderer-registry, not assembler.
 import './renderers-interactive';
 
-// Google Fonts URLs for each theme
+import { resolveTypographyPreset } from '../themes/typography-presets';
+
+// Fallback Google Fonts URLs for each base theme (used when no domain context)
 const THEME_FONT_URLS: Record<string, string> = {
     clean: 'https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap',
     editorial: 'https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,400;0,700;0,900;1,400&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap',
     bold: 'https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&family=Inter:wght@400;500;600;700&display=swap',
-    minimal: '', // uses system fonts
+    minimal: '',
 };
 
 // ============================================================
@@ -417,6 +419,91 @@ function buildStructuredData(ctx: RenderContext, canonicalUrl: string, blocks: B
         }
     }
 
+    // Organization + WebSite schema on homepage
+    if (isHomepage) {
+        const orgSchema = {
+            '@context': 'https://schema.org',
+            '@type': 'Organization',
+            name: ctx.siteTitle,
+            url: `https://${ctx.domain}`,
+            logo: `https://${ctx.domain}/favicon.svg`,
+        };
+        scripts.push(`<script type="application/ld+json">${JSON.stringify(orgSchema)}</script>`);
+
+        const webSiteSchema = {
+            '@context': 'https://schema.org',
+            '@type': 'WebSite',
+            name: ctx.siteTitle,
+            url: `https://${ctx.domain}`,
+            potentialAction: {
+                '@type': 'SearchAction',
+                target: `https://${ctx.domain}/?q={search_term_string}`,
+                'query-input': 'required name=search_term_string',
+            },
+        };
+        scripts.push(`<script type="application/ld+json">${JSON.stringify(webSiteSchema)}</script>`);
+    }
+
+    // ItemList schema for RankingList blocks (enables numbered list rich results)
+    const rankingBlocks = blocks.filter(b => b.type === 'RankingList');
+    for (const rb of rankingBlocks) {
+        const c = (rb.content || {}) as Record<string, unknown>;
+        const items = (c.items as Array<{ name: string; rank?: number; url?: string; description?: string }>) || [];
+        if (items.length > 0) {
+            const itemListSchema = {
+                '@context': 'https://schema.org',
+                '@type': 'ItemList',
+                name: (c.title as string) || ctx.pageTitle || 'Rankings',
+                itemListElement: items.map((item, i) => ({
+                    '@type': 'ListItem',
+                    position: item.rank ?? i + 1,
+                    name: item.name,
+                    ...(item.url ? { url: item.url } : {}),
+                    ...(item.description ? { description: item.description } : {}),
+                })),
+            };
+            scripts.push(`<script type="application/ld+json">${JSON.stringify(itemListSchema)}</script>`);
+        }
+    }
+
+    // SoftwareApplication schema for Calculator/Wizard blocks
+    const toolBlocks = blocks.filter(b => b.type === 'QuoteCalculator' || b.type === 'CostBreakdown' || b.type === 'Wizard');
+    if (toolBlocks.length > 0) {
+        const toolSchema = {
+            '@context': 'https://schema.org',
+            '@type': 'SoftwareApplication',
+            name: ctx.pageTitle || `${ctx.siteTitle} Calculator`,
+            url: canonicalUrl,
+            applicationCategory: 'FinanceApplication',
+            operatingSystem: 'Web',
+            offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+        };
+        scripts.push(`<script type="application/ld+json">${JSON.stringify(toolSchema)}</script>`);
+    }
+
+    // Review/AggregateRating for ProsConsCard blocks
+    const reviewBlocks = blocks.filter(b => b.type === 'ProsConsCard');
+    for (const rb of reviewBlocks) {
+        const c = (rb.content || {}) as Record<string, unknown>;
+        const name = (c.name as string) || '';
+        const rating = c.rating as number | undefined;
+        if (name && typeof rating === 'number') {
+            const reviewSchema = {
+                '@context': 'https://schema.org',
+                '@type': 'Review',
+                itemReviewed: { '@type': 'Thing', name },
+                reviewRating: {
+                    '@type': 'Rating',
+                    ratingValue: rating,
+                    bestRating: 10,
+                    worstRating: 1,
+                },
+                author: { '@type': 'Organization', name: ctx.domain },
+            };
+            scripts.push(`<script type="application/ld+json">${JSON.stringify(reviewSchema)}</script>`);
+        }
+    }
+
     return scripts.join('\n  ');
 }
 
@@ -553,7 +640,8 @@ export function assemblePageFromBlocks(
         ? `${escapeHtml(title)} | ${escapeHtml(ctx.siteTitle)}`
         : escapeHtml(title);
 
-    const fontUrl = THEME_FONT_URLS[ctx.theme] ?? THEME_FONT_URLS.clean;
+    const typoPreset = resolveTypographyPreset(ctx.domain);
+    const fontUrl = typoPreset.googleFontsUrl || THEME_FONT_URLS[ctx.theme] || THEME_FONT_URLS.clean;
     const fontLinks = fontUrl
         ? `<link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -596,6 +684,11 @@ ${contentBlocks.join('\n')}
 ${postGridBlocks.join('\n')}
 ${relatedHtml}`;
 
+    const hasHero = blocks.some(b => b.type === 'Hero');
+    const heroPreload = hasHero
+        ? `<link rel="preload" href="/images/hero-bg.svg" as="image" fetchpriority="high">`
+        : '';
+
     const raw = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -607,9 +700,12 @@ ${relatedHtml}`;
   <meta name="theme-color" content="${(skins[ctx.skin] || skins.slate).accent}">
   <title>${fullTitle}</title>
   <link rel="canonical" href="${escapeAttr(canonicalUrl)}">
+  <link rel="alternate" hreflang="en" href="${escapeAttr(canonicalUrl)}">
+  <link rel="alternate" hreflang="x-default" href="${escapeAttr(canonicalUrl)}">
   <link rel="preload" href="${escapeAttr(cssHref)}" as="style">
   <link rel="dns-prefetch" href="https://fonts.googleapis.com">
   <link rel="dns-prefetch" href="https://fonts.gstatic.com">
+  ${heroPreload}
   ${ogMeta}
   ${fontLinks}
   <link rel="stylesheet" href="${escapeAttr(cssHref)}">

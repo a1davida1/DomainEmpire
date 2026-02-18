@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthUser } from '@/lib/auth';
 import { db, pageDefinitions } from '@/lib/db';
 import { eq } from 'drizzle-orm';
-import { reviewEvents } from '@/lib/db/schema';
+import { reviewEvents, PAGE_STATUSES, type PageStatus } from '@/lib/db/schema';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -10,7 +10,8 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
     draft: ['review'],
     review: ['approved', 'draft'],
     approved: ['published', 'review', 'draft'],
-    published: ['draft'],
+    published: ['draft', 'archived'],
+    archived: ['draft'],
 };
 
 const ROLE_HIERARCHY: Record<string, number> = {
@@ -48,6 +49,9 @@ export async function POST(
     const newStatus = body.status as string;
     if (!newStatus || typeof newStatus !== 'string') {
         return NextResponse.json({ error: 'status is required' }, { status: 400 });
+    }
+    if (!(PAGE_STATUSES as readonly string[]).includes(newStatus)) {
+        return NextResponse.json({ error: `Invalid status '${newStatus}'. Valid: ${PAGE_STATUSES.join(', ')}` }, { status: 400 });
     }
 
     const rows = await db.select().from(pageDefinitions).where(eq(pageDefinitions.id, id)).limit(1);
@@ -92,7 +96,7 @@ export async function POST(
     if (newStatus === 'published') {
         updates.isPublished = true;
     }
-    if (newStatus === 'draft') {
+    if (newStatus === 'draft' || newStatus === 'archived') {
         updates.isPublished = false;
     }
 
@@ -101,6 +105,7 @@ export async function POST(
         review: 'submitted_for_review',
         approved: 'approved',
         published: 'published',
+        archived: 'archived',
         draft: currentStatus === 'published' ? 'reverted' : 'rejected',
     };
 

@@ -38,9 +38,11 @@ import { generateInteractiveMapPage } from './templates/interactive-map';
 import { generateEmbedPage } from './templates/embed';
 import { generateGeoBlocks } from './templates/geo-content';
 import { generateScrollCta } from './templates/scroll-cta';
-import { generateGlobalStyles, generateV2GlobalStyles, resolveDomainTheme } from './themes';
+import { generateGlobalStyles, generateV2GlobalStyles, resolveDomainTheme, resolveV2DomainTheme, type BrandingOverrides } from './themes';
 import { generateSiteImages, getOgImagePath } from './image-gen';
 import { generateAISiteImages } from '@/lib/ai/image-generator';
+import { generateFavicon } from './favicon-gen';
+import { applyInternalLinking } from './internal-linker';
 import { getLayoutConfig, type LayoutConfig } from './layouts';
 import { pageDefinitions } from '@/lib/db';
 import { assemblePageFromBlocks, type RenderContext } from './blocks/assembler';
@@ -237,10 +239,18 @@ async function generateV2SiteFiles(
 ): Promise<GeneratedFile[]> {
     const siteTitle = extractSiteTitle(domain.domain);
 
-    // Use the first page definition's theme/skin as the site-wide default
+    // Resolve v2 theme + skin with policy-based fallback for vertical/niche
     const homeDef = pageDefs.find(p => p.route === '/') || pageDefs[0];
-    const themeName = homeDef.theme || 'clean';
-    const skinName = homeDef.skin || domain.skin || 'slate';
+    const v2Resolution = resolveV2DomainTheme({
+        theme: homeDef.theme,
+        skin: homeDef.skin || domain.skin,
+        themeStyle: domain.themeStyle,
+        vertical: domain.vertical,
+        niche: domain.niche,
+    });
+    const themeName = v2Resolution.theme;
+    const skinName = v2Resolution.skin;
+    const branding: BrandingOverrides | undefined = domain.contentConfig?.branding;
 
     const files: GeneratedFile[] = [];
     const niche = domain.niche || 'general';
@@ -325,7 +335,7 @@ async function generateV2SiteFiles(
     // Generate CSS with v2 token system
     files.push({
         path: 'styles.css',
-        content: generateV2GlobalStyles(themeName, skinName, domain.siteTemplate || 'authority', domain.domain),
+        content: generateV2GlobalStyles(themeName, skinName, domain.siteTemplate || 'authority', domain.domain, branding),
     });
 
     // Auto-inject trust pages from disclosure config.
@@ -352,13 +362,16 @@ async function generateV2SiteFiles(
     files.push(
         { path: '404.html', content: generateV2ErrorPage(siteTitle, themeName, skinName) },
         { path: 'robots.txt', content: `User-agent: *\nAllow: /\nSitemap: https://${domain.domain}/sitemap.xml` },
-        { path: 'favicon.svg', content: generateNicheFavicon(niche) },
+        { path: 'favicon.svg', content: generateFavicon({ domain: domain.domain, skin: skinName, niche }) },
         { path: '_headers', content: generateHeaders() },
         {
             path: 'sitemap.xml',
             content: generateV2Sitemap(domain.domain, pageDefs, trustPageSlugs),
         },
     );
+
+    // Post-assembly internal linking pass
+    applyInternalLinking(files, pageList, domain.domain);
 
     return files;
 }
@@ -677,8 +690,9 @@ function generate404Page(pageShell: PageShell): string {
 function generateHeaders(): string {
     return `/*
   X-Content-Type-Options: nosniff
-  X-Frame-Options: DENY
+  X-Frame-Options: SAMEORIGIN
   Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: interest-cohort=()
 
 /styles.css
   Cache-Control: public, max-age=31536000, immutable
@@ -686,8 +700,11 @@ function generateHeaders(): string {
 /favicon.svg
   Cache-Control: public, max-age=604800
 
-/**/*.html
-  Cache-Control: public, max-age=3600
+/images/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/*.html
+  Cache-Control: public, max-age=3600, s-maxage=86400
 
 /robots.txt
   Cache-Control: public, max-age=86400
@@ -700,18 +717,34 @@ function generateHeaders(): string {
 /** Generate sitemap for v2 block-based sites using actual page definition routes */
 function generateV2Sitemap(domain: string, pageDefs: PageDefinitionRow[], trustPageSlugs: string[] = []): string {
     const now = new Date().toISOString().split('T')[0];
+
+    function routePriority(route: string): string {
+        if (route === '/') return '1.0';
+        const depth = route.replace(/^\//, '').split('/').length;
+        if (depth === 1) return '0.8';
+        return '0.6';
+    }
+
+    function routeChangeFreq(route: string): string {
+        if (route === '/') return 'weekly';
+        if (route.includes('calculator') || route.includes('compare')) return 'monthly';
+        if (route.includes('privacy') || route.includes('terms')) return 'yearly';
+        return 'weekly';
+    }
+
     const urls = pageDefs.map(pd => {
         const route = pd.route === '/' ? '' : pd.route.replace(/^\//, '');
         const loc = route ? `https://${domain}/${route}` : `https://${domain}/`;
         const lastmod = pd.updatedAt ? new Date(pd.updatedAt).toISOString().split('T')[0] : now;
-        const priority = pd.route === '/' ? '1.0' : '0.8';
-        return `<url><loc>${loc}</loc><lastmod>${lastmod}</lastmod><changefreq>weekly</changefreq><priority>${priority}</priority></url>`;
+        const slug = pd.route === '/' ? 'home' : pd.route.replace(/^\//, '').replace(/\/$/, '').replace(/\//g, '-');
+        const ogImage = `https://${domain}/images/og/${slug}.svg`;
+        return `<url><loc>${loc}</loc><lastmod>${lastmod}</lastmod><changefreq>${routeChangeFreq(pd.route)}</changefreq><priority>${routePriority(pd.route)}</priority><image:image><image:loc>${ogImage}</image:loc></image:image></url>`;
     });
     for (const slug of trustPageSlugs) {
-        urls.push(`<url><loc>https://${domain}/${slug}</loc><lastmod>${now}</lastmod><changefreq>monthly</changefreq><priority>0.5</priority></url>`);
+        urls.push(`<url><loc>https://${domain}/${slug}</loc><lastmod>${now}</lastmod><changefreq>yearly</changefreq><priority>0.4</priority></url>`);
     }
     return `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
 ${urls.join('\n')}
 </urlset>`;
 }

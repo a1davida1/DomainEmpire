@@ -198,10 +198,13 @@ export class OpenRouterClient {
     private baseDelay = 1000;
 
     constructor(apiKey?: string) {
-        this.apiKey = apiKey || process.env.OPENROUTER_API_KEY || '';
-        if (!this.apiKey) {
-            throw new Error('OPENROUTER_API_KEY is required');
+        const key = (apiKey || process.env.OPENROUTER_API_KEY || '').trim();
+        if (!key) {
+            throw new Error(
+                'OPENROUTER_API_KEY is required. Set it in your .env.local file or pass it to the constructor.',
+            );
         }
+        this.apiKey = key;
     }
 
     /**

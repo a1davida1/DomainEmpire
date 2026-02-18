@@ -9,7 +9,7 @@ import {
 import type { BlockEnvelope } from '@/lib/deploy/blocks/schemas';
 // Side-effect: register interactive block renderers
 import '@/lib/deploy/blocks/renderers-interactive';
-import { generateV2GlobalStyles } from '@/lib/deploy/themes';
+import { generateV2GlobalStyles, resolveV2DomainTheme, type BrandingOverrides } from '@/lib/deploy/themes';
 import { extractSiteTitle, escapeHtml } from '@/lib/deploy/templates/shared';
 
 interface PageProps {
@@ -150,9 +150,10 @@ function renderV2Preview(
     skinName: string,
     siteTemplate: string,
     domainName: string,
+    branding?: BrandingOverrides,
 ): string {
     const html = assemblePageFromBlocks(blocks, ctx);
-    const css = generateV2GlobalStyles(themeName, skinName, siteTemplate, domainName);
+    const css = generateV2GlobalStyles(themeName, skinName, siteTemplate, domainName, branding);
     return html.replace(
         '<link rel="stylesheet" href="/styles.css">',
         `<style>${css}</style>`,
@@ -207,8 +208,16 @@ export async function GET(request: NextRequest, { params }: PageProps) {
         .limit(1);
     const homepageDef = homepageDefs[0] ?? null;
 
-    const themeName = homepageDef?.theme || 'clean';
-    const skinName = homepageDef?.skin || (domainRow as Record<string, unknown>).skin as string || 'slate';
+    const v2Resolution = resolveV2DomainTheme({
+        theme: homepageDef?.theme,
+        skin: homepageDef?.skin || (domainRow as Record<string, unknown>).skin as string,
+        themeStyle: domainRow.themeStyle,
+        vertical: domainRow.vertical,
+        niche: domainRow.niche,
+    });
+    const themeName = v2Resolution.theme;
+    const skinName = v2Resolution.skin;
+    const domainBranding: BrandingOverrides | undefined = (domainRow.contentConfig as Record<string, unknown> | null)?.branding as BrandingOverrides | undefined;
 
     if (articleId) {
         // ---------- Single article preview ----------
@@ -253,7 +262,7 @@ export async function GET(request: NextRequest, { params }: PageProps) {
             bodyScripts: '',
         };
 
-        const previewHtml = renderV2Preview(blocks, ctx, themeName, skinName, siteTemplate, domainRow.domain);
+        const previewHtml = renderV2Preview(blocks, ctx, themeName, skinName, siteTemplate, domainRow.domain, domainBranding);
         return new NextResponse(previewHtml, { headers: previewHtmlHeaders() });
     }
 
@@ -280,6 +289,6 @@ export async function GET(request: NextRequest, { params }: PageProps) {
         bodyScripts: '',
     };
 
-    const previewHtml = renderV2Preview(blocks, ctx, themeName, skinName, siteTemplate, domainRow.domain);
+    const previewHtml = renderV2Preview(blocks, ctx, themeName, skinName, siteTemplate, domainRow.domain, domainBranding);
     return new NextResponse(previewHtml, { headers: previewHtmlHeaders() });
 }

@@ -209,8 +209,39 @@ function darken(hex: string, amount: number): string {
     return `#${dr.toString(16).padStart(2, '0')}${dg.toString(16).padStart(2, '0')}${db.toString(16).padStart(2, '0')}`;
 }
 
-export function generateSkinCSS(skinName: string): string {
-    const skin = skins[skinName] ?? skins.slate;
+/** Optional branding overrides from contentConfig.branding */
+export interface BrandingOverrides {
+    primaryColor?: string;
+    secondaryColor?: string;
+    accentColor?: string;
+}
+
+const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+function isValidHex(c?: string): c is string {
+    return Boolean(c && HEX_RE.test(c));
+}
+
+export function generateSkinCSS(skinName: string, branding?: BrandingOverrides): string {
+    const skin = { ...(skins[skinName] ?? skins.slate) };
+
+    // Apply branding overrides — only valid hex colors are accepted
+    if (branding) {
+        if (isValidHex(branding.primaryColor)) {
+            skin.primary = branding.primaryColor;
+            skin.primaryHover = darken(branding.primaryColor, 0.15);
+            skin.footerBg = branding.primaryColor;
+            skin.badgeBg = branding.primaryColor;
+            skin.linkColor = branding.primaryColor;
+            skin.linkHover = darken(branding.primaryColor, 0.15);
+        }
+        if (isValidHex(branding.secondaryColor)) {
+            skin.secondary = branding.secondaryColor;
+        }
+        if (isValidHex(branding.accentColor)) {
+            skin.accent = branding.accentColor;
+        }
+    }
+
     return `:root{
   --color-primary:${skin.primary};
   --color-primary-hover:${skin.primaryHover};
@@ -299,3 +330,86 @@ export const V1_THEME_TO_SKIN: Record<string, string> = {
     'enthusiast-community': 'ocean',
     'clean-general': 'slate',
 };
+
+// ============================================================
+// Per-domain hue shifting — makes accent colors unique
+// ============================================================
+
+function hexToHsl(hex: string): [number, number, number] | null {
+    const h = hex.replace('#', '');
+    if (h.length !== 6) return null;
+    const r = parseInt(h.slice(0, 2), 16) / 255;
+    const g = parseInt(h.slice(2, 4), 16) / 255;
+    const b = parseInt(h.slice(4, 6), 16) / 255;
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const l = (max + min) / 2;
+    if (max === min) return [0, 0, l];
+    const d = max - min;
+    const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    let hue = 0;
+    if (max === r) hue = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+    else if (max === g) hue = ((b - r) / d + 2) / 6;
+    else hue = ((r - g) / d + 4) / 6;
+    return [hue * 360, s, l];
+}
+
+function hslToHex(h: number, s: number, l: number): string {
+    const hue = ((h % 360) + 360) % 360;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
+    const m = l - c / 2;
+    let r = 0, g = 0, b = 0;
+    if (hue < 60) { r = c; g = x; }
+    else if (hue < 120) { r = x; g = c; }
+    else if (hue < 180) { g = c; b = x; }
+    else if (hue < 240) { g = x; b = c; }
+    else if (hue < 300) { r = x; b = c; }
+    else { r = c; b = x; }
+    const toHex = (v: number) => Math.round((v + m) * 255).toString(16).padStart(2, '0');
+    return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+function shiftHex(hex: string, degrees: number): string {
+    const hsl = hexToHsl(hex);
+    if (!hsl) return hex;
+    return hslToHex(hsl[0] + degrees, hsl[1], hsl[2]);
+}
+
+/**
+ * Generate CSS overrides that shift accent-related colors by a domain-specific
+ * hue offset. Structural colors (bg, text, border) stay untouched for readability.
+ */
+export function generateHueShiftCSS(skinName: string, hueDegrees: number): string {
+    if (hueDegrees === 0) return '';
+    const skin = skins[skinName] ?? skins.slate;
+    const shifted = {
+        accent: shiftHex(skin.accent, hueDegrees),
+        linkColor: shiftHex(skin.linkColor, hueDegrees),
+        linkHover: shiftHex(skin.linkHover, hueDegrees),
+        primary: shiftHex(skin.primary, hueDegrees),
+        primaryHover: shiftHex(skin.primaryHover, hueDegrees),
+        badgeBg: shiftHex(skin.badgeBg, hueDegrees),
+    };
+    return `:root{
+  --color-accent:${shifted.accent};
+  --color-link:${shifted.linkColor};
+  --color-link-hover:${shifted.linkHover};
+  --color-primary:${shifted.primary};
+  --color-primary-hover:${shifted.primaryHover};
+  --color-badge-bg:${shifted.badgeBg};
+  --color-accent-hover:${darken(shifted.accent, 0.15)};
+}`;
+}
+
+/**
+ * Compute a deterministic hue offset (0-359) from a domain name.
+ * Uses the same MD5-hash approach as visual-identity.ts.
+ */
+export function domainHueOffset(domain: string): number {
+    let hash = 5381;
+    for (let i = 0; i < domain.length; i++) {
+        hash = ((hash << 5) + hash + domain.charCodeAt(i)) | 0;
+    }
+    return Math.abs(hash) % 360;
+}
