@@ -63,7 +63,7 @@ function injectLinks(
     html: string,
     currentRoute: string,
     pages: PageInfo[],
-    domain: string,
+    _domain: string,
 ): string {
     const otherPages = pages.filter(p => p.route !== currentRoute);
     if (otherPages.length === 0) return html;

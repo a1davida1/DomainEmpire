@@ -62,7 +62,7 @@ export function generateModifierCSS(mods: ThemeModifiers): string {
             parts.push(`.calc-form,.lead-form,.wizard-step,.faq-item,.comparison-verdict,.review-card,.pricing-card,.testimonial-card{box-shadow:none;border:2px solid var(--color-border-strong)}`);
             break;
         case 'glass':
-            parts.push(`.calc-form,.lead-form,.wizard-step,.faq-item,.comparison-verdict,.review-card,.pricing-card,.testimonial-card{box-shadow:0 4px 16px rgba(0,0,0,0.06);border:1px solid rgba(255,255,255,0.2);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);background:rgba(var(--color-bg-surface-rgb,248,250,252),0.85)}`);
+            parts.push(`.calc-form,.lead-form,.wizard-step,.faq-item,.comparison-verdict,.review-card,.pricing-card,.testimonial-card{box-shadow:0 4px 16px rgba(0,0,0,0.06);border:1px solid rgba(255,255,255,0.2);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);background:color-mix(in srgb,var(--color-bg-surface) 85%,transparent)}`);
             break;
     }
 
@@ -73,8 +73,8 @@ export function generateModifierCSS(mods: ThemeModifiers): string {
             parts.push(`article h3{padding-bottom:0.35rem;border-bottom:2px solid var(--color-border)}`);
             break;
         case 'highlight':
-            parts.push(`article h2{background:linear-gradient(to top,rgba(var(--color-accent-rgb,37,99,235),0.12) 40%,transparent 40%);display:inline;padding:0 0.15em}`);
-            parts.push(`article h3{background:linear-gradient(to top,rgba(var(--color-accent-rgb,37,99,235),0.08) 35%,transparent 35%);display:inline;padding:0 0.1em}`);
+            parts.push(`article h2{background:linear-gradient(to top,color-mix(in srgb,var(--color-accent) 12%,transparent) 40%,transparent 40%);display:inline;padding:0 0.15em}`);
+            parts.push(`article h3{background:linear-gradient(to top,color-mix(in srgb,var(--color-accent) 8%,transparent) 35%,transparent 35%);display:inline;padding:0 0.1em}`);
             break;
     }
 

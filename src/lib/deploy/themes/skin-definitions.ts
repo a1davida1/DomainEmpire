@@ -404,7 +404,7 @@ export function generateHueShiftCSS(skinName: string, hueDegrees: number): strin
 
 /**
  * Compute a deterministic hue offset (0-359) from a domain name.
- * Uses the same MD5-hash approach as visual-identity.ts.
+ * Uses DJB2 hash for speed (no crypto import needed).
  */
 export function domainHueOffset(domain: string): number {
     let hash = 5381;

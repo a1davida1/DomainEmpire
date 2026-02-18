@@ -204,6 +204,87 @@ describe('POST /api/pages/[id]/status', () => {
         expect(updates.isPublished).toBe(false);
     });
 
+    it('allows published → archived for admin', async () => {
+        mockGetAuthUser.mockResolvedValue({ id: 'u1', role: 'admin' });
+        mockSelectWhere
+            .mockResolvedValueOnce([{ id: VALID_UUID, status: 'published' }])
+            .mockResolvedValueOnce([{ id: VALID_UUID, status: 'archived', isPublished: false }]);
+        mockTxUpdateSet.mockResolvedValue(undefined);
+        mockTxInsertValues.mockResolvedValue(undefined);
+
+        const res = await POST(makeRequest({ status: 'archived' }), {
+            params: Promise.resolve({ id: VALID_UUID }),
+        });
+        expect(res.status).toBe(200);
+        const updates = mockTxUpdateSet.mock.calls[0][0];
+        expect(updates.status).toBe('archived');
+        expect(updates.isPublished).toBe(false);
+    });
+
+    it('allows archived → draft for editor', async () => {
+        mockGetAuthUser.mockResolvedValue({ id: 'u1', role: 'editor' });
+        mockSelectWhere
+            .mockResolvedValueOnce([{ id: VALID_UUID, status: 'archived' }])
+            .mockResolvedValueOnce([{ id: VALID_UUID, status: 'draft' }]);
+        mockTxUpdateSet.mockResolvedValue(undefined);
+        mockTxInsertValues.mockResolvedValue(undefined);
+
+        const res = await POST(makeRequest({ status: 'draft' }), {
+            params: Promise.resolve({ id: VALID_UUID }),
+        });
+        expect(res.status).toBe(200);
+        const updates = mockTxUpdateSet.mock.calls[0][0];
+        expect(updates.status).toBe('draft');
+    });
+
+    it('rejects archived → published (must go through draft first)', async () => {
+        mockGetAuthUser.mockResolvedValue({ id: 'u1', role: 'admin' });
+        mockSelectWhere.mockResolvedValue([{ id: VALID_UUID, status: 'archived' }]);
+        const res = await POST(makeRequest({ status: 'published' }), {
+            params: Promise.resolve({ id: VALID_UUID }),
+        });
+        expect(res.status).toBe(400);
+        const body = await res.json();
+        expect(body.error).toContain('Cannot transition');
+    });
+
+    it('rejects draft → archived (must be published first)', async () => {
+        mockGetAuthUser.mockResolvedValue({ id: 'u1', role: 'admin' });
+        mockSelectWhere.mockResolvedValue([{ id: VALID_UUID, status: 'draft' }]);
+        const res = await POST(makeRequest({ status: 'archived' }), {
+            params: Promise.resolve({ id: VALID_UUID }),
+        });
+        expect(res.status).toBe(400);
+        const body = await res.json();
+        expect(body.error).toContain('Cannot transition');
+    });
+
+    it('records archived event type for published → archived', async () => {
+        mockGetAuthUser.mockResolvedValue({ id: 'u1', role: 'admin' });
+        mockSelectWhere
+            .mockResolvedValueOnce([{ id: VALID_UUID, status: 'published' }])
+            .mockResolvedValueOnce([{ id: VALID_UUID, status: 'archived' }]);
+        mockTxUpdateSet.mockResolvedValue(undefined);
+        mockTxInsertValues.mockResolvedValue(undefined);
+
+        await POST(makeRequest({ status: 'archived' }), {
+            params: Promise.resolve({ id: VALID_UUID }),
+        });
+
+        const eventValues = mockTxInsertValues.mock.calls[0][0];
+        expect(eventValues.eventType).toBe('archived');
+    });
+
+    it('rejects unknown status values', async () => {
+        mockGetAuthUser.mockResolvedValue({ id: 'u1', role: 'admin' });
+        const res = await POST(makeRequest({ status: 'deleted' }), {
+            params: Promise.resolve({ id: VALID_UUID }),
+        });
+        expect(res.status).toBe(400);
+        const body = await res.json();
+        expect(body.error).toContain('Invalid status');
+    });
+
     it('inserts review event in transaction', async () => {
         mockGetAuthUser.mockResolvedValue({ id: 'u1', role: 'reviewer' });
         mockSelectWhere

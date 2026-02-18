@@ -9,6 +9,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, formSubmissions, domains } from '@/lib/db';
 import { eq } from 'drizzle-orm';
+import { createRateLimiter } from '@/lib/rate-limit';
+
+const collectLimiter = createRateLimiter('collect', {
+    maxRequests: 10,
+    windowMs: 60_000,
+});
 
 const VALID_FORM_TYPES = ['lead', 'newsletter', 'contact', 'calculator', 'quiz', 'survey'] as const;
 type FormType = (typeof VALID_FORM_TYPES)[number];
@@ -72,6 +78,17 @@ export async function POST(request: NextRequest) {
     const origin = request.headers.get('origin');
     const headers = corsHeaders(origin);
 
+    const clientIp = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+        || request.headers.get('x-real-ip')
+        || 'unknown';
+    const rl = collectLimiter(clientIp);
+    if (!rl.allowed) {
+        return NextResponse.json(
+            { error: 'Too many submissions. Please try again later.' },
+            { status: 429, headers: { ...headers, ...rl.headers } },
+        );
+    }
+
     try {
         const body = await request.json().catch(() => null);
         if (!body || typeof body !== 'object') {
@@ -124,14 +141,10 @@ export async function POST(request: NextRequest) {
             // Non-fatal — proceed without domainId
         }
 
-        // Extract request metadata
-        const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-            || request.headers.get('x-real-ip')
-            || null;
         const userAgent = sanitizeString(request.headers.get('user-agent'), 500);
         const referrer = sanitizeString(request.headers.get('referer'), 2000);
+        const ip = clientIp === 'unknown' ? null : clientIp;
 
-        // Insert submission
         await db.insert(formSubmissions).values({
             domainId,
             domain,

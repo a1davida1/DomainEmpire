@@ -1,6 +1,6 @@
 {
-  "id": "bf8b32a6-f11c-4fb3-b314-c6f8a4c5cf18",
-  "prevId": "5d573c91-7c1f-4932-9c87-0558eefb972c",
+  "id": "ec7b9e4b-fe28-4ded-a18b-c71886ad8912",
+  "prevId": "6bd5f636-e538-4ecb-ba0f-358fcfdfef4a",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -4857,6 +4857,18 @@
         },
         "sub_niche": {
           "name": "sub_niche",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "wave": {
+          "name": "wave",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cluster": {
+          "name": "cluster",
           "type": "text",
           "primaryKey": false,
           "notNull": false

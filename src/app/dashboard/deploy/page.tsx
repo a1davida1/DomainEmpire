@@ -65,8 +65,30 @@ export default function DeployPage() {
     const [jobs, setJobs] = useState<DeployJob[]>([]);
     const [loading, setLoading] = useState(true);
     const [deploying, setDeploying] = useState(false);
+    const [reassigning, setReassigning] = useState(false);
     const [expandedJob, setExpandedJob] = useState<string | null>(null);
     const { toast } = useToast();
+
+    const handleReassignThemes = useCallback(async () => {
+        setReassigning(true);
+        try {
+            const res = await fetch('/api/domains/reassign-themes', { method: 'POST' });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Failed');
+            toast({
+                title: 'Themes Reassigned',
+                description: `Updated ${data.updated} domain(s), ${data.skipped} without pages.`,
+            });
+        } catch (err) {
+            toast({
+                title: 'Reassignment Failed',
+                description: err instanceof Error ? err.message : 'Unknown error',
+                variant: 'destructive',
+            });
+        } finally {
+            setReassigning(false);
+        }
+    }, [toast]);
 
     const runDeployBatch = useCallback(async (
         batch: string[],
@@ -278,10 +300,16 @@ export default function DeployPage() {
                         <p className="text-sm text-muted-foreground">Manage and monitor site deployments</p>
                     </div>
                 </div>
-                <Button size="sm" onClick={handleDeployAll} disabled={deploying || domains.length === 0}>
-                    {deploying ? <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Rocket className="mr-1.5 h-3.5 w-3.5" />}
-                    Deploy All Active ({domains.length})
-                </Button>
+                <div className="flex gap-2">
+                    <Button size="sm" variant="outline" onClick={handleReassignThemes} disabled={reassigning}>
+                        {reassigning ? <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
+                        Reassign Themes
+                    </Button>
+                    <Button size="sm" onClick={handleDeployAll} disabled={deploying || domains.length === 0}>
+                        {deploying ? <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Rocket className="mr-1.5 h-3.5 w-3.5" />}
+                        Deploy All Active ({domains.length})
+                    </Button>
+                </div>
             </div>
 
             {/* Summary Stats */}

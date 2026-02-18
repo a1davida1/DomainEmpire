@@ -47,7 +47,7 @@ export function generateDividerCSS(style: DividerStyle): string {
         return `section + section{border-top:2px solid var(--color-border);margin-top:0;padding-top:var(--section-padding)}`;
     }
 
-    const color = '%23e2e8f0'; // url-encoded #e2e8f0 — light gray, overridden by dark mode
+    const color = '#e2e8f0'; // encodeURIComponent in svgDataUri handles the # → %23 conversion
     let svg: string;
     let height = '48px';
 

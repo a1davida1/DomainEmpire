@@ -29,6 +29,10 @@ export const domains = pgTable('domains', {
     niche: text('niche'),
     subNiche: text('sub_niche'),
 
+    // Deployment wave & domain cluster
+    wave: integer('wave'),
+    cluster: text('cluster'),
+
     // Redirect config
     redirectTargetId: uuid('redirect_target_id').references((): AnyPgColumn => domains.id, { onDelete: 'set null' }),
 

@@ -533,10 +533,9 @@ export async function directUploadDeploy(
         }
 
         for (const [hash, file] of filesByHash) {
-            // Create Blob from content (auto-handles Buffer/string)
             const content = typeof file.content === 'string' ? file.content : new Uint8Array(file.content);
             const blob = new Blob([content]);
-            formData.append('files', blob, hash);
+            formData.append(hash, blob, hash);
         }
 
         // POST to Direct Upload endpoint

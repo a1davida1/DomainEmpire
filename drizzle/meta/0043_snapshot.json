@@ -1,5 +1,5 @@
 {
-  "id": "5d573c91-7c1f-4932-9c87-0558eefb972c",
+  "id": "6bd5f636-e538-4ecb-ba0f-358fcfdfef4a",
   "prevId": "915f15b8-57b4-4cb0-9152-f646aff8cb8b",
   "version": "7",
   "dialect": "postgresql",
@@ -8272,7 +8272,8 @@
         },
         "status": {
           "name": "status",
-          "type": "text",
+          "type": "page_status",
+          "typeSchema": "public",
           "primaryKey": false,
           "notNull": true,
           "default": "'draft'"
@@ -8416,12 +8417,7 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {
-        "page_def_status_chk": {
-          "name": "page_def_status_chk",
-          "value": "\"page_definitions\".\"status\" IN ('draft', 'review', 'approved', 'published')"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.page_variants": {
@@ -11007,7 +11003,19 @@
       "isRLSEnabled": false
     }
   },
-  "enums": {},
+  "enums": {
+    "public.page_status": {
+      "name": "page_status",
+      "schema": "public",
+      "values": [
+        "draft",
+        "review",
+        "approved",
+        "published",
+        "archived"
+      ]
+    }
+  },
   "schemas": {},
   "sequences": {},
   "roles": {},

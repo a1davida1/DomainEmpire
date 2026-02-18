@@ -564,5 +564,61 @@ export function extractSiteTitle(domain: string): string {
         const lastDot = domain.lastIndexOf('.');
         sld = lastDot > 0 ? domain.slice(0, lastDot) : domain;
     }
-    return sld.replaceAll('-', ' ').replaceAll(/\b\w/g, c => c.toUpperCase());
+    let spaced = sld.replaceAll('-', ' ').replaceAll('_', ' ');
+    if (!spaced.includes(' ')) {
+        spaced = spaced
+            .replace(/([a-z])([A-Z])/g, '$1 $2')
+            .replace(/([a-z])(\d)/g, '$1 $2')
+            .replace(/(\d)([a-z])/gi, '$1 $2');
+        if (!spaced.includes(' ')) {
+            const DICTIONARY = ['bathroom','renovation','cost','costs','kitchen','remodel','price','pool',
+                'installation','hvac','unit','install','replacement','credit','card','payoff',
+                'insurance','compare','auto','pet','switch','medicare','whole','term','extended',
+                'warranty','guide','ozempic','mounjaro','semaglutide','wegovy','therapy','braces',
+                'ivf','lasik','surgery','prescription','ketamine','refinance','loan','student',
+                'equity','salary','roth','debt','free','tax','filing','deduction','claim',
+                'home','value','rent','realtor','fsbo','trade','diminished','divorce','disability',
+                'injury','eviction','contractor','scam','prenup','supplement','beauty','sneaker',
+                'valuation','tool','pokemon','appraisal','wedding','planner','zone','fine','tuning',
+                'dropship','kingdom','clearance','catcher','travel','deal','spot','forum',
+                'affordable','generic','weight','loss','findings','analysis','today','facts',
+                'settled','refurbished','cancel','subscription','negotiate','bill','amazon','costco',
+                'arm','fixed','worth','fix','quit','rent','own','research','creator','onlyfans',
+                'fansly','review','shadow','ban','reddit','promotion','chatting','expert',
+                'car','accident','my','file','suit','settle','total','not','should','what','how',
+                'much','do','have','case','is','or','vs','the','a','an','of','for','your','can',
+                'am','being','scammed','big','independent','no','printer',
+                'calc','in','i','eliquis','alternative','payday','pro','renting','waste',
+                'write','off','wash','sale','rule','afford','check','ev','battery',
+                'suv','sedan','debates','over','counter','safe','take',
+                'rate','timing','pay','save','best','state','find',
+                'thot','pilot','info','help','hero','offers','service',
+                'fan','vue','shadowban'];
+            DICTIONARY.sort((a, b) => b.length - a.length);
+            const lower = spaced.toLowerCase();
+            const breaks = new Set<number>();
+            let pos = 0;
+            while (pos < lower.length) {
+                let matched = false;
+                for (const word of DICTIONARY) {
+                    if (lower.startsWith(word, pos)) {
+                        breaks.add(pos);
+                        pos += word.length;
+                        matched = true;
+                        break;
+                    }
+                }
+                if (!matched) pos++;
+            }
+            if (breaks.size > 1) {
+                let result = '';
+                for (let i = 0; i < spaced.length; i++) {
+                    if (breaks.has(i) && i > 0) result += ' ';
+                    result += spaced[i];
+                }
+                spaced = result;
+            }
+        }
+    }
+    return spaced.replaceAll(/\b\w/g, c => c.toUpperCase()).trim();
 }
