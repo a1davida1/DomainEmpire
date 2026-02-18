@@ -1554,6 +1554,14 @@ export async function processMetaJob(jobId: string): Promise<void> {
 export async function processResearchJob(jobId: string): Promise<void> {
     const jobs = await db.select().from(contentQueue).where(eq(contentQueue.id, jobId)).limit(1);
     const job = jobs[0];
+    if (!job.domainId) {
+        throw new Error(`Job ${job.id} (research) requires domainId but it is null`);
+    }
+    if (!job.articleId) {
+        throw new Error(`Job ${job.id} (research) requires articleId but it is null`);
+    }
+    const domainId = job.domainId;
+    const articleId = job.articleId;
     const payload = job.payload as {
         targetKeyword: string;
         domainName: string;
@@ -1582,36 +1590,32 @@ export async function processResearchJob(jobId: string): Promise<void> {
     });
 
     await logApiCallWithPrompt({
-        articleId: job.articleId,
-        domainId: job.domainId,
+        articleId,
+        domainId,
         stage: 'research',
         prompt: researchPrompt,
         usage: response,
     });
 
-    if (job.articleId) {
-        await db.update(articles).set({
-            researchData: response.data,
-        }).where(eq(articles.id, job.articleId));
-    }
+    await db.update(articles).set({
+        researchData: response.data,
+    }).where(eq(articles.id, articleId));
 
     // Accumulate knowledge into the domain's persistent knowledge base
-    if (job.domainId && job.articleId) {
-        try {
-            const upserted = await extractKnowledgeFromResearch(job.domainId, job.articleId, response.data);
-            if (upserted > 0) {
-                console.log(`[Pipeline] Extracted ${upserted} knowledge entries for domain ${job.domainId}`);
-            }
-        } catch (err) {
-            console.warn('[Pipeline] Non-fatal: failed to extract domain knowledge:', err);
+    try {
+        const upserted = await extractKnowledgeFromResearch(domainId, articleId, response.data);
+        if (upserted > 0) {
+            console.log(`[Pipeline] Extracted ${upserted} knowledge entries for domain ${domainId}`);
         }
+    } catch (err) {
+        console.warn('[Pipeline] Non-fatal: failed to extract domain knowledge:', err);
     }
 
     // Queue next step BEFORE marking current complete — prevents article orphan
     await enqueueContentJob({
         jobType: 'generate_outline',
-        domainId: job.domainId,
-        articleId: job.articleId,
+        domainId,
+        articleId,
         priority: job.priority,
         payload: {
             targetKeyword: payload.targetKeyword,

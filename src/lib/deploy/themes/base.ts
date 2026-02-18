@@ -228,8 +228,8 @@ section.is-visible .review-card:nth-child(4),section.is-visible .pricing-card:nt
 
 /* === Sidebar + Main Layout Grid === */
 .page-layout{display:grid;grid-template-columns:260px 1fr;gap:2.5rem;align-items:start}
-.page-sidebar{position:sticky;top:5rem;max-height:calc(100vh - 6rem);overflow-y:auto}
-.page-main{min-width:0}
+.page-sidebar{position:sticky;top:5rem;max-height:calc(100vh - 6rem);overflow-y:auto;flex-shrink:0}
+.page-main{min-width:0;overflow:hidden}
 @media(max-width:900px){
   .page-layout{grid-template-columns:1fr;gap:1.5rem}
   .page-sidebar{position:static;max-height:none;order:-1}

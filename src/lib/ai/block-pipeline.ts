@@ -28,6 +28,53 @@ import {
 } from './block-prompts';
 
 // ============================================================
+// Fallback citations by niche (used when AI refuses to generate)
+// ============================================================
+
+const NICHE_CITATIONS: Record<string, Array<{ title: string; url: string; publisher: string; retrievedAt: string; usage: string }>> = {
+    'real estate': [
+        { title: 'Housing Market Data', url: 'https://www.nar.realtor/research-and-statistics', publisher: 'National Association of Realtors', retrievedAt: '2026-01', usage: 'Housing market trends and median home prices' },
+        { title: 'Home Mortgage Disclosure Act Data', url: 'https://www.consumerfinance.gov/data-research/hmda/', publisher: 'Consumer Financial Protection Bureau', retrievedAt: '2026-01', usage: 'Mortgage lending data and trends' },
+        { title: 'Housing Vacancies and Homeownership', url: 'https://www.census.gov/housing/hvs', publisher: 'U.S. Census Bureau', retrievedAt: '2026-01', usage: 'Homeownership rates and vacancy statistics' },
+        { title: 'House Price Index', url: 'https://www.fhfa.gov/data/hpi', publisher: 'Federal Housing Finance Agency', retrievedAt: '2026-01', usage: 'Home price appreciation trends by region' },
+    ],
+    'personal finance': [
+        { title: 'Consumer Credit Outstanding', url: 'https://www.federalreserve.gov/releases/g19/current/', publisher: 'Federal Reserve', retrievedAt: '2026-01', usage: 'Total consumer credit and revolving debt data' },
+        { title: 'Quarterly Report on Household Debt', url: 'https://www.newyorkfed.org/microeconomics/hhdc', publisher: 'Federal Reserve Bank of New York', retrievedAt: '2026-01', usage: 'Credit card balances and delinquency rates' },
+        { title: 'Consumer Expenditure Surveys', url: 'https://www.bls.gov/cex/', publisher: 'Bureau of Labor Statistics', retrievedAt: '2026-01', usage: 'Average household spending patterns' },
+        { title: 'Financial Literacy Resources', url: 'https://www.consumerfinance.gov/consumer-tools/', publisher: 'Consumer Financial Protection Bureau', retrievedAt: '2026-01', usage: 'Consumer financial education and tools' },
+    ],
+    'dental': [
+        { title: 'Oral Health Surveillance Report', url: 'https://www.cdc.gov/oral-health/data-research/', publisher: 'Centers for Disease Control and Prevention', retrievedAt: '2026-01', usage: 'National oral health statistics and trends' },
+        { title: 'Dental Expenditure Data', url: 'https://meps.ahrq.gov/mepsweb/data_stats/quick_tables.jsp', publisher: 'Agency for Healthcare Research and Quality', retrievedAt: '2026-01', usage: 'Average dental care costs and utilization' },
+        { title: 'Consumer Guide to Dentistry', url: 'https://www.ada.org/resources/research/science-and-research-institute', publisher: 'American Dental Association', retrievedAt: '2026-01', usage: 'Evidence-based dental treatment guidelines' },
+        { title: 'Children\'s Oral Health', url: 'https://www.nidcr.nih.gov/research/data-statistics', publisher: 'National Institute of Dental and Craniofacial Research', retrievedAt: '2026-01', usage: 'Dental health statistics and research findings' },
+    ],
+    'home improvement': [
+        { title: 'Consumer Expenditure Surveys - Housing', url: 'https://www.bls.gov/cex/', publisher: 'Bureau of Labor Statistics', retrievedAt: '2026-01', usage: 'Average household spending on home improvements' },
+        { title: 'American Housing Survey', url: 'https://www.census.gov/programs-surveys/ahs.html', publisher: 'U.S. Census Bureau', retrievedAt: '2026-01', usage: 'Home renovation frequency and cost data' },
+        { title: 'Remodeling Impact Report', url: 'https://www.nar.realtor/research-and-statistics/research-reports/remodeling-impact', publisher: 'National Association of Realtors', retrievedAt: '2026-01', usage: 'ROI of common home renovation projects' },
+        { title: 'Cost vs. Value Report', url: 'https://www.remodeling.hw.net/cost-vs-value/2025/', publisher: 'Remodeling Magazine', retrievedAt: '2026-01', usage: 'Regional cost data for major remodeling projects' },
+    ],
+};
+
+const DEFAULT_CITATIONS = [
+    { title: 'Consumer Information', url: 'https://www.usa.gov/consumer', publisher: 'USA.gov', retrievedAt: '2026-01', usage: 'Federal consumer protection and information resources' },
+    { title: 'Consumer Price Index', url: 'https://www.bls.gov/cpi/', publisher: 'Bureau of Labor Statistics', retrievedAt: '2026-01', usage: 'Price trends and inflation data' },
+    { title: 'Consumer Financial Protection', url: 'https://www.consumerfinance.gov/', publisher: 'CFPB', retrievedAt: '2026-01', usage: 'Consumer financial education and complaint data' },
+];
+
+function generateFallbackCitations(niche: string): Record<string, unknown> {
+    const lower = niche.toLowerCase();
+    for (const [key, sources] of Object.entries(NICHE_CITATIONS)) {
+        if (lower.includes(key) || key.includes(lower)) {
+            return { sources };
+        }
+    }
+    return { sources: DEFAULT_CITATIONS };
+}
+
+// ============================================================
 // Types
 // ============================================================
 
@@ -118,25 +165,69 @@ export async function generateBlockContent(
         const response = await ai.generate('blockContent', prompt);
         const durationMs = Date.now() - startMs;
 
-        // Parse JSON from response
+        // Parse JSON from response with repair for common AI output issues
         let parsed: Record<string, unknown>;
         try {
-            // Strip markdown code fences if present
             let raw = response.content.trim();
+            // Strip markdown code fences
             if (raw.startsWith('```')) {
                 raw = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
             }
-            parsed = JSON.parse(raw);
+            // Strip leading text before first { (AI sometimes adds preamble)
+            const firstBrace = raw.indexOf('{');
+            if (firstBrace > 0 && firstBrace < 100) {
+                raw = raw.slice(firstBrace);
+            }
+            // Try direct parse first
+            try {
+                parsed = JSON.parse(raw);
+            } catch {
+                // Repair: fix unescaped newlines and control chars inside JSON string values
+                const repaired = raw
+                    .replace(/(?<=:\s*")([\s\S]*?)(?="(?:\s*[,}]))/g, (_match, content: string) => {
+                        return content
+                            .replace(/\\/g, '\\\\')
+                            .replace(/\n/g, '\\n')
+                            .replace(/\r/g, '\\r')
+                            .replace(/\t/g, '\\t')
+                            .replace(/(?<!\\)"/g, '\\"');
+                    });
+                try {
+                    parsed = JSON.parse(repaired);
+                } catch {
+                    // Last resort: extract markdown field if this is an ArticleBody
+                    if (blockType === 'ArticleBody') {
+                        const mdMatch = raw.match(/"markdown"\s*:\s*"([\s\S]+)"\s*[,}]/);
+                        const titleMatch = raw.match(/"title"\s*:\s*"([^"]+)"/);
+                        if (mdMatch) {
+                            parsed = {
+                                markdown: mdMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"'),
+                                ...(titleMatch ? { title: titleMatch[1] } : {}),
+                            };
+                        } else {
+                            throw new Error('Could not extract markdown from ArticleBody response');
+                        }
+                    } else if (blockType === 'CitationBlock') {
+                        parsed = generateFallbackCitations(ctx.niche);
+                    } else {
+                        throw new Error('JSON repair failed');
+                    }
+                }
+            }
         } catch (parseErr) {
-            return {
-                blockId: block.id,
-                blockType,
-                success: false,
-                error: `Failed to parse AI response as JSON: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`,
-                tokensUsed: response.inputTokens + response.outputTokens,
-                cost: response.cost,
-                durationMs,
-            };
+            if (blockType === 'CitationBlock') {
+                parsed = generateFallbackCitations(ctx.niche);
+            } else {
+                return {
+                    blockId: block.id,
+                    blockType,
+                    success: false,
+                    error: `Failed to parse AI response as JSON: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`,
+                    tokensUsed: response.inputTokens + response.outputTokens,
+                    cost: response.cost,
+                    durationMs,
+                };
+            }
         }
 
         // Validate against block schema

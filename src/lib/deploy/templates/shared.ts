@@ -588,7 +588,7 @@ export function extractSiteTitle(domain: string): string {
                 'car','accident','my','file','suit','settle','total','not','should','what','how',
                 'much','do','have','case','is','or','vs','the','a','an','of','for','your','can',
                 'am','being','scammed','big','independent','no','printer',
-                'calc','in','i','eliquis','alternative','payday','pro','renting','waste',
+                'start','formation','calc','in','i','eliquis','alternative','payday','pro','renting','waste',
                 'write','off','wash','sale','rule','afford','check','ev','battery',
                 'suv','sedan','debates','over','counter','safe','take',
                 'rate','timing','pay','save','best','state','find',
@@ -620,5 +620,17 @@ export function extractSiteTitle(domain: string): string {
             }
         }
     }
-    return spaced.replaceAll(/\b\w/g, c => c.toUpperCase()).trim();
+    let titled = spaced.replaceAll(/\b\w/g, c => c.toUpperCase()).trim();
+    const BRAND_NAMES: Record<string, string> = {
+        'Onlyfans': 'OnlyFans', 'Fansly': 'Fansly', 'Fanvue': 'Fanvue',
+        'Ozempic': 'Ozempic', 'Mounjaro': 'Mounjaro', 'Wegovy': 'Wegovy',
+        'Semaglutide': 'Semaglutide', 'Eliquis': 'Eliquis', 'Invisalign': 'Invisalign',
+        'Fsbo': 'FSBO', 'Llc': 'LLC', 'Ivf': 'IVF', 'Hvac': 'HVAC',
+        'Roi': 'ROI', 'Ev': 'EV', 'Suv': 'SUV', 'Apr': 'APR',
+        'Vs': 'vs', 'Or': 'or',
+    };
+    for (const [from, to] of Object.entries(BRAND_NAMES)) {
+        titled = titled.replaceAll(new RegExp(`\\b${from}\\b`, 'g'), to);
+    }
+    return titled;
 }

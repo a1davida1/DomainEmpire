@@ -731,6 +731,59 @@ function getCalculatorDefaults(niche: string, year: number): BlockContentDefault
         };
     }
 
+    // Creator economy — earnings calculator
+    if (n.match(/creator|onlyfans|fansly|fanvue|content creator|influencer/)) {
+        return {
+            content: {
+                heading: 'Creator Earnings Calculator',
+                inputs: [
+                    { id: 'subscribers', label: 'Monthly Subscribers', type: 'number', min: 0, max: 100000, step: 10, default: 100 },
+                    { id: 'price', label: 'Subscription Price ($)', type: 'number', min: 3, max: 100, step: 1, default: 10 },
+                    { id: 'tipsPercent', label: 'Tips & Extras (% of sub revenue)', type: 'number', min: 0, max: 200, step: 5, default: 30 },
+                    { id: 'platformCut', label: 'Platform Fee (%)', type: 'select', options: [{ label: 'OnlyFans (20%)', value: 20 }, { label: 'Fansly (20%)', value: 20 }, { label: 'Fanvue (15%)', value: 15 }] },
+                ],
+                outputs: [
+                    { id: 'grossMonthly', label: 'Gross Monthly Revenue', format: 'currency', decimals: 0 },
+                    { id: 'netMonthly', label: 'Net Monthly Earnings', format: 'currency', decimals: 0 },
+                    { id: 'netAnnual', label: 'Projected Annual Earnings', format: 'currency', decimals: 0 },
+                ],
+                formula: '({grossMonthly: subscribers * price * (1 + tipsPercent/100), netMonthly: subscribers * price * (1 + tipsPercent/100) * (1 - platformCut/100), netAnnual: subscribers * price * (1 + tipsPercent/100) * (1 - platformCut/100) * 12})',
+                methodology: `Estimates based on ${year} average creator earnings data. Actual earnings vary significantly based on niche, content quality, promotion efforts, and subscriber retention. Platform fees are deducted before payout. Tips and extras percentage is based on industry averages.`,
+                assumptions: [
+                    'Steady subscriber count (no churn factored in)',
+                    'Tips estimated as percentage of subscription revenue',
+                    'Does not include taxes (typically 25-35% for self-employment)',
+                    'Does not include content creation expenses',
+                ],
+            },
+        };
+    }
+
+    // Medical / health — treatment cost estimator
+    if (n.match(/medical|health|dental|braces|orthodont|therapy|surg|pharma|prescription|ivf|lasik|ketamine|ozempic|semaglutide|wegovy/)) {
+        return {
+            content: {
+                heading: `${capitalize(nicheLabel)} Cost Estimator`,
+                inputs: [
+                    { id: 'treatmentType', label: 'Treatment Type', type: 'select', options: [{ label: 'Basic / Standard', value: 1 }, { label: 'Mid-Range', value: 1.8 }, { label: 'Premium / Specialist', value: 3 }] },
+                    { id: 'hasInsurance', label: 'Insurance Coverage', type: 'select', options: [{ label: 'No Insurance', value: 1 }, { label: 'Basic Insurance', value: 0.6 }, { label: 'Good Insurance', value: 0.3 }, { label: 'Premium Insurance', value: 0.15 }] },
+                    { id: 'location', label: 'Region', type: 'select', options: [{ label: 'Rural / Low Cost', value: 0.75 }, { label: 'Suburban / Average', value: 1.0 }, { label: 'Urban / High Cost', value: 1.35 }, { label: 'Major Metro', value: 1.6 }] },
+                ],
+                outputs: [
+                    { id: 'estimate', label: 'Estimated Out-of-Pocket Cost', format: 'currency', decimals: 0 },
+                ],
+                formula: '({estimate: 2500 * treatmentType * hasInsurance * location})',
+                methodology: `Estimates use ${year} average costs from healthcare provider surveys and insurance claim data. Actual costs vary significantly by provider, plan, and region. Always verify with your provider and insurance company.`,
+                assumptions: [
+                    'Base cost from national provider averages',
+                    'Insurance reduces out-of-pocket based on typical coverage levels',
+                    'Regional adjustment from cost-of-living data',
+                    'Does not include ongoing maintenance or follow-up visits',
+                ],
+            },
+        };
+    }
+
     // Default generic calculator
     return {
         content: {

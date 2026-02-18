@@ -663,15 +663,14 @@ export function assemblePageFromBlocks(
     // Related pages nav for sub-pages
     const relatedHtml = buildRelatedPagesHtml(ctx);
 
-    // Sidebar layout: wrap content in a grid when sidebar is present.
-    // Full-width blocks (Hero, ResourceGrid, LatestArticles) render outside the
-    // grid so they aren't constrained to the narrow page-main column.
+    // Sidebar layout: when sidebar is present, hero goes inside the main column
+    // so the sidebar stays visible from the top. Without sidebar, hero is full-width.
     const hasSidebar = sidebarHtml.length > 0;
     const mainContent = hasSidebar
-        ? `${preGridBlocks.join('\n')}
-<div class="page-layout">
+        ? `<div class="page-layout">
   ${sidebarHtml}
   <div class="page-main">
+    ${preGridBlocks.join('\n')}
     ${breadcrumbHtml}
 ${contentBlocks.join('\n')}
 ${relatedHtml}

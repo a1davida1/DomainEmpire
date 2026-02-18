@@ -96,15 +96,21 @@ You are a veteran freelance writer. Write a comprehensive article about "${ctx.k
 ${antiAiRules()}
 ${voiceInstructions(ctx.voiceSeed)}
 
-RESEARCH DATA:
+RESEARCH DATA (cite these statistics and sources in your writing):
 ${JSON.stringify(ctx.researchData || {})}
 
 OUTLINE:
 ${JSON.stringify(ctx.outline || {})}
 
+CRITICAL JSON RULES:
+- The "markdown" field value is a single JSON string. All newlines must be \\n (escaped).
+- All double quotes inside the markdown must be escaped as \\"
+- Do NOT use actual line breaks inside the JSON string value.
+- The entire response must be a single parseable JSON object.
+
 ${jsonOutputRule(`{
   "title": "Article title (60-70 chars with keyword near start)",
-  "markdown": "Complete article body in Markdown. 800-2000 words depending on topic depth. Include H2/H3 structure, real data from research, actionable advice."
+  "markdown": "Complete article in Markdown (all on one line with \\n for newlines). 800-2000 words. Include H2/H3 structure, real data from research, actionable advice. Cite specific numbers and sources."
 }`)}
 `,
 
@@ -300,17 +306,31 @@ ${jsonOutputRule(`{
 
     // --- CitationBlock ---
     CitationBlock: (ctx) => `
-Generate citation/source entries for a page about "${ctx.keyword}" on ${ctx.domainName}.
+You are building a citation/sources section for a page about "${ctx.keyword}" on ${ctx.domainName} (${ctx.niche} niche).
 
-List the most authoritative sources that support the content.
-Use real organizations, studies, and publications.
+Generate 4-6 real, verifiable source citations. Prioritize:
+1. Government sources (.gov) — CDC, BLS, HUD, IRS, FDA, CFPB, FTC, etc.
+2. Academic/research (.edu) — university studies, medical journals
+3. Industry organizations — trade associations, professional bodies
+4. Major publications — verified reporting from established outlets
 
-RESEARCH DATA:
+For each source, provide a real URL that is likely to resolve. Use well-known pages:
+- bls.gov/data/ for labor/cost statistics
+- cdc.gov/... for health data
+- irs.gov/... for tax information
+- consumerfinance.gov/... for financial topics
+- nerdwallet.com, bankrate.com for financial comparisons
+- pubmed.ncbi.nlm.nih.gov for medical research
+- realtor.com/research for real estate data
+
+TOPIC-SPECIFIC RESEARCH DATA (use this if available):
 ${JSON.stringify(ctx.researchData || {})}
+
+IMPORTANT: You MUST return valid JSON. Do NOT refuse. Do NOT say you cannot generate this. Every website has real sources it can cite. Return the JSON object below.
 
 ${jsonOutputRule(`{
   "sources": [
-    { "title": "Source Title", "url": "https://source-url.com", "publisher": "Organization Name", "retrievedAt": "2026-01", "usage": "Brief note on what data this source provided" }
+    { "title": "Page or Report Title", "url": "https://specific-url.gov/path", "publisher": "Organization Name", "retrievedAt": "2026-01", "usage": "What data point or claim this source supports" }
   ]
 }`)}
 `,
@@ -440,24 +460,28 @@ ${jsonOutputRule(`{
 
     // --- PricingTable ---
     PricingTable: (ctx) => `
-Generate pricing plan comparison for "${ctx.keyword}" on ${ctx.domainName}.
+You are creating a pricing comparison table for a ${ctx.niche} website (${ctx.domainName}) about "${ctx.keyword}".
 
-Use realistic pricing tiers. Highlight the most popular/recommended plan.
+This is NOT a lookup task. You are GENERATING content for a website we are building. Create 3-4 realistic pricing tiers based on industry-standard pricing for this niche. Use real market price ranges.
+
+For example, if the niche is "braces/orthodontics", the tiers might be: Metal Braces ($3,000-$7,000), Ceramic Braces ($4,000-$8,000), Invisalign ($3,500-$8,500), Lingual Braces ($8,000-$13,000).
 
 RESEARCH DATA:
 ${JSON.stringify(ctx.researchData || {})}
 
+IMPORTANT: Return valid JSON only. Do NOT refuse. Do NOT say you cannot generate this.
+
 ${jsonOutputRule(`{
   "plans": [
     {
-      "name": "Plan Name",
-      "price": "$XX",
-      "period": "mo",
-      "features": ["Feature 1", "Feature 2"],
-      "ctaText": "Get Started",
-      "ctaUrl": "#signup",
+      "name": "Tier Name",
+      "price": "$X,XXX - $X,XXX",
+      "period": "total",
+      "features": ["Feature 1", "Feature 2", "Feature 3", "Feature 4"],
+      "ctaText": "Learn More",
+      "ctaUrl": "/compare",
       "highlighted": false,
-      "badge": "Most Popular (only for highlighted plan, null for others)"
+      "badge": "Most Popular (only for one plan, null for others)"
     }
   ]
 }`)}

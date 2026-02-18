@@ -42,15 +42,16 @@ TOPIC: ${keyword}
 CONTEXT: A high-quality authority site (${domainName})
 
 RESEARCH REQUIREMENTS:
-1. STATISTICS: Find 3-5 concrete numbers/stats with dates and sources. NOT "many people say," but "Example.com reports 43% increase in 2024."
+1. STATISTICS: Find 3-5 concrete numbers/stats with dates and sources. NOT "many people say," but "BLS.gov reports median cost of $X in 2025." PRIORITIZE .gov and .edu sources: CDC, BLS, IRS, HUD, CFPB, FDA, NIH, university studies. Then use established industry sources (Bankrate, NerdWallet, KFF, Realtor.com).
 2. LATEST NEWS: What happened in this niche in the last 6 months? New laws? New product releases? Scandals?
 3. EXPERT QUOTES: Find 2 quotes from industry leaders or verified reviews.
 4. UNCOMMON ANGLES: What is everyone else missing? What's the "secret" or counter-intuitive truth?
+5. CITABLE SOURCES: For every statistic, include the FULL URL where this data can be verified. Use specific page URLs, not just domain homepages.
 
 Respond with a JSON object ONLY:
 {
   "statistics": [
-    { "stat": "43% of users prefer X", "source": "Statista 2024 Report", "date": "2024-03-01", "url": "https://..." }
+    { "stat": "43% of users prefer X", "source": "Bureau of Labor Statistics", "date": "2025-03-01", "url": "https://bls.gov/specific/page" }
   ],
   "quotes": [
     { "quote": "The biggest mistake is...", "author": "John Doe, CEO of X", "source": "TechCrunch Interview" }

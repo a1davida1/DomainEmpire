@@ -32,6 +32,7 @@ interface ProjectCreateResult {
 interface DeploymentResult {
     success: boolean;
     deploymentId?: string;
+    projectName?: string;
     url?: string;
     status?: string;
     error?: string;
@@ -506,68 +507,59 @@ export async function directUploadDeploy(
     const config = await getConfig(clientOptions);
 
     try {
-        // Build multipart form data with manifest
-        const { createHash } = await import('node:crypto');
-        const manifest: Record<string, string> = {};
-        const filesByHash = new Map<string, { path: string; content: string | Buffer | Uint8Array }>();
+        const { mkdirSync, writeFileSync, rmSync } = await import('node:fs');
+        const { join, dirname } = await import('node:path');
+        const { execSync } = await import('node:child_process');
+
+        const tmpDir = join(process.env.TMPDIR || '/tmp', `cf-deploy-${projectName}-${Date.now()}`);
+        rmSync(tmpDir, { recursive: true, force: true });
 
         for (const file of files) {
-            // Handle string vs binary content for hashing
-            const contentBuffer = typeof file.content === 'string'
-                ? Buffer.from(file.content, 'utf-8')
-                : Buffer.from(file.content);
-
-            const hash = createHash('sha256').update(contentBuffer).digest('hex');
-            const filePath = file.path.startsWith('/') ? file.path : `/${file.path}`;
-            manifest[filePath] = hash;
-            filesByHash.set(hash, file);
-        }
-
-        // Create FormData with manifest + file blobs
-        const formData = new FormData();
-        formData.append('manifest', JSON.stringify(manifest));
-
-        // Specify branch for staging/preview deploys (non-production)
-        if (deployOptions?.branch) {
-            formData.append('branch', deployOptions.branch);
-        }
-
-        for (const [hash, file] of filesByHash) {
-            const content = typeof file.content === 'string' ? file.content : new Uint8Array(file.content);
-            const blob = new Blob([content]);
-            formData.append(hash, blob, hash);
-        }
-
-        // POST to Direct Upload endpoint
-        const response = await fetch(
-            `${CF_API}/accounts/${config.accountId}/pages/projects/${projectName}/deployments`,
-            {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${config.apiToken}`,
-                    // Don't set Content-Type — fetch sets it with the boundary for FormData
-                },
-                body: formData,
-                signal: AbortSignal.timeout(CF_UPLOAD_TIMEOUT_MS),
+            const filePath = join(tmpDir, file.path);
+            mkdirSync(dirname(filePath), { recursive: true });
+            if (typeof file.content === 'string') {
+                writeFileSync(filePath, file.content, 'utf-8');
+            } else {
+                writeFileSync(filePath, file.content);
             }
-        );
+        }
 
-        const data = await response.json();
+        const branchArg = deployOptions?.branch ? `--branch=${deployOptions.branch}` : '--branch=main';
 
-        if (!data.success) {
-            return { success: false, error: data.errors?.[0]?.message || 'Direct upload failed' };
+        const env = {
+            ...process.env,
+            CLOUDFLARE_API_TOKEN: config.apiToken,
+            CLOUDFLARE_ACCOUNT_ID: config.accountId,
+        };
+
+        const cmd = `npx wrangler pages deploy ${tmpDir} --project-name=${projectName} ${branchArg} --commit-dirty=true 2>&1`;
+        const output = execSync(cmd, {
+            env,
+            timeout: CF_UPLOAD_TIMEOUT_MS,
+            encoding: 'utf-8',
+            maxBuffer: 10 * 1024 * 1024,
+        });
+
+        rmSync(tmpDir, { recursive: true, force: true });
+
+        const urlMatch = output.match(/https:\/\/[a-z0-9-]+\.[a-z0-9-]+\.pages\.dev/);
+        const url = urlMatch ? urlMatch[0] : undefined;
+        const success = output.includes('Deployment complete') || output.includes('Success!');
+
+        if (!success) {
+            return { success: false, error: output.slice(-500) };
         }
 
         return {
             success: true,
-            deploymentId: data.result.id,
-            url: data.result.url,
-            status: data.result.latest_stage?.status || 'queued',
+            url,
+            status: 'success',
+            projectName,
         };
     } catch (error) {
         return {
             success: false,
-            error: error instanceof Error ? error.message : 'Unknown error',
+            error: error instanceof Error ? error.message.slice(0, 500) : 'Unknown error',
         };
     }
 }
