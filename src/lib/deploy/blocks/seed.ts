@@ -15,6 +15,7 @@ import { db, domains, pageDefinitions, articles } from '@/lib/db';
 import { eq, and, isNull } from 'drizzle-orm';
 import { getHomepagePreset, getArticlePagePreset } from './presets';
 import { extractSiteTitle } from '../templates/shared';
+import { getVisualCombo, applyVisualCombo } from '../visual-identity';
 
 // ============================================================
 // Types
@@ -58,7 +59,6 @@ export async function seedPageDefinitions(
 ): Promise<SeedResult> {
     const {
         publish = false,
-        theme = 'clean',
         seedArticlePages = true,
         skipIfExists = true,
     } = options;
@@ -72,8 +72,12 @@ export async function seedPageDefinitions(
     }
 
     const domain = domainRows[0];
-    const skinName = options.skin || domain.skin || 'slate';
     const siteTemplate = domain.siteTemplate || 'authority';
+
+    // Use explicit theme/skin from options, or fall back to visual identity combo
+    const combo = getVisualCombo(domain.domain);
+    const theme = options.theme || combo.theme;
+    const skinName = options.skin || combo.skin;
 
     const result: SeedResult = {
         domainId,
@@ -100,7 +104,13 @@ export async function seedPageDefinitions(
     }
 
     // --- Homepage ---
-    const homepageBlocks = getHomepagePreset(siteTemplate, domain.domain, domain.niche || undefined);
+    const rawHomepageBlocks = getHomepagePreset(siteTemplate, domain.domain, domain.niche || undefined);
+    const homepageBlocks = applyVisualCombo(rawHomepageBlocks, {
+        ...combo,
+        // Respect explicit overrides but keep combo variants
+        theme,
+        skin: skinName,
+    });
     await db.insert(pageDefinitions).values({
         domainId,
         route: '/',

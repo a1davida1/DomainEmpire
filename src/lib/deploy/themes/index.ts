@@ -25,6 +25,7 @@ import { generateDomainVariantStyles } from './variants';
 import { getLayoutConfig, getLayoutStyles } from '../layouts';
 import { generateThemeCSS } from './theme-tokens';
 import { generateSkinCSS, generateDarkModeCSS } from './skin-definitions';
+import { randomizeCSS } from './class-randomizer';
 
 /**
  * v1: Generate the complete global CSS stylesheet for a given theme and layout.
@@ -55,5 +56,24 @@ export function generateV2GlobalStyles(
     const layoutStyles = getLayoutStyles(layoutConfig);
     const variantStyles = generateDomainVariantStyles(domain || 'default-domain');
     const darkMode = generateDarkModeCSS(skinName);
-    return themeVars + '\n' + skinVars + '\n' + baseStyles + layoutStyles + componentStyles + blockVariantStyles + variantStyles + darkMode + responsiveStyles;
+    const raw = themeVars + '\n' + skinVars + '\n' + baseStyles + layoutStyles + componentStyles + blockVariantStyles + variantStyles + darkMode + responsiveStyles;
+    const randomized = domain ? randomizeCSS(raw, domain) : raw;
+    return minifyCSS(randomized);
+}
+
+/**
+ * Lightweight CSS minification — strips comments, collapses whitespace,
+ * removes unnecessary semicolons before closing braces.
+ */
+function minifyCSS(css: string): string {
+    return css
+        .replace(/\/\*[\s\S]*?\*\//g, '')         // strip comments
+        .replace(/\s*\n\s*/g, '')                  // collapse newlines
+        .replace(/\s{2,}/g, ' ')                   // collapse multiple spaces
+        .replace(/;\s*}/g, '}')                     // remove last semicolons
+        .replace(/:\s+/g, ':')                      // collapse space after colons
+        .replace(/\s*\{\s*/g, '{')                  // collapse around braces
+        .replace(/\s*}\s*/g, '}')                   // collapse around braces
+        .replace(/\s*,\s*/g, ',')                   // collapse around commas in selectors
+        .trim();
 }

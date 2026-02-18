@@ -50,6 +50,8 @@ export const BlockTypeEnum = z.enum([
   'PdfDownload',
   'ScrollCTA',
   'EmbedWidget',
+  'ResourceGrid',
+  'LatestArticles',
 ]);
 
 export type BlockType = z.infer<typeof BlockTypeEnum>;
@@ -872,6 +874,8 @@ export const BLOCK_SCHEMA_REGISTRY: Record<BlockType, {
   PdfDownload: { content: PdfDownloadContentSchema, config: PdfDownloadConfigSchema },
   ScrollCTA: { content: ScrollCTAContentSchema, config: ScrollCTAConfigSchema },
   EmbedWidget: { content: EmbedWidgetContentSchema, config: EmbedWidgetConfigSchema },
+  ResourceGrid: { content: z.record(z.string(), z.unknown()), config: z.record(z.string(), z.unknown()) },
+  LatestArticles: { content: z.record(z.string(), z.unknown()), config: z.record(z.string(), z.unknown()) },
 };
 
 /**
@@ -905,3 +909,156 @@ export function validateBlock(block: BlockEnvelope): {
 
   return errors.length > 0 ? { success: false, errors } : { success: true };
 }
+
+// ============================================================
+// Logical Block Categories — groups 31 blocks into ~12 sections
+// ============================================================
+
+export type SectionCategory =
+  | 'hero'
+  | 'content'
+  | 'faq'
+  | 'steps'
+  | 'social-proof'
+  | 'comparison'
+  | 'lead-capture'
+  | 'calculator'
+  | 'data-display'
+  | 'internal-links'
+  | 'layout'
+  | 'metadata';
+
+/** Maps every BlockType to its logical section category */
+export const BLOCK_CATEGORIES: Record<BlockType, SectionCategory> = {
+  Header: 'layout',
+  Footer: 'layout',
+  Sidebar: 'layout',
+  Hero: 'hero',
+  ArticleBody: 'content',
+  FAQ: 'faq',
+  StepByStep: 'steps',
+  Checklist: 'steps',
+  AuthorBio: 'social-proof',
+  ComparisonTable: 'comparison',
+  VsCard: 'comparison',
+  RankingList: 'comparison',
+  ProsConsCard: 'comparison',
+  LeadForm: 'lead-capture',
+  CTABanner: 'lead-capture',
+  ScrollCTA: 'lead-capture',
+  PricingTable: 'data-display',
+  QuoteCalculator: 'calculator',
+  CostBreakdown: 'calculator',
+  StatGrid: 'data-display',
+  DataTable: 'data-display',
+  TestimonialGrid: 'social-proof',
+  TrustBadges: 'social-proof',
+  CitationBlock: 'metadata',
+  LastUpdated: 'metadata',
+  MedicalDisclaimer: 'metadata',
+  Wizard: 'lead-capture',
+  GeoContent: 'content',
+  InteractiveMap: 'content',
+  PdfDownload: 'metadata',
+  EmbedWidget: 'content',
+  ResourceGrid: 'internal-links',
+  LatestArticles: 'internal-links',
+};
+
+// ============================================================
+// Page Type Templates — 6 canonical page shapes
+// ============================================================
+
+export type PageType =
+  | 'offer'
+  | 'comparison'
+  | 'directory'
+  | 'article'
+  | 'calculator'
+  | 'legal';
+
+export interface PageTypeTemplate {
+  label: string;
+  description: string;
+  /** Ordered list of section categories that compose this page type */
+  sections: SectionCategory[];
+  /** Recommended block types for each section (first is default) */
+  recommended: Partial<Record<SectionCategory, BlockType[]>>;
+}
+
+export const PAGE_TYPE_TEMPLATES: Record<PageType, PageTypeTemplate> = {
+  offer: {
+    label: 'Offer / Referral Landing',
+    description: 'Lead-capture page with hero, benefits, social proof, and CTA.',
+    sections: ['layout', 'hero', 'content', 'social-proof', 'calculator', 'lead-capture', 'faq', 'layout'],
+    recommended: {
+      hero: ['Hero'],
+      content: ['ArticleBody'],
+      'social-proof': ['TestimonialGrid', 'TrustBadges', 'StatGrid'],
+      calculator: ['QuoteCalculator', 'CostBreakdown'],
+      'lead-capture': ['LeadForm', 'CTABanner'],
+      faq: ['FAQ'],
+    },
+  },
+  comparison: {
+    label: 'Comparison Page',
+    description: '"X vs Y" or "Best ___ for ___" — comparison tables with verdict.',
+    sections: ['layout', 'hero', 'comparison', 'content', 'social-proof', 'lead-capture', 'faq', 'layout'],
+    recommended: {
+      hero: ['Hero'],
+      comparison: ['ComparisonTable', 'VsCard', 'ProsConsCard', 'RankingList'],
+      content: ['ArticleBody'],
+      'social-proof': ['TrustBadges', 'TestimonialGrid'],
+      'lead-capture': ['CTABanner', 'ScrollCTA'],
+      faq: ['FAQ'],
+    },
+  },
+  directory: {
+    label: 'Directory / Listing',
+    description: 'Hub page linking to sub-pages — guides, reviews, resources.',
+    sections: ['layout', 'hero', 'internal-links', 'content', 'lead-capture', 'layout'],
+    recommended: {
+      hero: ['Hero'],
+      'internal-links': ['ResourceGrid', 'LatestArticles'],
+      content: ['ArticleBody'],
+      'lead-capture': ['CTABanner'],
+    },
+  },
+  article: {
+    label: 'Blog / Article',
+    description: 'Long-form content page with author, citations, and related links.',
+    sections: ['layout', 'hero', 'metadata', 'content', 'steps', 'social-proof', 'metadata', 'lead-capture', 'internal-links', 'layout'],
+    recommended: {
+      hero: ['Hero'],
+      metadata: ['LastUpdated', 'CitationBlock', 'MedicalDisclaimer'],
+      content: ['ArticleBody'],
+      steps: ['StepByStep', 'Checklist'],
+      'social-proof': ['AuthorBio', 'TrustBadges'],
+      'lead-capture': ['CTABanner', 'ScrollCTA'],
+      'internal-links': ['LatestArticles', 'ResourceGrid'],
+    },
+  },
+  calculator: {
+    label: 'Calculator / Tool',
+    description: 'Interactive tool page — cost calculators, quote builders, wizards.',
+    sections: ['layout', 'hero', 'calculator', 'data-display', 'content', 'lead-capture', 'faq', 'social-proof', 'layout'],
+    recommended: {
+      hero: ['Hero'],
+      calculator: ['QuoteCalculator', 'CostBreakdown'],
+      'data-display': ['DataTable', 'StatGrid', 'PricingTable'],
+      content: ['ArticleBody'],
+      'lead-capture': ['LeadForm', 'CTABanner', 'ScrollCTA'],
+      faq: ['FAQ'],
+      'social-proof': ['TrustBadges', 'TestimonialGrid'],
+    },
+  },
+  legal: {
+    label: 'Contact / Legal',
+    description: 'Simple content page — privacy, terms, contact, about.',
+    sections: ['layout', 'content', 'lead-capture', 'layout'],
+    recommended: {
+      content: ['ArticleBody'],
+      'lead-capture': ['LeadForm'],
+    },
+  },
+};

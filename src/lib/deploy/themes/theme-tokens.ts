@@ -24,6 +24,10 @@ export interface ThemeTokens {
     containerMax: string;
     borderWidth: string;
     transitionSpeed: string;
+    /** 8px baseline spacing scale: sp1=0.5rem(8px) … sp8=4rem(64px) */
+    spacingScale: [string, string, string, string, string, string, string, string];
+    /** Default vertical padding for each <section> */
+    sectionPadding: string;
 }
 
 export const themes: Record<string, ThemeTokens> = {
@@ -44,6 +48,8 @@ export const themes: Record<string, ThemeTokens> = {
         containerMax: '1100px',
         borderWidth: '1px',
         transitionSpeed: '0.2s',
+        spacingScale: ['0.5rem','1rem','1.5rem','2rem','2.5rem','3rem','3.5rem','4rem'],
+        sectionPadding: '3.5rem',
     },
     editorial: {
         fontHeading: 'Merriweather, Georgia, serif',
@@ -62,6 +68,8 @@ export const themes: Record<string, ThemeTokens> = {
         containerMax: '900px',
         borderWidth: '1px',
         transitionSpeed: '0.2s',
+        spacingScale: ['0.5rem','1rem','1.5rem','2rem','2.5rem','3rem','3.5rem','4rem'],
+        sectionPadding: '4rem',
     },
     bold: {
         fontHeading: 'DM Sans, system-ui, sans-serif',
@@ -80,6 +88,8 @@ export const themes: Record<string, ThemeTokens> = {
         containerMax: '1200px',
         borderWidth: '2px',
         transitionSpeed: '0.15s',
+        spacingScale: ['0.5rem','1rem','1.5rem','2rem','3rem','3.5rem','4rem','5rem'],
+        sectionPadding: '3rem',
     },
     minimal: {
         fontHeading: 'system-ui, -apple-system, sans-serif',
@@ -98,6 +108,8 @@ export const themes: Record<string, ThemeTokens> = {
         containerMax: '680px',
         borderWidth: '1px',
         transitionSpeed: '0.2s',
+        spacingScale: ['0.5rem','1rem','1.5rem','2rem','2.5rem','3rem','3.5rem','4rem'],
+        sectionPadding: '3rem',
     },
 };
 
@@ -106,6 +118,7 @@ export const themes: Record<string, ThemeTokens> = {
  */
 export function generateThemeCSS(themeName: string): string {
     const t = themes[themeName] ?? themes.clean;
+    const sp = t.spacingScale;
     return `:root{
   --font-heading:${t.fontHeading};
   --font-body:${t.fontBody};
@@ -123,6 +136,8 @@ export function generateThemeCSS(themeName: string): string {
   --container-max:${t.containerMax};
   --border-width:${t.borderWidth};
   --transition-speed:${t.transitionSpeed};
+  --sp-1:${sp[0]};--sp-2:${sp[1]};--sp-3:${sp[2]};--sp-4:${sp[3]};--sp-5:${sp[4]};--sp-6:${sp[5]};--sp-7:${sp[6]};--sp-8:${sp[7]};
+  --section-padding:${t.sectionPadding};
 }`;
 }
 

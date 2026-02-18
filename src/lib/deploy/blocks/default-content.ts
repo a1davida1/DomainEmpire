@@ -38,24 +38,39 @@ export function getDefaultBlockContent(
             config: { sticky: true },
             content: {
                 siteName,
+                phone: '',
                 navLinks: [
                     { label: 'Home', href: '/' },
-                    { label: 'Guides', href: '/guides' },
-                    { label: 'Compare', href: '/compare' },
-                    { label: 'Contact', href: '/contact' },
+                    {
+                        label: 'Resources',
+                        href: '/guides',
+                        children: [
+                            { label: 'Guides', href: '/guides' },
+                            { label: 'Calculator', href: '/calculator' },
+                            { label: 'Compare', href: '/compare' },
+                            { label: 'FAQ', href: '/faq' },
+                        ],
+                    },
+                    { label: 'Reviews', href: '/reviews' },
+                    { label: 'Blog', href: '/blog' },
+                    { label: 'About', href: '/about' },
                 ],
             },
         },
         Footer: {
-            config: { showDisclaimer: true },
+            config: { showDisclaimer: true, showCookieConsent: true },
             content: {
                 siteName,
                 copyrightYear: year,
                 disclaimerText: `All content on ${siteName} is for informational purposes only. Always consult a qualified professional before making decisions.`,
-                columns: [
-                    { title: 'Resources', links: [{ label: 'Guides', href: '/guides' }, { label: 'Calculator', href: '/calculator' }, { label: 'FAQ', href: '/#faq' }] },
-                    { title: 'Company', links: [{ label: 'About Us', href: '/about' }, { label: 'Contact', href: '/contact' }] },
-                    { title: 'Legal', links: [{ label: 'Privacy Policy', href: '/privacy' }, { label: 'Terms of Service', href: '/terms' }, { label: 'Disclaimer', href: '/disclaimer' }] },
+                columns: getFooterColumns(nicheLabel),
+                socialLinks: [
+                    { platform: 'facebook', url: '#' },
+                    { platform: 'instagram', url: '#' },
+                    { platform: 'twitter', url: '#' },
+                    { platform: 'pinterest', url: '#' },
+                    { platform: 'youtube', url: '#' },
+                    { platform: 'rss', url: '#' },
                 ],
             },
         },
@@ -66,6 +81,15 @@ export function getDefaultBlockContent(
                 badge: `Updated ${year}`,
                 ctaText: 'Explore Guides',
                 ctaUrl: '/guides',
+                secondaryCtaText: 'Cost Calculator',
+                secondaryCtaUrl: '/calculator',
+                trustIndicators: [
+                    'Free to Use',
+                    'No Sign-up Required',
+                    'Expert Reviewed',
+                    `Updated ${year}`,
+                ],
+                rating: 4.8,
             },
         },
         ArticleBody: {
@@ -97,17 +121,13 @@ export function getDefaultBlockContent(
             },
         },
         LeadForm: {
-            config: { requireConsent: true, endpoint: '#', submitLabel: 'Get My Free Quote' },
+            config: { requireConsent: true, endpoint: '#', submitLabel: 'GET YOUR FREE QUOTE' },
             content: {
-                headline: `Get Your Free ${capitalize(nicheLabel)} Quote`,
-                description: `Fill out the form below and receive personalized recommendations within 24 hours. No obligation, completely free.`,
-                fields: [
-                    { name: 'fullName', label: 'Full Name', type: 'text', required: true },
-                    { name: 'email', label: 'Email Address', type: 'email', required: true },
-                    { name: 'phone', label: 'Phone Number', type: 'tel', required: false },
-                    { name: 'zipCode', label: 'ZIP Code', type: 'text', required: true },
-                ],
-                consentText: 'I agree to the privacy policy and consent to being contacted about my inquiry.',
+                heading: `Get Your Free ${capitalize(nicheLabel)} Quote`,
+                subheading: `Fill out the form below and receive personalized recommendations within 24 hours. No obligation.`,
+                fields: getLeadFormFields(nicheLabel),
+                consentText: `I agree to receiving communications and to the Privacy Policy. Msg and data rates may apply. Opt out by replying STOP. Not a condition of purchase.`,
+                privacyUrl: '/privacy',
                 successMessage: 'Thank you! We\'ll be in touch within 24 hours.',
             },
         },
@@ -193,21 +213,14 @@ export function getDefaultBlockContent(
                 verdict: `Option A is the better choice if budget isn't a concern. For most people, Option B offers the best value for money.`,
             },
         },
-        QuoteCalculator: {
+        Sidebar: {
+            config: { showSearch: true },
             content: {
-                title: `${capitalize(nicheLabel)} Cost Calculator`,
-                inputs: [
-                    { id: 'quantity', label: 'Size / Quantity', type: 'number', min: 1, max: 10000, default: 100 },
-                    { id: 'quality', label: 'Quality Level', type: 'select', options: [{ label: 'Basic', value: 1 }, { label: 'Standard', value: 2 }, { label: 'Premium', value: 3 }, { label: 'Luxury', value: 4 }] },
-                    { id: 'location', label: 'Location Type', type: 'select', options: [{ label: 'Urban', value: 1.2 }, { label: 'Suburban', value: 1.0 }, { label: 'Rural', value: 0.85 }] },
-                ],
-                outputs: [
-                    { id: 'estimate', label: 'Estimated Cost', format: 'currency', decimals: 0 },
-                ],
-                formula: 'quantity * quality * location * 15',
-                methodology: `Estimates are based on current ${year} market rates, verified by industry experts. Actual costs may vary based on your specific requirements and local market conditions.`,
+                heading: 'Categories',
+                categories: getSidebarCategories(nicheLabel),
             },
         },
+        QuoteCalculator: getCalculatorDefaults(nicheLabel, year),
         CostBreakdown: {
             content: {
                 title: `${capitalize(nicheLabel)} Cost Breakdown`,
@@ -290,15 +303,6 @@ export function getDefaultBlockContent(
                 ],
             },
         },
-        Sidebar: {
-            config: { position: 'right', sticky: true },
-            content: {
-                sections: [
-                    { title: 'Quick Links', html: '<ul><li><a href="/">Home</a></li><li><a href="/guides">Guides</a></li><li><a href="/compare">Compare</a></li></ul>' },
-                    { title: 'Need Help?', html: `<p>Our team is here to help you find the best ${nicheLabel} solution. <a href="/contact">Contact us</a></p>` },
-                ],
-            },
-        },
         InteractiveMap: {
             config: { showTileGrid: false, showDropdown: true },
             content: {
@@ -338,6 +342,28 @@ export function getDefaultBlockContent(
         EmbedWidget: {
             content: { title: 'External Resource', embedUrl: '', embedType: 'iframe', height: '400px' },
         },
+        ResourceGrid: {
+            content: {
+                heading: 'More Resources',
+                items: [
+                    { icon: '📚', title: 'Guides', description: `Browse our guides; there is something for everyone with how-tos, templates, safety tips, and more.`, href: '/guides' },
+                    { icon: '🧮', title: 'Calculators', description: `Explore ${nicheLabel} calculators that build success, one calculation at a time.`, href: '/calculator' },
+                    { icon: '❓', title: 'FAQ', description: `Get answers to the most frequently asked questions, clarifying any questions you might have.`, href: '/#faq' },
+                    { icon: '📊', title: 'Comparisons', description: `Side-by-side comparisons designed to help you make informed decisions.`, href: '/compare' },
+                    { icon: '⭐', title: 'Reviews', description: `Read verified reviews and ratings from real customers and industry experts.`, href: '/reviews' },
+                ],
+            },
+        },
+        LatestArticles: {
+            content: {
+                heading: 'Latest Articles',
+                articles: [
+                    { title: `Understanding ${capitalize(nicheLabel)}: A Complete Guide`, excerpt: `Everything you need to know about ${nicheLabel}, from basics to advanced strategies. Our comprehensive guide covers key factors, costs, and expert recommendations.`, href: '/guides/complete-guide' },
+                    { title: `How to Save Money on ${capitalize(nicheLabel)}`, excerpt: `Smart strategies and insider tips to reduce your ${nicheLabel} costs without sacrificing quality. Learn what the experts recommend.`, href: '/guides/save-money' },
+                    { title: `${capitalize(nicheLabel)} Mistakes to Avoid`, excerpt: `The most common and costly ${nicheLabel} mistakes people make — and how to avoid them. Don't learn these lessons the hard way.`, href: '/guides/common-mistakes' },
+                ],
+            },
+        },
     };
 
     return defaults[type] || {};
@@ -357,6 +383,470 @@ export function mergeBlockDefaults(
         content: { ...(defaults.content || {}), ...(block.content || {}) },
         config: { ...(defaults.config || {}), ...(block.config || {}) },
     };
+}
+
+// ============================================================
+// Niche-aware sidebar categories (OmniCalculator-style)
+// ============================================================
+
+interface SidebarCategory {
+    icon: string;
+    label: string;
+    href: string;
+    active?: boolean;
+}
+
+function getSidebarCategories(niche: string): SidebarCategory[] {
+    const n = niche.toLowerCase();
+
+    // Home services / construction
+    if (n.match(/home|house|roof|plumb|hvac|ac unit|bath|kitchen|floor|paint|landscap|fence|garage|pool|solar|window|door|siding|insulation|renovation|remodel|construct|contract/)) {
+        return [
+            { icon: '🏗️', label: 'Construction', href: '/construction', active: true },
+            { icon: '🔧', label: 'Repairs', href: '/repairs' },
+            { icon: '💰', label: 'Cost Guides', href: '/guides' },
+            { icon: '🧮', label: 'Calculators', href: '/calculator' },
+            { icon: '⚡', label: 'Electrical', href: '/electrical' },
+            { icon: '🚿', label: 'Plumbing', href: '/plumbing' },
+            { icon: '❄️', label: 'HVAC', href: '/hvac' },
+            { icon: '🏠', label: 'Remodeling', href: '/remodeling' },
+            { icon: '🌿', label: 'Landscaping', href: '/landscaping' },
+            { icon: '🔒', label: 'Security', href: '/security' },
+            { icon: '☀️', label: 'Solar', href: '/solar' },
+            { icon: '📋', label: 'Permits', href: '/permits' },
+        ];
+    }
+
+    // Finance / insurance / loans
+    if (n.match(/loan|mortgage|financ|insur|credit|bank|invest|tax|account|debt|budget|lending|refinanc|401k|ira/)) {
+        return [
+            { icon: '💵', label: 'Finance', href: '/finance', active: true },
+            { icon: '🏦', label: 'Banking', href: '/banking' },
+            { icon: '🏠', label: 'Mortgage', href: '/mortgage' },
+            { icon: '📊', label: 'Investing', href: '/investing' },
+            { icon: '🧮', label: 'Calculators', href: '/calculator' },
+            { icon: '💳', label: 'Credit', href: '/credit' },
+            { icon: '🛡️', label: 'Insurance', href: '/insurance' },
+            { icon: '📈', label: 'Savings', href: '/savings' },
+            { icon: '💼', label: 'Business', href: '/business' },
+            { icon: '📑', label: 'Tax', href: '/tax' },
+            { icon: '🎓', label: 'Education', href: '/education' },
+            { icon: '🏥', label: 'Health', href: '/health' },
+        ];
+    }
+
+    // Auto / vehicle
+    if (n.match(/car|auto|vehicle|truck|suv|sedan|motor|tire|mechanic|dealer|lease/)) {
+        return [
+            { icon: '🚗', label: 'Cars', href: '/cars', active: true },
+            { icon: '🏎️', label: 'Sports Cars', href: '/sports-cars' },
+            { icon: '🚙', label: 'SUVs', href: '/suvs' },
+            { icon: '🚐', label: 'Trucks', href: '/trucks' },
+            { icon: '⚡', label: 'Electric', href: '/electric' },
+            { icon: '🧮', label: 'Calculators', href: '/calculator' },
+            { icon: '🔧', label: 'Maintenance', href: '/maintenance' },
+            { icon: '🛡️', label: 'Insurance', href: '/insurance' },
+            { icon: '💰', label: 'Financing', href: '/financing' },
+            { icon: '📋', label: 'Reviews', href: '/reviews' },
+        ];
+    }
+
+    // Health / medical
+    if (n.match(/health|medic|doctor|dent|chiropract|therap|wellness|fitness|diet|nutrition|mental|rehab|pharma|hospital|clinic/)) {
+        return [
+            { icon: '🏥', label: 'Health', href: '/health', active: true },
+            { icon: '💊', label: 'Medicine', href: '/medicine' },
+            { icon: '🦷', label: 'Dental', href: '/dental' },
+            { icon: '🧠', label: 'Mental Health', href: '/mental-health' },
+            { icon: '💪', label: 'Fitness', href: '/fitness' },
+            { icon: '🥗', label: 'Nutrition', href: '/nutrition' },
+            { icon: '🧮', label: 'Calculators', href: '/calculator' },
+            { icon: '🛡️', label: 'Insurance', href: '/insurance' },
+            { icon: '👨‍⚕️', label: 'Find a Doctor', href: '/providers' },
+            { icon: '📋', label: 'Guides', href: '/guides' },
+        ];
+    }
+
+    // Business / tech
+    if (n.match(/business|tech|software|saas|startup|enterprise|employ|payroll|hr|manage|office/)) {
+        return [
+            { icon: '💼', label: 'Business', href: '/business', active: true },
+            { icon: '💻', label: 'Technology', href: '/technology' },
+            { icon: '📊', label: 'Analytics', href: '/analytics' },
+            { icon: '👥', label: 'HR & Payroll', href: '/hr' },
+            { icon: '🧮', label: 'Calculators', href: '/calculator' },
+            { icon: '📈', label: 'Marketing', href: '/marketing' },
+            { icon: '🔐', label: 'Security', href: '/security' },
+            { icon: '☁️', label: 'Cloud', href: '/cloud' },
+            { icon: '📱', label: 'Mobile', href: '/mobile' },
+            { icon: '📋', label: 'Guides', href: '/guides' },
+        ];
+    }
+
+    // Default
+    return [
+        { icon: '📚', label: 'Guides', href: '/guides', active: true },
+        { icon: '🧮', label: 'Calculators', href: '/calculator' },
+        { icon: '📊', label: 'Comparisons', href: '/compare' },
+        { icon: '⭐', label: 'Reviews', href: '/reviews' },
+        { icon: '❓', label: 'FAQ', href: '/#faq' },
+        { icon: '💰', label: 'Pricing', href: '/pricing' },
+        { icon: '📰', label: 'Blog', href: '/blog' },
+        { icon: '🔧', label: 'Tools', href: '/tools' },
+        { icon: '📋', label: 'Resources', href: '/resources' },
+        { icon: '📞', label: 'Contact', href: '/contact' },
+    ];
+}
+
+// ============================================================
+// Niche-aware footer columns
+// ============================================================
+
+interface FooterColumn {
+    title: string;
+    links: Array<{ label: string; href: string }>;
+}
+
+function getFooterColumns(niche: string): FooterColumn[] {
+    const n = niche.toLowerCase();
+
+    const companyCol: FooterColumn = {
+        title: 'Company',
+        links: [
+            { label: 'About Us', href: '/about' },
+            { label: 'Contact', href: '/contact' },
+            { label: 'Privacy Policy', href: '/privacy' },
+            { label: 'Terms of Service', href: '/terms' },
+        ],
+    };
+
+    // Home services / construction
+    if (n.match(/home|house|roof|plumb|hvac|ac unit|bath|kitchen|floor|paint|landscap|fence|garage|pool|solar|window|door|siding|insulation|renovation|remodel|construct|contract/)) {
+        return [
+            {
+                title: 'Resources',
+                links: [
+                    { label: 'Cost Calculator', href: '/calculator' },
+                    { label: 'Comparison Guide', href: '/compare' },
+                    { label: 'How-To Guides', href: '/guides' },
+                    { label: 'Reviews', href: '/reviews' },
+                    { label: 'FAQ', href: '/faq' },
+                ],
+            },
+            {
+                title: 'Explore',
+                links: [
+                    { label: 'Blog', href: '/blog' },
+                    { label: 'Resources & Tools', href: '/resources' },
+                    { label: 'Pricing Guide', href: '/pricing' },
+                    { label: 'Complete Guide', href: '/guides/complete-guide' },
+                    { label: 'Save Money', href: '/guides/save-money' },
+                ],
+            },
+            companyCol,
+        ];
+    }
+
+    // Finance / insurance / loans
+    if (n.match(/loan|mortgage|financ|insur|credit|bank|invest|tax|account|debt|budget|lending|refinanc|401k|ira/)) {
+        return [
+            {
+                title: 'Resources',
+                links: [
+                    { label: 'Loan Calculator', href: '/calculator' },
+                    { label: 'Rate Comparison', href: '/compare' },
+                    { label: 'Financial Guides', href: '/guides' },
+                    { label: 'Reviews', href: '/reviews' },
+                    { label: 'FAQ', href: '/faq' },
+                ],
+            },
+            {
+                title: 'Explore',
+                links: [
+                    { label: 'Blog', href: '/blog' },
+                    { label: 'Resources & Tools', href: '/resources' },
+                    { label: 'Pricing Guide', href: '/pricing' },
+                    { label: 'Complete Guide', href: '/guides/complete-guide' },
+                    { label: 'Save Money Tips', href: '/guides/save-money' },
+                ],
+            },
+            companyCol,
+        ];
+    }
+
+    // Auto / vehicle
+    if (n.match(/car|auto|vehicle|truck|suv|sedan|motor|tire|mechanic|dealer|lease/)) {
+        return [
+            {
+                title: 'Resources',
+                links: [
+                    { label: 'Vehicle Comparison', href: '/compare' },
+                    { label: 'Buyer\'s Guide', href: '/guides' },
+                    { label: 'Cost Calculator', href: '/calculator' },
+                    { label: 'Reviews', href: '/reviews' },
+                    { label: 'FAQ', href: '/faq' },
+                ],
+            },
+            {
+                title: 'Explore',
+                links: [
+                    { label: 'Blog', href: '/blog' },
+                    { label: 'Resources & Tools', href: '/resources' },
+                    { label: 'Pricing Guide', href: '/pricing' },
+                    { label: 'Complete Guide', href: '/guides/complete-guide' },
+                    { label: 'Common Mistakes', href: '/guides/common-mistakes' },
+                ],
+            },
+            companyCol,
+        ];
+    }
+
+    // Health / medical
+    if (n.match(/health|medic|doctor|dent|chiropract|therap|wellness|fitness|diet|nutrition|mental|rehab|pharma|hospital|clinic/)) {
+        return [
+            {
+                title: 'Resources',
+                links: [
+                    { label: 'Treatment Guides', href: '/guides' },
+                    { label: 'Cost Comparison', href: '/compare' },
+                    { label: 'Reviews & Ratings', href: '/reviews' },
+                    { label: 'Cost Estimator', href: '/calculator' },
+                    { label: 'FAQ', href: '/faq' },
+                ],
+            },
+            {
+                title: 'Explore',
+                links: [
+                    { label: 'Blog', href: '/blog' },
+                    { label: 'Resources & Tools', href: '/resources' },
+                    { label: 'Pricing Guide', href: '/pricing' },
+                    { label: 'Complete Guide', href: '/guides/complete-guide' },
+                    { label: 'Common Mistakes', href: '/guides/common-mistakes' },
+                ],
+            },
+            companyCol,
+        ];
+    }
+
+    // Default
+    return [
+        {
+            title: 'Resources',
+            links: [
+                { label: 'Guides', href: '/guides' },
+                { label: 'Comparisons', href: '/compare' },
+                { label: 'Cost Calculator', href: '/calculator' },
+                { label: 'Reviews', href: '/reviews' },
+                { label: 'FAQ', href: '/faq' },
+            ],
+        },
+        {
+            title: 'Explore',
+            links: [
+                { label: 'Blog', href: '/blog' },
+                { label: 'Resources & Tools', href: '/resources' },
+                { label: 'Pricing Guide', href: '/pricing' },
+                { label: 'Complete Guide', href: '/guides/complete-guide' },
+                { label: 'Save Money', href: '/guides/save-money' },
+            ],
+        },
+        companyCol,
+    ];
+}
+
+// ============================================================
+// Niche-aware calculator defaults
+// ============================================================
+
+function getCalculatorDefaults(niche: string, year: number): BlockContentDefaults {
+    const n = niche.toLowerCase();
+    const nicheLabel = niche;
+
+    // Finance / loan / mortgage — proper amortization calculator
+    if (n.match(/loan|mortgage|financ|insur|credit|bank|invest|debt|budget|lending|refinanc|401k|ira/)) {
+        return {
+            config: { scheduleType: 'amortization' },
+            content: {
+                heading: `${capitalize(nicheLabel)} Loan Calculator`,
+                inputs: [
+                    { id: 'loanAmount', label: 'Loan Amount', type: 'number', min: 1000, max: 10000000, step: 1000, default: 50000 },
+                    { id: 'interestRate', label: 'Interest Rate', type: 'number', min: 0.1, max: 30, step: 0.1, default: 7 },
+                    { id: 'loanTerm', label: 'Loan Term', type: 'number', min: 1, max: 30, step: 1, default: 5 },
+                ],
+                outputs: [
+                    { id: 'monthlyPayment', label: 'Monthly Payment', format: 'currency', decimals: 2 },
+                    { id: 'totalInterest', label: 'Total Interest Paid', format: 'currency', decimals: 2 },
+                    { id: 'totalCost', label: 'Total Cost of Loan', format: 'currency', decimals: 2 },
+                ],
+                formula: '({monthlyPayment: loanAmount*(interestRate/100/12*Math.pow(1+interestRate/100/12,loanTerm*12))/(Math.pow(1+interestRate/100/12,loanTerm*12)-1), totalInterest: loanAmount*(interestRate/100/12*Math.pow(1+interestRate/100/12,loanTerm*12))/(Math.pow(1+interestRate/100/12,loanTerm*12)-1)*loanTerm*12-loanAmount, totalCost: loanAmount*(interestRate/100/12*Math.pow(1+interestRate/100/12,loanTerm*12))/(Math.pow(1+interestRate/100/12,loanTerm*12)-1)*loanTerm*12})',
+                methodology: `Calculator uses standard amortization formula with ${year} market rates. Actual payments may vary based on credit score, fees, and lender terms. Consult a financial professional for personalized advice.`,
+                assumptions: [
+                    'Fixed interest rate for the full loan term',
+                    'No additional fees or closing costs included',
+                    'Monthly compounding frequency',
+                    'Payments begin one month after loan origination',
+                ],
+            },
+        };
+    }
+
+    // Home services / construction / renovation — project cost estimator
+    if (n.match(/home|house|roof|plumb|hvac|ac unit|bath|kitchen|floor|paint|landscap|fence|garage|pool|solar|window|door|siding|insulation|renovation|remodel|construct|contract/)) {
+        return {
+            content: {
+                heading: `${capitalize(nicheLabel)} Cost Estimator`,
+                inputs: [
+                    { id: 'area', label: 'Project Area (sq ft)', type: 'number', min: 50, max: 50000, step: 50, default: 500 },
+                    { id: 'quality', label: 'Quality Level', type: 'select', options: [{ label: 'Economy', value: 8 }, { label: 'Standard', value: 15 }, { label: 'Premium', value: 28 }, { label: 'Luxury', value: 45 }] },
+                    { id: 'location', label: 'Location Factor', type: 'select', options: [{ label: 'Low Cost Area', value: 0.8 }, { label: 'Average', value: 1.0 }, { label: 'High Cost Area', value: 1.3 }, { label: 'Major Metro', value: 1.6 }] },
+                ],
+                outputs: [
+                    { id: 'estimate', label: 'Estimated Project Cost', format: 'currency', decimals: 0 },
+                ],
+                formula: 'area * quality * location',
+                methodology: `Estimates are based on ${year} national average costs per square foot, adjusted for quality and location. Actual costs vary based on scope, materials, and contractor pricing.`,
+            },
+        };
+    }
+
+    // Real estate
+    if (n.match(/real estate|realtor|house|property|condo|apartment|rent/)) {
+        return {
+            config: { scheduleType: 'amortization' },
+            content: {
+                heading: 'Mortgage Payment Calculator',
+                inputs: [
+                    { id: 'loanAmount', label: 'Home Price', type: 'number', min: 10000, max: 10000000, step: 5000, default: 350000 },
+                    { id: 'interestRate', label: 'Interest Rate', type: 'number', min: 0.1, max: 15, step: 0.125, default: 6.5 },
+                    { id: 'loanTerm', label: 'Loan Term (Years)', type: 'number', min: 5, max: 30, step: 5, default: 30 },
+                ],
+                outputs: [
+                    { id: 'monthlyPayment', label: 'Monthly Payment', format: 'currency', decimals: 2 },
+                    { id: 'totalInterest', label: 'Total Interest', format: 'currency', decimals: 2 },
+                    { id: 'totalCost', label: 'Total Cost', format: 'currency', decimals: 2 },
+                ],
+                formula: '({monthlyPayment: loanAmount*(interestRate/100/12*Math.pow(1+interestRate/100/12,loanTerm*12))/(Math.pow(1+interestRate/100/12,loanTerm*12)-1), totalInterest: loanAmount*(interestRate/100/12*Math.pow(1+interestRate/100/12,loanTerm*12))/(Math.pow(1+interestRate/100/12,loanTerm*12)-1)*loanTerm*12-loanAmount, totalCost: loanAmount*(interestRate/100/12*Math.pow(1+interestRate/100/12,loanTerm*12))/(Math.pow(1+interestRate/100/12,loanTerm*12)-1)*loanTerm*12})',
+                methodology: `Uses standard ${year} mortgage amortization formula. Does not include property taxes, insurance, PMI, or HOA fees. Consult a mortgage professional for a complete estimate.`,
+            },
+        };
+    }
+
+    // Default generic calculator
+    return {
+        content: {
+            heading: `${capitalize(nicheLabel)} Cost Calculator`,
+            inputs: [
+                { id: 'quantity', label: 'Size / Quantity', type: 'number', min: 1, max: 10000, default: 100 },
+                { id: 'quality', label: 'Quality Level', type: 'select', options: [{ label: 'Basic', value: 1 }, { label: 'Standard', value: 2 }, { label: 'Premium', value: 3 }, { label: 'Luxury', value: 4 }] },
+                { id: 'location', label: 'Location Type', type: 'select', options: [{ label: 'Urban', value: 1.2 }, { label: 'Suburban', value: 1.0 }, { label: 'Rural', value: 0.85 }] },
+            ],
+            outputs: [
+                { id: 'estimate', label: 'Estimated Cost', format: 'currency', decimals: 0 },
+            ],
+            formula: 'quantity * quality * location * 15',
+            methodology: `Estimates are based on current ${year} market rates, verified by industry experts. Actual costs may vary based on your specific requirements and local market conditions.`,
+        },
+    };
+}
+
+// ============================================================
+// Niche-aware lead form fields
+// ============================================================
+
+interface LeadField {
+    name: string;
+    label: string;
+    type: string;
+    required?: boolean;
+    half?: boolean;
+    placeholder?: string;
+    options?: string[];
+}
+
+function getLeadFormFields(niche: string): LeadField[] {
+    const n = niche.toLowerCase();
+
+    const nameFields: LeadField[] = [
+        { name: 'firstName', label: 'First Name', type: 'text', required: true, half: true, placeholder: 'First Name' },
+        { name: 'lastName', label: 'Last Name', type: 'text', required: true, half: true, placeholder: 'Last Name' },
+    ];
+    const emailField: LeadField = { name: 'email', label: 'Email Address', type: 'email', required: true, placeholder: 'Email Address' };
+    const phoneField: LeadField = { name: 'phone', label: 'Phone Number', type: 'tel', required: false, placeholder: 'Phone Number' };
+    const zipField: LeadField = { name: 'zipCode', label: 'ZIP Code', type: 'text', required: true, placeholder: 'ZIP Code' };
+
+    // Home services / construction / renovation
+    if (n.match(/home|house|roof|plumb|hvac|ac unit|bath|kitchen|floor|paint|landscap|fence|garage|pool|solar|window|door|siding|insulation|renovation|remodel|construct|contract/)) {
+        return [
+            ...nameFields,
+            emailField,
+            { name: 'projectType', label: 'Project Type', type: 'select', required: true, options: ['New Installation', 'Repair / Maintenance', 'Renovation / Remodel', 'Inspection / Consultation', 'Emergency Service'] },
+            phoneField,
+            zipField,
+        ];
+    }
+
+    // Finance / insurance / loans
+    if (n.match(/loan|mortgage|financ|insur|credit|bank|invest|tax|account|debt|budget|lending|refinanc/)) {
+        return [
+            ...nameFields,
+            emailField,
+            { name: 'budget', label: 'Estimated Amount', type: 'select', required: true, options: ['Under $10,000', '$10,000 - $50,000', '$50,000 - $100,000', '$100,000 - $500,000', 'Over $500,000'] },
+            phoneField,
+            zipField,
+        ];
+    }
+
+    // Business / software / technology
+    if (n.match(/software|saas|tech|app|business|enterprise|crm|erp|cloud|cyber|data|ai|automat|manag|market|seo|agency/)) {
+        return [
+            ...nameFields,
+            emailField,
+            { name: 'company', label: 'Company', type: 'text', required: false, placeholder: 'Company' },
+            { name: 'employeeSize', label: 'Employee Size', type: 'select', required: false, options: ['1-10', '11-50', '51-200', '201-1,000', '1,000+'] },
+            phoneField,
+        ];
+    }
+
+    // Health / medical / wellness
+    if (n.match(/health|medic|doctor|dent|chiropract|therap|wellness|fitness|diet|nutrition|mental|rehab|pharma|hospital|clinic/)) {
+        return [
+            ...nameFields,
+            emailField,
+            { name: 'concern', label: 'Primary Concern', type: 'select', required: true, options: ['General Consultation', 'Second Opinion', 'Treatment Options', 'Cost Estimate', 'Insurance Question'] },
+            phoneField,
+            zipField,
+        ];
+    }
+
+    // Auto / vehicle
+    if (n.match(/car|auto|vehicle|truck|suv|sedan|motor|tire|mechanic|dealer|lease/)) {
+        return [
+            ...nameFields,
+            emailField,
+            { name: 'vehicleType', label: 'Vehicle Type', type: 'select', required: false, options: ['Car / Sedan', 'SUV / Crossover', 'Truck / Pickup', 'Van / Minivan', 'Luxury / Sports', 'Electric / Hybrid'] },
+            phoneField,
+            zipField,
+        ];
+    }
+
+    // Legal
+    if (n.match(/lawyer|legal|attorney|law firm|court|divorce|injury|estate plan|immigrat/)) {
+        return [
+            ...nameFields,
+            emailField,
+            { name: 'caseType', label: 'Case Type', type: 'select', required: true, options: ['Personal Injury', 'Family / Divorce', 'Criminal Defense', 'Estate Planning', 'Business / Corporate', 'Immigration', 'Other'] },
+            phoneField,
+            zipField,
+        ];
+    }
+
+    // Default
+    return [
+        ...nameFields,
+        emailField,
+        phoneField,
+        zipField,
+    ];
 }
 
 // ============================================================

@@ -309,25 +309,27 @@ describe('generateRandomizePlan', () => {
 describe('block variant CSS in v2 pipeline', () => {
     it('generateV2GlobalStyles includes block variant CSS', async () => {
         const { generateV2GlobalStyles } = await import('@/lib/deploy/themes/index');
-        const css = generateV2GlobalStyles('clean', 'slate', 'authority', 'test.com');
-        // Check for hero variant selectors
+        const { getDomainPrefix } = await import('@/lib/deploy/themes/class-randomizer');
+        const domain = 'test.com';
+        const p = getDomainPrefix(domain);
+        const css = generateV2GlobalStyles('clean', 'slate', 'authority', domain);
+        // Check for hero variant selectors (randomized with domain prefix)
         expect(css).toContain('.hero--centered');
         expect(css).toContain('.hero--gradient');
         expect(css).toContain('.hero--split');
-        // Check for header variant selectors
-        expect(css).toContain('.header--topbar');
-        expect(css).toContain('.header--centered');
+        // Check for header variant selectors (randomized)
+        expect(css).toContain(`.${p}-header--topbar`);
+        expect(css).toContain(`.${p}-header--centered`);
         // Check for footer variant selectors
         expect(css).toContain('.footer--multi-column');
         expect(css).toContain('.footer--minimal');
-        // Check for CTA section variants
-        expect(css).toContain('.cta-section--bar');
-        expect(css).toContain('.cta-section--banner');
-        // Check for renderer-specific classes
-        expect(css).toContain('.review-card');
-        expect(css).toContain('.testimonial-card');
-        expect(css).toContain('.pricing-card');
-        expect(css).toContain('.ranking-item');
-        expect(css).toContain('.vs-grid');
+        // Check for CTA section variants (randomized)
+        expect(css).toContain(`.${p}-cta-section--bar`);
+        // Check for renderer-specific classes (randomized)
+        expect(css).toContain(`.${p}-review-card`);
+        expect(css).toContain(`.${p}-testimonial-card`);
+        expect(css).toContain(`.${p}-pricing-card`);
+        expect(css).toContain(`.${p}-ranking-item`);
+        expect(css).toContain(`.${p}-vs-grid`);
     });
 });

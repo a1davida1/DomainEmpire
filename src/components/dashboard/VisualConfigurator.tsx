@@ -315,6 +315,7 @@ const BLOCK_FIELD_SCHEMAS: Record<string, FieldDef[]> = {
     // --- Layout ---
     Header: [
         { key: 'siteName', label: 'Site Name', type: 'text', target: 'content', placeholder: 'Site name in logo' },
+        { key: 'phone', label: 'Phone Number', type: 'text', target: 'content', placeholder: '1-555-123-4567' },
         { key: 'logoUrl', label: 'Logo URL', type: 'url', target: 'content', placeholder: '/logo.svg' },
         { key: 'sticky', label: 'Sticky Header', type: 'boolean', target: 'config' },
         { key: 'showSearch', label: 'Show Search', type: 'boolean', target: 'config' },

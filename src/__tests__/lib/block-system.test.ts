@@ -446,7 +446,7 @@ describe('Interactive Block Renderers', () => {
             ],
             title: 'Top Picks',
         }), ctx);
-        expect(html).toContain('#1');
+        expect(html).toContain('ranking-number');
         expect(html).toContain('First');
         expect(html).toContain('Top Picks');
     });
@@ -551,7 +551,7 @@ describe('Page Assembly', () => {
         ];
         const html = assemblePageFromBlocks(blocks, makeCtx());
         const headerIdx = html.indexOf('<header');
-        const mainIdx = html.indexOf('<main>');
+        const mainIdx = html.indexOf('<main');
         const footerIdx = html.indexOf('<footer');
 
         expect(headerIdx).toBeLessThan(mainIdx);

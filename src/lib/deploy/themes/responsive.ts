@@ -39,6 +39,11 @@ export const responsiveStyles = `
   .imap-map-grid{grid-template-columns:repeat(auto-fill,minmax(34px,1fr))}
   .trust-badges-row{flex-direction:column}
   .trust-badge{max-width:100%}
+  .toc{padding:1rem}
+  .toc-list{max-height:0;overflow:hidden;transition:max-height .3s ease}
+  .toc:focus-within .toc-list,.toc:hover .toc-list{max-height:80vh}
+  .toc-title{cursor:pointer;margin-bottom:0}
+  .toc-title::after{content:' ▾';font-size:0.7em;opacity:0.5}
 }
 /* Print */
 @media print{

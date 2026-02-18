@@ -20,9 +20,9 @@ config({ path: path.resolve(__dirname, '../.env.local') });
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { and, eq, isNull, sql } from 'drizzle-orm';
-import { randomUUID } from 'crypto';
 import * as schema from '../src/lib/db/schema';
-import { HOMEPAGE_PRESETS } from '../src/lib/deploy/blocks/presets';
+import { getHomepagePreset } from '../src/lib/deploy/blocks/presets';
+import { getVisualCombo, applyVisualCombo } from '../src/lib/deploy/visual-identity';
 
 function parseFlagValue(args: string[], flag: string, fallback: string): string {
     const idx = args.indexOf(flag);
@@ -52,10 +52,6 @@ interface DomainSummary {
     articlesSeeded: number;
     homepageSeeded: boolean;
     error?: string;
-}
-
-function generateBlockId(): string {
-    return `blk_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
 }
 
 function extractSiteTitle(domain: string): string {
@@ -194,17 +190,17 @@ async function main() {
                         // Seed v2 homepage page definition with block presets (inside tx so
                         // if this fails the deletes above are rolled back — no data loss)
                         const siteTemplate = domain.siteTemplate || 'authority';
-                        const skinName = domain.skin || 'slate';
-                        const presetBlocks = HOMEPAGE_PRESETS[siteTemplate] ?? HOMEPAGE_PRESETS.authority;
-                        const blocks = presetBlocks.map(b => ({ ...b, id: generateBlockId() }));
+                        const combo = getVisualCombo(domain.domain);
+                        const rawBlocks = getHomepagePreset(siteTemplate, domain.domain, domain.niche || undefined);
+                        const blocks = applyVisualCombo(rawBlocks, combo);
 
                         await tx.insert(schema.pageDefinitions).values({
                             domainId: domain.id,
                             route: '/',
                             title: extractSiteTitle(domain.domain),
                             metaDescription: `Expert guides about ${domain.niche || 'various topics'}`,
-                            theme: 'clean',
-                            skin: skinName,
+                            theme: combo.theme,
+                            skin: combo.skin,
                             blocks,
                             isPublished: true,
                             version: 1,

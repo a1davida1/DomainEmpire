@@ -40,7 +40,7 @@ export function escapeHtml(unsafe: string): string {
         '"': '&quot;',
         "'": '&#039;',
     };
-    return unsafe.replace(/[&<>"']/g, (m) => map[m]);
+    return (unsafe ?? '').replace(/[&<>"']/g, (m) => map[m]);
 }
 
 export function escapeAttr(unsafe: string): string {
@@ -51,7 +51,7 @@ export function escapeAttr(unsafe: string): string {
         '<': '&lt;',
         '>': '&gt;',
     };
-    return unsafe.replace(/[&"'<>]/g, (m) => map[m]);
+    return (unsafe ?? '').replace(/[&"'<>]/g, (m) => map[m]);
 }
 
 // ==============================
