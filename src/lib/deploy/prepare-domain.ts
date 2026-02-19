@@ -303,6 +303,45 @@ export async function prepareDomain(
                 return { ...b, content: c, config: cfg };
             }
 
+            // Fix dead links in markdown content — strip links to pages that don't exist
+            if (b.type === 'ArticleBody' || b.type === 'FAQ') {
+                const linkRe = /\[([^\]]+)\]\(\/([^)]+)\)/g;
+                let fixCount = 0;
+                function stripDeadLinks(text: string): string {
+                    return text.replace(linkRe, (full, label, path) => {
+                        const route = '/' + path;
+                        if (!liveRoutes.has(route) && !liveRoutes.has(route.replace(/\/$/, ''))) {
+                            fixCount++;
+                            return label;
+                        }
+                        return full;
+                    });
+                }
+                for (const key of Object.keys(c)) {
+                    const val = c[key];
+                    if (typeof val === 'string' && val.includes('](/')) {
+                        c[key] = stripDeadLinks(val);
+                    }
+                    if (Array.isArray(val)) {
+                        for (let j = 0; j < val.length; j++) {
+                            const item = val[j];
+                            if (item && typeof item === 'object') {
+                                for (const ik of Object.keys(item as Record<string, unknown>)) {
+                                    const iv = (item as Record<string, unknown>)[ik];
+                                    if (typeof iv === 'string' && iv.includes('](/')) {
+                                        (item as Record<string, unknown>)[ik] = stripDeadLinks(iv);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if (fixCount > 0) {
+                    result.programmaticFixes.namesFixed += fixCount;
+                    changed = true;
+                }
+            }
+
             if (b.type === 'LeadForm' && (cfg.endpoint === '#')) {
                 cfg.endpoint = '';
                 result.programmaticFixes.endpointsFixed++;

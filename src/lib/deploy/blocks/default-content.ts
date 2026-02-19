@@ -176,7 +176,7 @@ export function getDefaultBlockContent(
         },
         RankingList: {
             content: {
-                title: `Top ${capitalize(nicheLabel)} Picks for ${year}`,
+                title: 'Top Picks',
                 items: [],
             },
         },

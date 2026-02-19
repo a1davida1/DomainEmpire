@@ -554,6 +554,10 @@ export async function directUploadDeploy(
             });
 
             if (proc.error) throw proc.error;
+            if (proc.signal) {
+                const partial = `${proc.stdout || ''}${proc.stderr || ''}`.slice(-300);
+                throw new Error(`Deploy process killed by signal ${proc.signal}${partial ? `: ${partial}` : ''}`);
+            }
             const output = `${proc.stdout || ''}${proc.stderr || ''}`;
 
             const urlMatch = output.match(/https:\/\/[a-z0-9-]+\.[a-z0-9-]+\.pages\.dev/);

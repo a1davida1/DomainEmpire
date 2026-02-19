@@ -72,9 +72,14 @@ export default async function ReviewerWorkbenchPage({ searchParams }: PageProps)
         taskWhere.push(inArray(articles.contentType, TOOL_CONTENT_TYPES));
     }
     if (search.length > 0) {
+        const escaped = search
+            .replaceAll('\\', '\\\\')
+            .replaceAll('%', '\\%')
+            .replaceAll('_', '\\_');
+        const pattern = `%${escaped}%`;
         const searchCondition = or(
-            ilike(articles.title, `%${search}%`),
-            ilike(domains.domain, `%${search}%`),
+            ilike(articles.title, pattern),
+            ilike(domains.domain, pattern),
         );
         if (searchCondition) {
             taskWhere.push(searchCondition);

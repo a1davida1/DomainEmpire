@@ -29,8 +29,14 @@ export function resolveQualityGate(input: {
         return { minQualityScore: MIN_REVIEW_QUALITY_SCORE, minWordCount: 900, isInteractive: false };
     }
 
-    const ymyl = (input.ymylLevel || 'none') as 'none' | 'low' | 'medium' | 'high';
-    const minWordCount = ymyl === 'high' ? 350 : ymyl === 'medium' ? 250 : 150;
+    const raw = input.ymylLevel || 'none';
+    const YMYL_WORD_COUNTS: Record<string, number> = {
+        high: 350,
+        medium: 250,
+        low: 150,
+        none: 150,
+    };
+    const minWordCount = YMYL_WORD_COUNTS[raw] ?? 150;
     return { minQualityScore: MIN_REVIEW_QUALITY_SCORE, minWordCount, isInteractive: true };
 }
 

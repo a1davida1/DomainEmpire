@@ -119,9 +119,9 @@ const SIDEBAR_STRATEGIES: SidebarStrategy[] = ['guides-only', 'all-content', 'no
 export interface StructuralBlueprint {
     domain: string;
 
-    /** Which sub-pages this site includes (8-14 pages, always includes core) */
+    /** Which sub-pages this site includes (7-15 pages, always includes core) */
     pages: SubPageSlot[];
-    /** How many guide sub-pages (0-3) */
+    /** How many guide sub-pages (1-3) */
     guideCount: number;
 
     /** Nav structure */

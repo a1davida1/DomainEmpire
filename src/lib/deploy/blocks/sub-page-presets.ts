@@ -933,7 +933,7 @@ export function generateSubPagesFromBlueprint(
             if (b.type === 'Footer') {
                 result.variant = footerVariant;
             }
-            if (b.type === 'Hero' && !b.content?.heading) {
+            if (b.type === 'Hero' && !b.variant) {
                 result.variant = heroVariant;
             }
             if (b.type === 'CTABanner' && ctaConfig) {

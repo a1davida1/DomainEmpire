@@ -69,6 +69,10 @@ export interface EnrichResult {
     calculatorsFixed: number;
     faqsFixed: number;
     articlesExpanded: number;
+    comparisonsFixed: number;
+    rankingsFixed: number;
+    prosconsFixed: number;
+    vscardsFixed: number;
     citationsFixed: number;
     metaFixed: number;
     totalAiCalls: number;
@@ -84,9 +88,15 @@ const GENERIC_COST_MARKERS = [
 ];
 const GENERIC_RANGE_FINGERPRINT = new Set([500, 1200, 1500, 2000, 3000, 5000, 6000, 12000]);
 
+const GENERIC_CALC_INPUT_LABELS = [
+    'Size / Quantity', 'Size/Quantity', 'Quality Level', 'Location Type',
+    'Service Type', 'Project Size', 'Basic', 'Standard', 'Premium',
+];
+
 function isGenericCostData(content: Record<string, unknown>): boolean {
     const str = JSON.stringify(content);
     if (GENERIC_COST_MARKERS.some(m => str.includes(m))) return true;
+    if (GENERIC_CALC_INPUT_LABELS.some(m => str.includes(m))) return true;
 
     const ranges = content.ranges as Array<{ low?: number; high?: number; average?: number }> | undefined;
     if (Array.isArray(ranges) && ranges.length > 0) {
@@ -97,22 +107,30 @@ function isGenericCostData(content: Record<string, unknown>): boolean {
     return false;
 }
 
+const SEVERE_GENERIC_FAQ_PHRASES = [
+    'every situation is unique', 'individualized basis',
+    'contact us for a personalized', 'get in touch with our team',
+    'reach out to our team',
+];
+
 const GENERIC_FAQ_PHRASES = [
     'first-time buyer', 'experienced professional', 'verified customers',
     'right choice for you', 'best option for your needs', 'varies depending on',
-    'contact us for a personalized', 'every situation is unique',
-    'depends on several factors', 'get in touch with our team',
+    'depends on several factors',
     'costs vary widely', 'use our cost calculator', 'for a personalized estimate',
     'based on your requirements', 'specific needs, location',
-    'consult with a professional', 'reach out to our team',
-    'varies based on', 'numerous factors', 'individualized basis',
+    'consult with a professional',
+    'varies based on', 'numerous factors',
 ];
+
+const GENERIC_FAQ_MATCH_THRESHOLD = 3;
 
 function isGenericFaqContent(items: unknown[] | undefined): boolean {
     if (!Array.isArray(items) || items.length === 0) return false;
     const text = JSON.stringify(items).toLowerCase();
+    if (SEVERE_GENERIC_FAQ_PHRASES.some(p => text.includes(p.toLowerCase()))) return true;
     const genericHits = GENERIC_FAQ_PHRASES.filter(p => text.includes(p.toLowerCase()));
-    return genericHits.length >= 1;
+    return genericHits.length >= GENERIC_FAQ_MATCH_THRESHOLD;
 }
 
 // ── AI call helpers ──────────────────────────────────────────────────────────
@@ -197,7 +215,9 @@ export async function enrichDomain(domainId: string, options: EnrichOptions = {}
 
     const result: EnrichResult = {
         domain: domain.domain, heroesFixed: 0, calculatorsFixed: 0,
-        faqsFixed: 0, articlesExpanded: 0, citationsFixed: 0, metaFixed: 0,
+        faqsFixed: 0, articlesExpanded: 0, comparisonsFixed: 0,
+        rankingsFixed: 0, prosconsFixed: 0, vscardsFixed: 0,
+        citationsFixed: 0, metaFixed: 0,
         totalAiCalls: 0, totalCost: 0, errors: [],
     };
 
@@ -529,24 +549,28 @@ Return ONLY JSON: { "metaDescription": "..." }`,
                 case 'comparison':
                     if (parsed.options && Array.isArray(parsed.options) && (parsed.options as unknown[]).length > 0) {
                         updated[job.blockIdx] = { ...updated[job.blockIdx], content: { ...(updated[job.blockIdx].content as Record<string, unknown>), ...parsed } };
+                        result.comparisonsFixed++;
                         changed = true;
                     }
                     break;
                 case 'ranking':
                     if (parsed.items && Array.isArray(parsed.items) && (parsed.items as unknown[]).length > 0) {
                         updated[job.blockIdx] = { ...updated[job.blockIdx], content: { ...(updated[job.blockIdx].content as Record<string, unknown>), ...parsed } };
+                        result.rankingsFixed++;
                         changed = true;
                     }
                     break;
                 case 'proscons':
                     if (parsed.name && parsed.pros) {
                         updated[job.blockIdx] = { ...updated[job.blockIdx], content: { ...(updated[job.blockIdx].content as Record<string, unknown>), ...parsed } };
+                        result.prosconsFixed++;
                         changed = true;
                     }
                     break;
                 case 'vscard':
                     if (parsed.itemA && parsed.itemB) {
                         updated[job.blockIdx] = { ...updated[job.blockIdx], content: { ...(updated[job.blockIdx].content as Record<string, unknown>), ...parsed } };
+                        result.vscardsFixed++;
                         changed = true;
                     }
                     break;
