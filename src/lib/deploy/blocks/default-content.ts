@@ -115,9 +115,9 @@ export function getDefaultBlockContent(
         },
         CTABanner: {
             content: {
-                text: `Ready to find the best ${nicheLabel} for your needs? Compare top-rated options and get personalized recommendations.`,
-                buttonLabel: 'Compare Options Now',
-                buttonUrl: '/compare',
+                text: '',
+                buttonLabel: '',
+                buttonUrl: '/calculator',
             },
         },
         LeadForm: {

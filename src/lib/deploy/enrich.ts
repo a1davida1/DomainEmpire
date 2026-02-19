@@ -159,6 +159,45 @@ function parseJson(raw: string): Record<string, unknown> | null {
     }
 }
 
+/**
+ * Infer the site's actual purpose from its domain name and niche.
+ * This gives AI prompts the context needed to generate relevant content
+ * instead of generic "compare {niche} options" copy.
+ */
+function inferSitePurpose(domain: string, niche: string, siteName: string): string {
+    const d = domain.toLowerCase();
+    const n = niche.toLowerCase();
+
+    // Domain name keyword → purpose mapping
+    const patterns: Array<[RegExp, string]> = [
+        [/home\s?value|property\s?value|house\s?worth/, `${siteName} helps homeowners estimate their property's current market value. The calculator should take property details (sq ft, bedrooms, bathrooms, zip code, year built, condition) and output an estimated market value range.`],
+        [/prenup|pre-?nup/, `${siteName} helps couples decide whether they need a prenuptial agreement and understand the costs. The calculator should estimate prenup costs based on complexity (simple vs contested), assets, state, and attorney involvement.`],
+        [/refinanc/, `${siteName} helps homeowners evaluate mortgage refinancing options. The calculator should compare current rate vs new rate, remaining term, closing costs, and show break-even timeline and total savings.`],
+        [/mortgage|home\s?loan/, `${siteName} helps home buyers calculate mortgage payments and affordability. Inputs should be home price, down payment, interest rate, loan term. Show monthly payment, total interest, and amortization.`],
+        [/credit\s?card\s?payoff/, `${siteName} helps people create a plan to pay off credit card debt. Calculator inputs: balance, interest rate (APR), monthly payment. Show payoff timeline, total interest, and debt-free date.`],
+        [/braces|orthodont/, `${siteName} helps people understand braces and orthodontic treatment costs. Calculator should estimate costs based on treatment type (metal/ceramic/lingual/Invisalign), insurance coverage level, region, and treatment complexity.`],
+        [/bathroom|kitchen|remodel|renovat/, `${siteName} helps homeowners estimate renovation costs. Calculator inputs should be room size, renovation scope (cosmetic/partial/full gut), material quality, and region. Output total project cost range.`],
+        [/solar|panel/, `${siteName} helps homeowners evaluate solar panel installation costs and savings. Inputs: roof size, electricity bill, sun exposure, region. Output: installation cost, monthly savings, payback period.`],
+        [/pool/, `${siteName} helps homeowners estimate swimming pool installation costs. Inputs: pool type (above-ground/in-ground), size, material, features. Output: total cost range and annual maintenance estimate.`],
+        [/therapy|counsel/, `${siteName} helps people understand therapy and counseling costs. Calculator estimates session costs based on therapy type, insurance, provider credentials, and session frequency.`],
+        [/dental|tooth|teeth/, `${siteName} helps people understand dental procedure costs. Calculator estimates costs based on procedure type, insurance coverage, provider type, and geographic region.`],
+        [/insur/, `${siteName} helps consumers compare insurance options and estimate premiums. Calculator inputs depend on insurance type (auto/home/health/life) with appropriate risk factors.`],
+        [/lawyer|attorney|legal/, `${siteName} helps people understand legal service costs and find appropriate representation. Calculator estimates legal fees based on case type, complexity, and billing method.`],
+        [/ivf|fertil/, `${siteName} helps people understand fertility treatment costs. Calculator estimates costs based on treatment type (IVF/IUI/medication), insurance coverage, number of cycles, and clinic tier.`],
+        [/wedding/, `${siteName} helps couples plan and budget their wedding. Calculator estimates total wedding cost based on guest count, venue type, region, and service tier.`],
+        [/moving|reloc/, `${siteName} helps people estimate moving costs. Calculator inputs: distance, home size, service level (DIY/partial/full-service), timing.`],
+        [/only\s?fans|creator/, `${siteName} helps content creators estimate potential earnings. Calculator inputs: subscriber count, subscription price, posting frequency, tip ratio.`],
+    ];
+
+    for (const [pattern, purpose] of patterns) {
+        if (pattern.test(d) || pattern.test(n)) return purpose;
+    }
+
+    // Generic fallback using domain name analysis
+    const slug = domain.replace(/\.[a-z]{2,}(?:\.[a-z]{2,})?$/i, '').replace(/[-_]/g, ' ');
+    return `${siteName} is a consumer information site about ${niche}. The domain "${domain}" suggests it focuses on ${slug}. Generate content that's specifically useful for someone researching ${slug} — not generic "${niche}" content.`;
+}
+
 async function runParallel<T>(tasks: Array<() => Promise<T>>, concurrency: number): Promise<T[]> {
     const results: T[] = [];
     let idx = 0;
@@ -186,6 +225,7 @@ type EnrichJob =
     | { type: 'ranking'; pageId: string; blockIdx: number; prompt: string }
     | { type: 'proscons'; pageId: string; blockIdx: number; prompt: string }
     | { type: 'vscard'; pageId: string; blockIdx: number; prompt: string }
+    | { type: 'cta'; pageId: string; blockIdx: number; prompt: string }
     | { type: 'meta'; pageId: string; prompt: string };
 
 interface EnrichJobResult {
@@ -212,6 +252,7 @@ export async function enrichDomain(domainId: string, options: EnrichOptions = {}
     const niche = domain.subNiche || domain.niche || 'general';
     const siteName = extractSiteTitle(domain.domain);
     const voiceSeed = await getOrCreateVoiceSeed(domain.id, domain.domain, niche);
+    const sitePurpose = inferSitePurpose(domain.domain, niche, siteName);
 
     const result: EnrichResult = {
         domain: domain.domain, heroesFixed: 0, calculatorsFixed: 0,
@@ -258,16 +299,17 @@ export async function enrichDomain(domainId: string, options: EnrichOptions = {}
                     const pageContext = page.title || page.route.replace(/\//g, ' ').trim();
                     jobs.push({
                         type: 'hero', pageId: page.id, blockIdx: i,
-                        prompt: `Generate a hero headline for a ${niche} website.
+                        prompt: `Generate a hero headline for ${domain.domain}.
 
-Site:
-- Domain: ${domain.domain}
-- Site name: ${siteName}
-- Page context: ${pageContext}
-- Voice seed (for style/voice, not for factual claims): ${JSON.stringify(voiceSeed)}
+SITE PURPOSE: ${sitePurpose}
+
+Page: ${pageContext}
+Year: ${new Date().getFullYear()}
+
+Write a headline that speaks directly to someone visiting THIS specific site. Not generic "${niche}" copy.
 
 Return ONLY a JSON object:
-{ "heading": "Compelling H1 (50-70 chars)", "subheading": "Value proposition (80-120 chars)", "badge": "Updated 2026" }`,
+{ "heading": "Specific compelling H1 (50-70 chars)", "subheading": "What this site helps you do (80-120 chars)", "badge": "Updated ${new Date().getFullYear()}" }`,
                     });
                 }
             }
@@ -286,11 +328,19 @@ Return ONLY a JSON object:
                         : '{ "ranges": [{ "label": "Category", "low": 500, "high": 5000, "average": 2000 }], "factors": [{ "name": "Factor", "impact": "high", "description": "Why it matters" }] }';
                     jobs.push({
                         type: 'calculator', pageId: page.id, blockIdx: i,
-                        prompt: `Generate ${block.type === 'QuoteCalculator' ? 'calculator inputs and formula' : 'cost breakdown ranges'} for "${niche}" on ${domain.domain}.
+                        prompt: `Generate a ${block.type === 'QuoteCalculator' ? 'calculator' : 'cost breakdown'} for ${domain.domain}.
 
-IMPORTANT: Use REAL, RESEARCHED cost data specific to "${niche}". Do NOT use generic placeholder numbers.
-For cost ranges, research actual market rates for this specific industry/service.
-For calculator inputs, use fields that real consumers would care about in this niche.
+SITE PURPOSE: ${sitePurpose}
+
+CRITICAL RULES:
+- Input fields must be specific to what THIS site calculates — NOT generic "Size/Quantity" or "Quality Level"
+- Use real industry terminology that a consumer would recognize
+- For select dropdowns, use options with real names (e.g., "Traditional Metal Braces" not "Basic")
+- Formula must produce realistic dollar amounts for this specific domain
+- Include 3-5 relevant input fields
+- ${block.type === 'QuoteCalculator'
+    ? 'Inputs can be: number (with min/max/step), select (with labeled options and numeric multiplier values), or range'
+    : 'Each range needs a descriptive label, low/high/average dollar amounts that are realistic for this service'}
 
 Return ONLY valid JSON: ${schema}`,
                     });
@@ -304,18 +354,19 @@ Return ONLY valid JSON: ${schema}`,
                 if (options.forceFaqs || !items || items.length === 0 || hasGenericFaq) {
                     jobs.push({
                         type: 'faq', pageId: page.id, blockIdx: i,
-                        prompt: `Generate 5-7 FAQ items for a ${niche} page on ${domain.domain}.
+                        prompt: `Generate 5-7 FAQ items for ${domain.domain}.
 
-Site name: ${siteName}
-Page context: ${page.title || page.route}
-Voice seed: ${JSON.stringify(voiceSeed)}
+SITE PURPOSE: ${sitePurpose}
+Page: ${page.title || page.route}
 
 RULES:
-- Questions should be what real people actually Google about ${niche}
-- Answers MUST include specific numbers, price ranges, or concrete facts — NEVER say "costs vary widely" or "depends on your needs" without giving a range
-- If a question is about cost, give a real dollar range (e.g. "$3,000-$7,000 for traditional braces")
-- Keep answers 2-3 sentences, factual, and genuinely useful to a reader
-- Do NOT use hedge language like "consult a professional" or "use our calculator" — give the actual answer
+- Questions should be what real people actually Google about this specific topic
+- Answers MUST include specific numbers, dollar ranges, timelines, or concrete facts
+- NEVER say "costs vary widely" or "depends on your needs" without immediately giving a real range
+- If a question is about cost, give actual dollar amounts (e.g., "$3,000-$7,000" not "varies")
+- Keep answers 2-3 sentences, directly useful — a reader should learn something concrete
+- Do NOT use hedge language like "consult a professional" or "use our calculator"
+- Do NOT reference other pages on the site — answer the question completely right here
 
 Return ONLY valid JSON: { "items": [{ "question": "...", "answer": "..." }] }`,
                     });
@@ -334,7 +385,14 @@ Return ONLY valid JSON: { "items": [{ "question": "...", "answer": "..." }] }`,
                     const pageContext = page.title || niche;
                     jobs.push({
                         type: 'article', pageId: page.id, blockIdx: i, originalLength: md.length,
-                        prompt: `Expand this article about "${pageContext}" to at least ${targetWords} words. Keep the existing content and add more depth, examples, and actionable advice. Write naturally with personality.
+                        prompt: `Expand this article for ${domain.domain}.
+
+SITE PURPOSE: ${sitePurpose}
+Page: ${pageContext}
+Year: ${new Date().getFullYear()}
+
+Expand to at least ${targetWords} words. Add real data, specific examples, and actionable advice relevant to THIS site's topic.
+Do NOT use generic template language. Write as if you're an expert in this specific subject.
 
 EXISTING CONTENT:
 ${md}
@@ -354,20 +412,21 @@ Return ONLY a JSON object: { "markdown": "Full expanded article in markdown" }`,
                 if (isGeneric) {
                     jobs.push({
                         type: 'comparison', pageId: page.id, blockIdx: i,
-                        prompt: `Generate a comparison table for "${niche}" on ${domain.domain}.
+                        prompt: `Generate a comparison table for ${domain.domain}.
 
-List 3-5 REAL, NAMED options that consumers actually choose between in the ${niche} industry.
-Use real product/service/provider names — NOT generic labels like "Premium Choice" or "Option A".
-Include realistic pricing, genuine pros/cons differences, and honest ratings.
+SITE PURPOSE: ${sitePurpose}
 
-For braces: "Traditional Metal Braces", "Ceramic Braces", "Invisalign Clear Aligners", "Lingual Braces"
-For home renovation: "DIY Approach", "Budget Contractor", "Mid-Range Firm", "Premium Design-Build"
+List 3-5 REAL, NAMED options that consumers of THIS specific site would compare.
+Use actual product/service/provider/method names — NOT generic labels.
+Include realistic pricing, genuine trade-offs, and honest quality ratings.
+
+The column headers should make sense for what's being compared on THIS site.
 
 Return ONLY valid JSON:
 {
   "columns": [{ "key": "quality", "label": "Quality", "type": "rating", "sortable": true }, { "key": "value", "label": "Value", "type": "rating", "sortable": true }, { "key": "price", "label": "Price Range", "type": "text", "sortable": true }],
-  "options": [{ "name": "Real Product Name", "badge": "Editor's Pick", "scores": { "quality": 5, "value": 4, "price": "$3,000-$7,000" } }],
-  "verdict": "Specific recommendation with reasoning"
+  "options": [{ "name": "Real Specific Name", "badge": "Editor's Pick", "scores": { "quality": 5, "value": 4, "price": "$X,000-$Y,000" } }],
+  "verdict": "Specific recommendation with reasoning for THIS site's audience"
 }`,
                     });
                 }
@@ -383,17 +442,18 @@ Return ONLY valid JSON:
                 if (isGeneric) {
                     jobs.push({
                         type: 'ranking', pageId: page.id, blockIdx: i,
-                        prompt: `Generate a ranking list of the top 3-5 ${niche} options for ${domain.domain}.
+                        prompt: `Generate a ranking list for ${domain.domain}.
 
-Use REAL, NAMED products/services/providers — NOT generic labels.
-Include specific strengths, realistic ratings, and why each earned its rank.
+SITE PURPOSE: ${sitePurpose}
+
+List 3-5 REAL, NAMED options relevant to THIS site's audience. Use actual names consumers would recognize.
 
 Return ONLY valid JSON:
 {
-  "title": "Top [Niche] Picks for ${new Date().getFullYear()}",
+  "title": "Top Picks for ${new Date().getFullYear()}",
   "items": [
-    { "rank": 1, "name": "Real Name", "description": "2-3 sentences explaining why #1", "rating": 4.9, "badge": "Editor's Choice" },
-    { "rank": 2, "name": "Real Name", "description": "Why it's runner up", "rating": 4.7 }
+    { "rank": 1, "name": "Real Specific Name", "description": "2-3 sentences with real details", "rating": 4.9, "badge": "Editor's Choice" },
+    { "rank": 2, "name": "Real Specific Name", "description": "Specific strengths", "rating": 4.7 }
   ]
 }`,
                     });
@@ -407,18 +467,20 @@ Return ONLY valid JSON:
                 if (isGeneric) {
                     jobs.push({
                         type: 'proscons', pageId: page.id, blockIdx: i,
-                        prompt: `Generate a detailed pros/cons review card for the #1 recommended ${niche} option on ${domain.domain}.
+                        prompt: `Generate a pros/cons card for the #1 option on ${domain.domain}.
 
-Use a REAL product/service name. Give specific, honest pros and cons — not generic filler.
+SITE PURPOSE: ${sitePurpose}
+
+Use a REAL name. Pros/cons must be specific to this option — not generic "good quality" filler.
 
 Return ONLY valid JSON:
 {
-  "name": "Real Product/Service Name",
+  "name": "Real Specific Name",
   "rating": 4.8,
   "badge": "Editor's Choice",
-  "pros": ["Specific pro 1", "Specific pro 2", "Specific pro 3", "Specific pro 4"],
-  "cons": ["Honest con 1", "Honest con 2"],
-  "summary": "2-3 sentence honest assessment"
+  "pros": ["Specific factual pro with numbers where possible"],
+  "cons": ["Honest specific con"],
+  "summary": "2-3 sentence honest assessment specific to this option"
 }`,
                     });
                 }
@@ -431,16 +493,38 @@ Return ONLY valid JSON:
                 if (isGeneric) {
                     jobs.push({
                         type: 'vscard', pageId: page.id, blockIdx: i,
-                        prompt: `Generate a head-to-head comparison card for the two most popular ${niche} options on ${domain.domain}.
+                        prompt: `Generate a head-to-head comparison for ${domain.domain}.
 
-Use REAL product/service names. Give specific, differentiated pros/cons.
+SITE PURPOSE: ${sitePurpose}
+
+Compare the two most common choices a visitor to THIS site would be deciding between. Use real names.
 
 Return ONLY valid JSON:
 {
-  "itemA": { "name": "Real Name A", "description": "1 sentence", "pros": ["specific pro"], "cons": ["specific con"], "rating": 4.8 },
-  "itemB": { "name": "Real Name B", "description": "1 sentence", "pros": ["specific pro"], "cons": ["specific con"], "rating": 4.3 },
-  "verdict": "Specific recommendation with reasoning"
+  "itemA": { "name": "Real Name", "description": "1 sentence", "pros": ["specific pro"], "cons": ["specific con"], "rating": 4.8 },
+  "itemB": { "name": "Real Name", "description": "1 sentence", "pros": ["specific pro"], "cons": ["specific con"], "rating": 4.3 },
+  "verdict": "Specific recommendation for THIS site's audience"
 }`,
+                    });
+                }
+            }
+
+            // CTABanner — needs site-specific call to action
+            if (block.type === 'CTABanner') {
+                const text = content.text as string || '';
+                const isGeneric = !text || text.includes('Ready to find the best') || text.includes('Compare top-rated') || text.length < 10;
+                if (isGeneric) {
+                    jobs.push({
+                        type: 'cta', pageId: page.id, blockIdx: i,
+                        prompt: `Write a call-to-action banner for ${domain.domain}.
+
+SITE PURPOSE: ${sitePurpose}
+Page: ${page.title || page.route}
+
+The CTA should tell the visitor exactly what they'll get by clicking. Be specific to THIS site.
+
+Return ONLY valid JSON:
+{ "text": "One compelling sentence specific to this site", "buttonLabel": "Action verb + what they get (3-5 words)", "buttonUrl": "/calculator" }`,
                     });
                 }
             }
@@ -458,15 +542,12 @@ Return ONLY valid JSON:
         if (options.forceMeta || !page.metaDescription || page.metaDescription.includes('Expert guides about')) {
             jobs.push({
                 type: 'meta', pageId: page.id,
-                prompt: `Write a specific ~150-character SEO meta description.
+                prompt: `Write a ~150-character SEO meta description for ${domain.domain}.
 
-Site:
-- Domain: ${domain.domain}
-- Site name: ${siteName}
-- Niche: ${niche}
-- Page title: ${page.title || page.route}
+SITE PURPOSE: ${sitePurpose}
+Page: ${page.title || page.route}
 
-Avoid generic filler like "Expert guides about...". Make it feel uniquely relevant.
+Write a description that tells a Google searcher exactly what they'll get on THIS page. Be specific, not generic.
 
 Return ONLY JSON: { "metaDescription": "..." }`,
             });
@@ -571,6 +652,12 @@ Return ONLY JSON: { "metaDescription": "..." }`,
                     if (parsed.itemA && parsed.itemB) {
                         updated[job.blockIdx] = { ...updated[job.blockIdx], content: { ...(updated[job.blockIdx].content as Record<string, unknown>), ...parsed } };
                         result.vscardsFixed++;
+                        changed = true;
+                    }
+                    break;
+                case 'cta':
+                    if (parsed.text && parsed.buttonLabel) {
+                        updated[job.blockIdx] = { ...updated[job.blockIdx], content: { ...(updated[job.blockIdx].content as Record<string, unknown>), ...parsed } };
                         changed = true;
                     }
                     break;
