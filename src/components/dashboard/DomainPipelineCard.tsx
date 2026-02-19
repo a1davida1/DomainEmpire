@@ -207,7 +207,10 @@ export function DomainPipelineCard({ state }: { state: PipelineState }) {
 
             toast.success(`Pipeline complete: ${ready ? '✓ Ready' : '⚠ Needs attention'}. ${parts.join(', ')}`);
             const totalCost = (data.enrichment?.cost ?? 0) + (data.contentScan?.cost ?? 0);
-            setPrepareStatus(`${data.pageCount ?? 0} pages | ${scoreText} | $${totalCost.toFixed(2)} cost`);
+            const segments = [`${data.pageCount ?? 0} pages`];
+            if (scoreText) segments.push(scoreText);
+            segments.push(`$${totalCost.toFixed(2)} cost`);
+            setPrepareStatus(segments.join(' | '));
             router.refresh();
         } catch (err) {
             toast.error(err instanceof Error ? err.message : 'Prepare failed');

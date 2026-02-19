@@ -3,6 +3,7 @@
  * Dispatches to content-type-specific templates for interactive pages.
  */
 
+import { createHash } from 'node:crypto';
 import { db, articles, domains, monetizationProfiles, articleDatasets, datasets } from '@/lib/db';
 import { eq, and, inArray, isNull } from 'drizzle-orm';
 import { getMonetizationScripts } from '@/lib/monetization/scripts';
@@ -304,6 +305,13 @@ async function generateV2SiteFiles(
         }
     }
 
+    // Generate CSS first so we can compute a cache-busting hash for HTML references
+    const cssContent = generateV2GlobalStyles(themeName, skinName, domain.siteTemplate || 'authority', domain.domain, branding);
+    files.push({ path: 'styles.css', content: cssContent });
+
+    const cssHash = createHash('md5').update(cssContent).digest('hex').slice(0, 8);
+    const cssHref = `/styles.css?v=${cssHash}`;
+
     // Generate HTML for each page definition
     for (const pageDef of pageDefs) {
         const ctx: RenderContext = {
@@ -326,7 +334,16 @@ async function generateV2SiteFiles(
         };
 
         const blocks = (pageDef.blocks || []) as BlockEnvelope[];
-        const html = assemblePageFromBlocks(blocks, ctx);
+        let html = assemblePageFromBlocks(blocks, ctx, cssHref);
+
+        // Resolve image paths: swap .svg → .png where AI images were generated
+        if (deployedImagePaths.size > 0) {
+            html = html.replace(/\/images\/[a-z0-9/_-]+\.svg/gi, (svgPath) => {
+                const clean = svgPath.startsWith('/') ? svgPath.slice(1) : svgPath;
+                const pngPath = clean.replace(/\.svg$/, '.png');
+                return deployedImagePaths.has(pngPath) ? `/${pngPath}` : svgPath;
+            });
+        }
 
         // Determine file path from route
         const route = pageDef.route || '/';
@@ -336,12 +353,6 @@ async function generateV2SiteFiles(
 
         files.push({ path: filePath, content: html });
     }
-
-    // Generate CSS with v2 token system
-    files.push({
-        path: 'styles.css',
-        content: generateV2GlobalStyles(themeName, skinName, domain.siteTemplate || 'authority', domain.domain, branding),
-    });
 
     // Auto-inject trust pages from disclosure config.
     // Skip if a block-based page_definition already covers that route —

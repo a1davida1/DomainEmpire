@@ -442,7 +442,7 @@ export default async function DomainDetailPage({ params }: PageProps) {
         .map((issue) => issue.trim())
         .filter((issue) => issue.length > 0)
         .slice(0, 25);
-    const totalCriticalIssueCount = storedReview?.criticalIssues.length ?? 0;
+    const totalCriticalIssueCount = storedReview?.criticalIssues?.length ?? 0;
     const reviewBadgeClass = reviewVerdict === 'approve'
         ? 'bg-emerald-100 text-emerald-800'
         : reviewVerdict === 'needs_work'

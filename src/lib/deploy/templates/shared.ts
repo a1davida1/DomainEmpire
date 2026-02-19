@@ -164,7 +164,7 @@ export function addExternalLinkAttributes(html: string): string {
 export async function renderMarkdownToHtml(markdown: string, options: RenderMarkdownOptions = {}): Promise<string> {
     const cleaned = markdown
         .replace(/\[INTERNAL_LINK.*?\]/g, '')
-        .replace(/\[EXTERNAL_LINK.*?\]/g, '')  // safety net for unresolved leftovers
+        .replace(/\[EXTERNAL_LINK:\s*(.+?)\s*\|[^\]]*\]/g, '$1')  // preserve anchor text from unresolved leftovers
         .replace(/\[IMAGE.*?\]/g, '');
 
     const result = marked.parse(cleaned, { async: false });

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -62,6 +63,7 @@ function isToolContentType(contentType: string | null): boolean {
 }
 
 export function ToolReviewPanel({ articleId }: { articleId: string }) {
+  const router = useRouter();
   const [me, setMe] = useState<Me | null>(null);
   const [qa, setQa] = useState<QaData | null>(null);
   const [article, setArticle] = useState<ArticleInfo | null>(null);
@@ -205,6 +207,7 @@ export function ToolReviewPanel({ articleId }: { articleId: string }) {
 
       toast.success('QA saved');
       await load();
+      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to save QA');
     } finally {
@@ -233,6 +236,7 @@ export function ToolReviewPanel({ articleId }: { articleId: string }) {
 
       toast.success(`Moved to ${body.newStatus || toStatus}`);
       await load();
+      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Status transition failed');
     } finally {

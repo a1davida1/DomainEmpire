@@ -40,8 +40,9 @@ const navSections: NavSection[] = [
         label: 'Core',
         items: [
             { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-            { name: 'Workflow', href: '/dashboard/workflow', icon: PlayCircle },
+            { name: 'Reviewer', href: '/dashboard/reviewer', icon: ClipboardCheck },
             { name: 'Domains', href: '/dashboard/domains', icon: Globe },
+            { name: 'Workflow', href: '/dashboard/workflow', icon: PlayCircle },
         ],
     },
     {
@@ -70,7 +71,7 @@ const navSections: NavSection[] = [
             { name: 'Deploy', href: '/dashboard/deploy', icon: Rocket },
             { name: 'Queue', href: '/dashboard/queue', icon: ListTodo },
             { name: 'Monitoring', href: '/dashboard/monitoring', icon: Activity },
-            { name: 'Review', href: '/dashboard/review', icon: ClipboardCheck },
+            { name: 'Review Center', href: '/dashboard/review', icon: ClipboardCheck },
             { name: 'Compliance', href: '/dashboard/compliance', icon: ShieldCheck },
             { name: 'KPIs', href: '/dashboard/kpis', icon: Gauge },
         ],

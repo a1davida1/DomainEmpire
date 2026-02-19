@@ -142,6 +142,13 @@ export async function prepareDomain(
     result.theme = combo.theme;
     result.skin = combo.skin;
 
+    // Propagate theme+skin to all existing page definitions
+    await db.update(pageDefinitions).set({
+        theme: combo.theme,
+        skin: combo.skin,
+        updatedAt: new Date(),
+    }).where(eq(pageDefinitions.domainId, domain.id));
+
     // ── Step 3: Pages — seed if empty, regenerate if strategy was explicitly provided ──
     const existingPages = await db.select({ id: pageDefinitions.id })
         .from(pageDefinitions)

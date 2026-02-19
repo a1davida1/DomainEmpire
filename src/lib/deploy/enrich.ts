@@ -68,6 +68,7 @@ export interface EnrichResult {
     heroesFixed: number;
     calculatorsFixed: number;
     faqsFixed: number;
+    articlesExpanded: number;
     citationsFixed: number;
     metaFixed: number;
     totalAiCalls: number;
@@ -188,7 +189,7 @@ export async function enrichDomain(domainId: string, options: EnrichOptions = {}
 
     const result: EnrichResult = {
         domain: domain.domain, heroesFixed: 0, calculatorsFixed: 0,
-        faqsFixed: 0, citationsFixed: 0, metaFixed: 0,
+        faqsFixed: 0, articlesExpanded: 0, citationsFixed: 0, metaFixed: 0,
         totalAiCalls: 0, totalCost: 0, errors: [],
     };
 
@@ -406,6 +407,7 @@ Return ONLY JSON: { "metaDescription": "..." }`,
                 case 'article':
                     if (parsed.markdown && (parsed.markdown as string).length > job.originalLength) {
                         updated[job.blockIdx] = { ...updated[job.blockIdx], content: { ...(updated[job.blockIdx].content as Record<string, unknown>), markdown: parsed.markdown } };
+                        result.articlesExpanded++;
                         changed = true;
                     }
                     break;

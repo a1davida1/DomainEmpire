@@ -197,7 +197,16 @@ export async function checkContentSchedule() {
         .where(inArray(articles.domainId, activeDomainIds))
         .groupBy(articles.domainId);
 
-    const lastDateMap = new Map(latestArticles.map(a => [a.domainId, a.lastDate]));
+    function coerceDate(value: unknown): Date {
+        if (value instanceof Date) return value;
+        if (typeof value === 'string' || typeof value === 'number') {
+            const d = new Date(value);
+            if (!Number.isNaN(d.getTime())) return d;
+        }
+        return new Date(0);
+    }
+
+    const lastDateMap = new Map(latestArticles.map(a => [a.domainId, coerceDate(a.lastDate)]));
 
     // 4. Process each domain
     for (const domain of activeDomains) {

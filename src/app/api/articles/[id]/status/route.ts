@@ -23,7 +23,28 @@ const TRANSITIONS: Record<string, string[]> = {
 };
 
 const MIN_REVIEW_QUALITY_SCORE = 70;
-const MIN_REVIEW_WORD_COUNT = 900;
+
+const INTERACTIVE_CONTENT_TYPES = new Set([
+    'calculator',
+    'wizard',
+    'configurator',
+    'quiz',
+    'survey',
+    'assessment',
+    'interactive_infographic',
+    'interactive_map',
+]);
+
+function resolveQualityGate(input: { contentType: string | null; ymylLevel: string | null }) {
+    const isInteractive = input.contentType ? INTERACTIVE_CONTENT_TYPES.has(input.contentType) : false;
+    if (!isInteractive) {
+        return { minQualityScore: MIN_REVIEW_QUALITY_SCORE, minWordCount: 900 };
+    }
+
+    const ymyl = (input.ymylLevel || 'none') as 'none' | 'low' | 'medium' | 'high';
+    const minWordCount = ymyl === 'high' ? 350 : ymyl === 'medium' ? 250 : 150;
+    return { minQualityScore: MIN_REVIEW_QUALITY_SCORE, minWordCount };
+}
 
 async function tryAutoPublish(
     articleId: string,
@@ -153,17 +174,18 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         if (newStatus === 'approved' || newStatus === 'published') {
             const plainText = toPlainText(article.contentMarkdown, article.contentHtml);
             const quality = analyzeContentQuality(plainText);
+            const gate = resolveQualityGate({ contentType: article.contentType, ymylLevel: article.ymylLevel });
             const qualityFailures: string[] = [];
 
-            if (quality.qualityScore < MIN_REVIEW_QUALITY_SCORE) {
+            if (quality.qualityScore < gate.minQualityScore) {
                 qualityFailures.push(
-                    `Quality score ${quality.qualityScore} is below required ${MIN_REVIEW_QUALITY_SCORE}`,
+                    `Quality score ${quality.qualityScore} is below required ${gate.minQualityScore}`,
                 );
             }
 
-            if (quality.metrics.wordCount < MIN_REVIEW_WORD_COUNT) {
+            if (quality.metrics.wordCount < gate.minWordCount) {
                 qualityFailures.push(
-                    `Word count ${quality.metrics.wordCount} is below required ${MIN_REVIEW_WORD_COUNT}`,
+                    `Word count ${quality.metrics.wordCount} is below required ${gate.minWordCount}`,
                 );
             }
 
@@ -172,6 +194,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
                     {
                         error: 'Content quality gate failed. Improve content before approving/publishing.',
                         details: qualityFailures,
+                        qualityGate: gate,
                         quality: {
                             score: quality.qualityScore,
                             status: quality.status,

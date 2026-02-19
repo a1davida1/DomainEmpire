@@ -51,11 +51,12 @@ export async function createNotification(options: CreateNotificationOptions): Pr
 
     // Deduplicate: skip if same type+title+domainId exists unread in last 24h
     const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const oneDayAgoIso = oneDayAgo.toISOString();
     const conditions = [
         eq(notifications.type, type),
         eq(notifications.title, title),
         eq(notifications.isRead, false),
-        sql`${notifications.createdAt} > ${oneDayAgo}`,
+        sql`${notifications.createdAt} > ${oneDayAgoIso}::timestamp`,
     ];
     if (domainId) conditions.push(eq(notifications.domainId, domainId));
 
@@ -168,12 +169,13 @@ export async function getUnreadCount(): Promise<number> {
  */
 export async function purgeOldNotifications(olderThanDays = 90): Promise<number> {
     const cutoff = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000);
+    const cutoffIso = cutoff.toISOString();
 
     const deleted = await db.delete(notifications)
         .where(
             and(
                 eq(notifications.isRead, true),
-                sql`${notifications.createdAt} < ${cutoff}`
+                sql`${notifications.createdAt} < ${cutoffIso}::timestamp`
             )
         )
         .returning({ id: notifications.id });

@@ -81,8 +81,11 @@ function injectLinks(
             if (keyword.length < 4) continue;
 
             const escaped = escapeRegex(keyword);
+            // Allow HTML tags (bold, em, span, etc.) between the opening/closing
+            // p/li and the keyword so formatted paragraphs can still be linked.
+            const inner = '(?:[^<]|<(?!\\/(?:p|li)\\b))*?';
             const pattern = new RegExp(
-                `(<(?:p|li)[^>]*>[^<]*?)\\b(${escaped})\\b([^<]*?<\\/(?:p|li)>)`,
+                `(<(?:p|li)[^>]*>${inner})\\b(${escaped})\\b(${inner}<\\/(?:p|li)>)`,
                 'i',
             );
 

@@ -572,25 +572,49 @@ export class OpenRouterClient {
 
             if (!choice) return null;
 
-            // Extract base64 image from multimodal response
-            const content = choice.message?.content;
+            // Extract base64 image from multimodal response.
+            // OpenRouter returns images in several possible locations depending on the model:
+            //   1. choice.message.images[] — Gemini image models use this
+            //   2. choice.message.content (array with image_url parts)
+            //   3. choice.message.content (string with inline data URI)
+            const message = choice.message as Record<string, unknown>;
+            const content = message?.content;
             let imageBase64: string | null = null;
 
-            if (typeof content === 'string') {
-                // Check for inline base64 data URI in the text
+            // 1. Check message.images[] (Gemini via OpenRouter)
+            const images = message?.images;
+            if (Array.isArray(images)) {
+                for (const img of images) {
+                    const imgObj = img as { type?: string; image_url?: { url?: string } };
+                    if (imgObj.image_url?.url) {
+                        const urlMatch = imgObj.image_url.url.match(/^data:image\/(png|jpeg|webp);base64,(.+)$/);
+                        if (urlMatch) {
+                            imageBase64 = urlMatch[2];
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // 2. Check content array (standard multimodal format)
+            if (!imageBase64 && Array.isArray(content)) {
+                for (const part of content) {
+                    const p = part as { type?: string; image_url?: { url?: string } };
+                    if (p.type === 'image_url' && p.image_url?.url) {
+                        const urlMatch = p.image_url.url.match(/^data:image\/(png|jpeg|webp);base64,(.+)$/);
+                        if (urlMatch) {
+                            imageBase64 = urlMatch[2];
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // 3. Check content string for inline data URI
+            if (!imageBase64 && typeof content === 'string') {
                 const b64Match = content.match(/data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)/);
                 if (b64Match) {
                     imageBase64 = b64Match[2];
-                }
-            } else if (Array.isArray(content)) {
-                // Multimodal parts: look for image_url with base64
-                for (const part of content) {
-                    if (part.type === 'image_url' && part.image_url?.url) {
-                        const urlMatch = part.image_url.url.match(/^data:image\/(png|jpeg|webp);base64,(.+)$/);
-                        if (urlMatch) {
-                            imageBase64 = urlMatch[2];
-                        }
-                    }
                 }
             }
 

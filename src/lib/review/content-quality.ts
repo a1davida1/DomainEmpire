@@ -23,7 +23,13 @@ export const AI_PHRASES = [
 
 export function stripHtml(html: string): string {
     return html
+        // Drop script/style blocks entirely so JS/CSS doesn't inflate word count.
+        .replaceAll(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replaceAll(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replaceAll(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+        // Remove remaining tags
         .replaceAll(/<[^>]*>/g, ' ')
+        .replaceAll(/\s+/g, ' ')
         .trim();
 }
 
@@ -43,7 +49,11 @@ export function stripMarkdown(md: string): string {
 }
 
 export function toPlainText(contentMarkdown?: string | null, contentHtml?: string | null): string {
-    if (contentMarkdown) return stripMarkdown(contentMarkdown);
+    if (contentMarkdown) {
+        const looksLikeFullHtmlDocument = /^\s*<!doctype\s+html|^\s*<html[\s>]/i.test(contentMarkdown);
+        if (looksLikeFullHtmlDocument) return stripHtml(contentMarkdown);
+        return stripMarkdown(contentMarkdown);
+    }
     if (contentHtml) return stripHtml(contentHtml);
     return '';
 }

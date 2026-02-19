@@ -26,6 +26,7 @@ export async function processDomainSiteReviewJob(jobId: string): Promise<void> {
     if (!job.domainId) {
         throw new Error(`Site review job ${jobId} missing domainId`);
     }
+    const domainId = job.domainId;
 
     const domainRows = await db
         .select({
@@ -33,37 +34,40 @@ export async function processDomainSiteReviewJob(jobId: string): Promise<void> {
             domain: domains.domain,
         })
         .from(domains)
-        .where(and(eq(domains.id, job.domainId), isNull(domains.deletedAt)))
+        .where(and(eq(domains.id, domainId), isNull(domains.deletedAt)))
         .limit(1);
 
     const domain = domainRows[0];
     if (!domain) {
-        throw new Error(`Domain not found for site review job: ${job.domainId}`);
+        throw new Error(`Domain not found for site review job: ${domainId}`);
     }
 
-    const report = await reviewSite(job.domainId);
+    const report = await reviewSite(domainId);
     const scoreRounded = Math.round(report.overallScore);
+    const criticalIssueCount = report.criticalIssues?.length ?? 0;
 
-    await db.update(domains).set({
-        lastReviewResult: report,
-        lastReviewScore: scoreRounded,
-        lastReviewedAt: new Date(report.reviewedAt),
-        updatedAt: new Date(),
-    }).where(eq(domains.id, job.domainId));
+    await db.transaction(async (tx) => {
+        await tx.update(domains).set({
+            lastReviewResult: report,
+            lastReviewScore: scoreRounded,
+            lastReviewedAt: new Date(report.reviewedAt),
+            updatedAt: new Date(),
+        }).where(eq(domains.id, domainId));
 
-    await db.update(contentQueue).set({
-        status: 'completed',
-        completedAt: new Date(),
-        lockedUntil: null,
-        errorMessage: null,
-        result: {
-            message: `Site review completed: ${scoreRounded} (${report.verdict})`,
-            reviewScore: scoreRounded,
-            verdict: report.verdict,
-            reviewedAt: report.reviewedAt,
-            criticalIssueCount: report.criticalIssues.length,
-        },
-        attempts: job.attempts ?? 0,
-    }).where(eq(contentQueue.id, jobId));
+        await tx.update(contentQueue).set({
+            status: 'completed',
+            completedAt: new Date(),
+            lockedUntil: null,
+            errorMessage: null,
+            result: {
+                message: `Site review completed: ${scoreRounded} (${report.verdict})`,
+                reviewScore: scoreRounded,
+                verdict: report.verdict,
+                reviewedAt: report.reviewedAt,
+                criticalIssueCount,
+            },
+            attempts: job.attempts ?? 0,
+        }).where(eq(contentQueue.id, jobId));
+    });
 }
 

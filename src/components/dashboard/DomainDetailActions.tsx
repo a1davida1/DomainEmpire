@@ -196,7 +196,6 @@ export function SeedPagesButton({ domainId }: { domainId: string }) {
 
     async function handlePrepare() {
         setLoading(true);
-        setStatus('Starting full pipeline...');
         try {
             const res = await fetch(`/api/domains/${domainId}/prepare`, {
                 method: 'POST',
@@ -210,7 +209,8 @@ export function SeedPagesButton({ domainId }: { domainId: string }) {
                 if (data.validation?.ready) parts.push('validation passed');
                 const score = data.validation?.ready ? '✓ Ready' : '⚠ Needs attention';
                 toast.success(`Pipeline complete: ${score}. ${parts.join(', ')}`);
-                setStatus(`Score: ${data.validation?.errorCount === 0 ? 'Ready' : `${data.validation?.errorCount} issues`} | ${data.pageCount} pages`);
+                const errorCount = data.validation?.errorCount ?? 0;
+                setStatus(`Score: ${data.validation?.ready ? 'Ready' : `${errorCount} issues`} | ${data.pageCount ?? 0} pages`);
                 router.refresh();
             } else {
                 toast.error(data.error || 'Pipeline failed');

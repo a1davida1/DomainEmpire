@@ -11,6 +11,7 @@ import {
 
 const NAV_ITEMS = [
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, keywords: 'home overview metrics' },
+    { name: 'Reviewer', href: '/dashboard/reviewer', icon: ClipboardCheck, keywords: 'review workbench qa tools calculator' },
     { name: 'Workflow', href: '/dashboard/workflow', icon: PlayCircle, keywords: 'actions next steps' },
     { name: 'Domains', href: '/dashboard/domains', icon: Globe, keywords: 'portfolio sites' },
     { name: 'Content', href: '/dashboard/content', icon: FileText, keywords: 'articles pages writing' },
@@ -21,7 +22,7 @@ const NAV_ITEMS = [
     { name: 'Competitors', href: '/dashboard/competitors', icon: Swords, keywords: 'competition tracking' },
     { name: 'Growth', href: '/dashboard/growth', icon: Megaphone, keywords: 'campaigns media promotions' },
     { name: 'Integrations', href: '/dashboard/integrations', icon: PlugZap, keywords: 'connections sync api' },
-    { name: 'Review', href: '/dashboard/review', icon: ClipboardCheck, keywords: 'content approval qa' },
+    { name: 'Review Center', href: '/dashboard/review', icon: ClipboardCheck, keywords: 'content approval qa queues' },
     { name: 'Compliance', href: '/dashboard/compliance', icon: ShieldCheck, keywords: 'legal ymyl policy' },
     { name: 'KPIs', href: '/dashboard/kpis', icon: Gauge, keywords: 'metrics performance targets' },
     { name: 'Deploy', href: '/dashboard/deploy', icon: Rocket, keywords: 'publish launch sites' },

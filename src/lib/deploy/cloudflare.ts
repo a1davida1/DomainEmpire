@@ -409,7 +409,7 @@ export async function addCustomDomain(
         if (!data.success) {
             const errMsg = (data.errors?.[0]?.message || '') as string;
             // Domain already attached to this project — treat as success
-            if (/already.*exist/i.test(errMsg) || /already.*active/i.test(errMsg) || /already.*registered/i.test(errMsg)) {
+            if (/already.*exist/i.test(errMsg) || /already.*active/i.test(errMsg) || /already.*registered/i.test(errMsg) || /already.*added/i.test(errMsg)) {
                 console.log(`[CF] Domain "${domain}" already linked to project "${projectName}", continuing.`);
                 return { success: true };
             }
@@ -514,48 +514,50 @@ export async function directUploadDeploy(
         const tmpDir = join(process.env.TMPDIR || '/tmp', `cf-deploy-${projectName}-${Date.now()}`);
         rmSync(tmpDir, { recursive: true, force: true });
 
-        for (const file of files) {
-            const filePath = join(tmpDir, file.path);
-            mkdirSync(dirname(filePath), { recursive: true });
-            if (typeof file.content === 'string') {
-                writeFileSync(filePath, file.content, 'utf-8');
-            } else {
-                writeFileSync(filePath, file.content);
+        try {
+            for (const file of files) {
+                const filePath = join(tmpDir, file.path);
+                mkdirSync(dirname(filePath), { recursive: true });
+                if (typeof file.content === 'string') {
+                    writeFileSync(filePath, file.content, 'utf-8');
+                } else {
+                    writeFileSync(filePath, file.content);
+                }
             }
+
+            const branchArg = deployOptions?.branch ? `--branch=${deployOptions.branch}` : '--branch=main';
+
+            const env = {
+                ...process.env,
+                CLOUDFLARE_API_TOKEN: config.apiToken,
+                CLOUDFLARE_ACCOUNT_ID: config.accountId,
+            };
+
+            const cmd = `npx wrangler pages deploy ${tmpDir} --project-name=${projectName} ${branchArg} --commit-dirty=true 2>&1`;
+            const output = execSync(cmd, {
+                env,
+                timeout: CF_UPLOAD_TIMEOUT_MS,
+                encoding: 'utf-8',
+                maxBuffer: 10 * 1024 * 1024,
+            });
+
+            const urlMatch = output.match(/https:\/\/[a-z0-9-]+\.[a-z0-9-]+\.pages\.dev/);
+            const url = urlMatch ? urlMatch[0] : undefined;
+            const success = output.includes('Deployment complete') || output.includes('Success!');
+
+            if (!success) {
+                return { success: false, error: output.slice(-500) };
+            }
+
+            return {
+                success: true,
+                url,
+                status: 'success',
+                projectName,
+            };
+        } finally {
+            rmSync(tmpDir, { recursive: true, force: true });
         }
-
-        const branchArg = deployOptions?.branch ? `--branch=${deployOptions.branch}` : '--branch=main';
-
-        const env = {
-            ...process.env,
-            CLOUDFLARE_API_TOKEN: config.apiToken,
-            CLOUDFLARE_ACCOUNT_ID: config.accountId,
-        };
-
-        const cmd = `npx wrangler pages deploy ${tmpDir} --project-name=${projectName} ${branchArg} --commit-dirty=true 2>&1`;
-        const output = execSync(cmd, {
-            env,
-            timeout: CF_UPLOAD_TIMEOUT_MS,
-            encoding: 'utf-8',
-            maxBuffer: 10 * 1024 * 1024,
-        });
-
-        rmSync(tmpDir, { recursive: true, force: true });
-
-        const urlMatch = output.match(/https:\/\/[a-z0-9-]+\.[a-z0-9-]+\.pages\.dev/);
-        const url = urlMatch ? urlMatch[0] : undefined;
-        const success = output.includes('Deployment complete') || output.includes('Success!');
-
-        if (!success) {
-            return { success: false, error: output.slice(-500) };
-        }
-
-        return {
-            success: true,
-            url,
-            status: 'success',
-            projectName,
-        };
     } catch (error) {
         return {
             success: false,

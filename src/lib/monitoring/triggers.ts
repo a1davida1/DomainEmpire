@@ -38,6 +38,7 @@ export async function checkTrafficDrops() {
         const now = new Date();
         const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
         const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+        const sevenDaysAgoIso = sevenDaysAgo.toISOString();
 
         const activeDomains = await db
             .select({ id: domains.id, domain: domains.domain })
@@ -54,7 +55,7 @@ export async function checkTrafficDrops() {
                     .where(and(
                         eq(revenueSnapshots.domainId, domain.id),
                         gte(revenueSnapshots.snapshotDate, fourteenDaysAgo),
-                        sql`${revenueSnapshots.snapshotDate} < ${sevenDaysAgo}`,
+                        sql`${revenueSnapshots.snapshotDate} < ${sevenDaysAgoIso}::timestamp`,
                     )),
             ]);
 
@@ -237,6 +238,7 @@ export async function checkSearchQualityHealth() {
         const now = new Date();
         const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
         const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+        const thirtyDaysAgoIso = thirtyDaysAgo.toISOString();
 
         const activeDomains = await db
             .select({ id: domains.id, domain: domains.domain, createdAt: domains.createdAt })
@@ -279,7 +281,7 @@ export async function checkSearchQualityHealth() {
                     .where(and(
                         eq(revenueSnapshots.domainId, domain.id),
                         gte(revenueSnapshots.snapshotDate, sixtyDaysAgo),
-                        sql`${revenueSnapshots.snapshotDate} < ${thirtyDaysAgo}`,
+                        sql`${revenueSnapshots.snapshotDate} < ${thirtyDaysAgoIso}::timestamp`,
                     )),
             ]);
 
