@@ -102,13 +102,17 @@ const GENERIC_FAQ_PHRASES = [
     'right choice for you', 'best option for your needs', 'varies depending on',
     'contact us for a personalized', 'every situation is unique',
     'depends on several factors', 'get in touch with our team',
+    'costs vary widely', 'use our cost calculator', 'for a personalized estimate',
+    'based on your requirements', 'specific needs, location',
+    'consult with a professional', 'reach out to our team',
+    'varies based on', 'numerous factors', 'individualized basis',
 ];
 
 function isGenericFaqContent(items: unknown[] | undefined): boolean {
     if (!Array.isArray(items) || items.length === 0) return false;
     const text = JSON.stringify(items).toLowerCase();
     const genericHits = GENERIC_FAQ_PHRASES.filter(p => text.includes(p.toLowerCase()));
-    return genericHits.length >= 2;
+    return genericHits.length >= 1;
 }
 
 // ── AI call helpers ──────────────────────────────────────────────────────────
@@ -160,6 +164,10 @@ type EnrichJob =
     | { type: 'calculator'; pageId: string; blockIdx: number; prompt: string }
     | { type: 'faq'; pageId: string; blockIdx: number; prompt: string }
     | { type: 'article'; pageId: string; blockIdx: number; prompt: string; originalLength: number }
+    | { type: 'comparison'; pageId: string; blockIdx: number; prompt: string }
+    | { type: 'ranking'; pageId: string; blockIdx: number; prompt: string }
+    | { type: 'proscons'; pageId: string; blockIdx: number; prompt: string }
+    | { type: 'vscard'; pageId: string; blockIdx: number; prompt: string }
     | { type: 'meta'; pageId: string; prompt: string };
 
 interface EnrichJobResult {
@@ -282,7 +290,13 @@ Site name: ${siteName}
 Page context: ${page.title || page.route}
 Voice seed: ${JSON.stringify(voiceSeed)}
 
-Questions should be what real people search for. Answers: 2-3 sentences, factual.
+RULES:
+- Questions should be what real people actually Google about ${niche}
+- Answers MUST include specific numbers, price ranges, or concrete facts — NEVER say "costs vary widely" or "depends on your needs" without giving a range
+- If a question is about cost, give a real dollar range (e.g. "$3,000-$7,000 for traditional braces")
+- Keep answers 2-3 sentences, factual, and genuinely useful to a reader
+- Do NOT use hedge language like "consult a professional" or "use our calculator" — give the actual answer
+
 Return ONLY valid JSON: { "items": [{ "question": "...", "answer": "..." }] }`,
                     });
                 }
@@ -306,6 +320,107 @@ EXISTING CONTENT:
 ${md}
 
 Return ONLY a JSON object: { "markdown": "Full expanded article in markdown" }`,
+                    });
+                }
+            }
+
+            // ComparisonTable — needs real product/service names and data
+            if (block.type === 'ComparisonTable') {
+                const options = content.options as unknown[];
+                const isGeneric = !options || options.length === 0
+                    || JSON.stringify(options).includes('Premium Choice')
+                    || JSON.stringify(options).includes('Best Value')
+                    || JSON.stringify(options).includes('Budget Option');
+                if (isGeneric) {
+                    jobs.push({
+                        type: 'comparison', pageId: page.id, blockIdx: i,
+                        prompt: `Generate a comparison table for "${niche}" on ${domain.domain}.
+
+List 3-5 REAL, NAMED options that consumers actually choose between in the ${niche} industry.
+Use real product/service/provider names — NOT generic labels like "Premium Choice" or "Option A".
+Include realistic pricing, genuine pros/cons differences, and honest ratings.
+
+For braces: "Traditional Metal Braces", "Ceramic Braces", "Invisalign Clear Aligners", "Lingual Braces"
+For home renovation: "DIY Approach", "Budget Contractor", "Mid-Range Firm", "Premium Design-Build"
+
+Return ONLY valid JSON:
+{
+  "columns": [{ "key": "quality", "label": "Quality", "type": "rating", "sortable": true }, { "key": "value", "label": "Value", "type": "rating", "sortable": true }, { "key": "price", "label": "Price Range", "type": "text", "sortable": true }],
+  "options": [{ "name": "Real Product Name", "badge": "Editor's Pick", "scores": { "quality": 5, "value": 4, "price": "$3,000-$7,000" } }],
+  "verdict": "Specific recommendation with reasoning"
+}`,
+                    });
+                }
+            }
+
+            // RankingList — needs real named entries
+            if (block.type === 'RankingList') {
+                const items = content.items as unknown[];
+                const isGeneric = !items || items.length === 0
+                    || JSON.stringify(items).includes('Best Overall')
+                    || JSON.stringify(items).includes('Runner Up')
+                    || JSON.stringify(items).includes('Best Budget');
+                if (isGeneric) {
+                    jobs.push({
+                        type: 'ranking', pageId: page.id, blockIdx: i,
+                        prompt: `Generate a ranking list of the top 3-5 ${niche} options for ${domain.domain}.
+
+Use REAL, NAMED products/services/providers — NOT generic labels.
+Include specific strengths, realistic ratings, and why each earned its rank.
+
+Return ONLY valid JSON:
+{
+  "title": "Top [Niche] Picks for ${new Date().getFullYear()}",
+  "items": [
+    { "rank": 1, "name": "Real Name", "description": "2-3 sentences explaining why #1", "rating": 4.9, "badge": "Editor's Choice" },
+    { "rank": 2, "name": "Real Name", "description": "Why it's runner up", "rating": 4.7 }
+  ]
+}`,
+                    });
+                }
+            }
+
+            // ProsConsCard — needs real named product
+            if (block.type === 'ProsConsCard') {
+                const name = content.name as string || '';
+                const isGeneric = !name || name.includes('Top-Rated') || name.includes('Option');
+                if (isGeneric) {
+                    jobs.push({
+                        type: 'proscons', pageId: page.id, blockIdx: i,
+                        prompt: `Generate a detailed pros/cons review card for the #1 recommended ${niche} option on ${domain.domain}.
+
+Use a REAL product/service name. Give specific, honest pros and cons — not generic filler.
+
+Return ONLY valid JSON:
+{
+  "name": "Real Product/Service Name",
+  "rating": 4.8,
+  "badge": "Editor's Choice",
+  "pros": ["Specific pro 1", "Specific pro 2", "Specific pro 3", "Specific pro 4"],
+  "cons": ["Honest con 1", "Honest con 2"],
+  "summary": "2-3 sentence honest assessment"
+}`,
+                    });
+                }
+            }
+
+            // VsCard — needs real named comparison
+            if (block.type === 'VsCard') {
+                const itemA = content.itemA as Record<string, unknown> | undefined;
+                const isGeneric = !itemA || (itemA.name as string || '').includes('Option A');
+                if (isGeneric) {
+                    jobs.push({
+                        type: 'vscard', pageId: page.id, blockIdx: i,
+                        prompt: `Generate a head-to-head comparison card for the two most popular ${niche} options on ${domain.domain}.
+
+Use REAL product/service names. Give specific, differentiated pros/cons.
+
+Return ONLY valid JSON:
+{
+  "itemA": { "name": "Real Name A", "description": "1 sentence", "pros": ["specific pro"], "cons": ["specific con"], "rating": 4.8 },
+  "itemB": { "name": "Real Name B", "description": "1 sentence", "pros": ["specific pro"], "cons": ["specific con"], "rating": 4.3 },
+  "verdict": "Specific recommendation with reasoning"
+}`,
                     });
                 }
             }
@@ -408,6 +523,30 @@ Return ONLY JSON: { "metaDescription": "..." }`,
                     if (parsed.markdown && (parsed.markdown as string).length > job.originalLength) {
                         updated[job.blockIdx] = { ...updated[job.blockIdx], content: { ...(updated[job.blockIdx].content as Record<string, unknown>), markdown: parsed.markdown } };
                         result.articlesExpanded++;
+                        changed = true;
+                    }
+                    break;
+                case 'comparison':
+                    if (parsed.options && Array.isArray(parsed.options) && (parsed.options as unknown[]).length > 0) {
+                        updated[job.blockIdx] = { ...updated[job.blockIdx], content: { ...(updated[job.blockIdx].content as Record<string, unknown>), ...parsed } };
+                        changed = true;
+                    }
+                    break;
+                case 'ranking':
+                    if (parsed.items && Array.isArray(parsed.items) && (parsed.items as unknown[]).length > 0) {
+                        updated[job.blockIdx] = { ...updated[job.blockIdx], content: { ...(updated[job.blockIdx].content as Record<string, unknown>), ...parsed } };
+                        changed = true;
+                    }
+                    break;
+                case 'proscons':
+                    if (parsed.name && parsed.pros) {
+                        updated[job.blockIdx] = { ...updated[job.blockIdx], content: { ...(updated[job.blockIdx].content as Record<string, unknown>), ...parsed } };
+                        changed = true;
+                    }
+                    break;
+                case 'vscard':
+                    if (parsed.itemA && parsed.itemB) {
+                        updated[job.blockIdx] = { ...updated[job.blockIdx], content: { ...(updated[job.blockIdx].content as Record<string, unknown>), ...parsed } };
                         changed = true;
                     }
                     break;

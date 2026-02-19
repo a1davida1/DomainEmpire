@@ -1,9 +1,7 @@
 import { db } from '@/lib/db';
-import { articles, domains, qaChecklistResults, reviewEvents, reviewTasks, pageDefinitions } from '@/lib/db/schema';
-import { eq, inArray, asc, and, isNull, count } from 'drizzle-orm';
+import { articles, domains, qaChecklistResults, reviewTasks, pageDefinitions } from '@/lib/db/schema';
+import { eq, inArray, asc, and, isNull, count, desc } from 'drizzle-orm';
 import Link from 'next/link';
-import { revalidatePath } from 'next/cache';
-import { getAuthUser } from '@/lib/auth';
 import { getCampaignLaunchReviewSlaSummary } from '@/lib/review/campaign-launch-sla';
 import { ClipboardCheck, ShoppingCart, Rocket, FileText, CheckCircle2, Clock, AlertTriangle } from 'lucide-react';
 
@@ -13,111 +11,6 @@ const YMYL_COLORS: Record<string, string> = {
     low: 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300',
     none: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
 };
-
-async function approveAction(formData: FormData) {
-    'use server';
-    const user = await getAuthUser();
-    if (!user) throw new Error('Unauthorized');
-    if (!['admin', 'reviewer', 'editor'].includes(user.role)) throw new Error('Forbidden');
-
-    const articleId = formData.get('articleId') as string;
-    if (!articleId) return;
-
-    await db.transaction(async (tx) => {
-        await tx.update(articles).set({
-            status: 'approved',
-            lastReviewedAt: new Date(),
-        }).where(eq(articles.id, articleId));
-
-        await tx.insert(reviewEvents).values({
-            articleId,
-            actorId: user.id,
-            actorRole: user.role,
-            eventType: 'approved',
-        });
-    });
-    revalidatePath('/dashboard/review');
-}
-
-async function rejectAction(formData: FormData) {
-    'use server';
-    const user = await getAuthUser();
-    if (!user) throw new Error('Unauthorized');
-    if (!['admin', 'reviewer'].includes(user.role)) throw new Error('Forbidden');
-
-    const articleId = formData.get('articleId') as string;
-    if (!articleId) return;
-
-    await db.transaction(async (tx) => {
-        await tx.update(articles).set({
-            status: 'draft',
-            lastReviewedAt: new Date(),
-        }).where(eq(articles.id, articleId));
-
-        await tx.insert(reviewEvents).values({
-            articleId,
-            actorId: user.id,
-            actorRole: user.role,
-            eventType: 'rejected',
-        });
-    });
-    revalidatePath('/dashboard/review');
-}
-
-async function approvePageAction(formData: FormData) {
-    'use server';
-    const user = await getAuthUser();
-    if (!user) throw new Error('Unauthorized');
-    if (!['admin', 'reviewer', 'editor'].includes(user.role)) throw new Error('Forbidden');
-
-    const pageId = formData.get('pageId') as string;
-    if (!pageId) return;
-
-    await db.transaction(async (tx) => {
-        await tx.update(pageDefinitions).set({
-            status: 'approved',
-            lastReviewedAt: new Date(),
-            lastReviewedBy: user.id,
-            updatedAt: new Date(),
-        }).where(eq(pageDefinitions.id, pageId));
-
-        await tx.insert(reviewEvents).values({
-            pageDefinitionId: pageId,
-            actorId: user.id,
-            actorRole: user.role,
-            eventType: 'approved',
-        });
-    });
-    revalidatePath('/dashboard/review');
-}
-
-async function rejectPageAction(formData: FormData) {
-    'use server';
-    const user = await getAuthUser();
-    if (!user) throw new Error('Unauthorized');
-    if (!['admin', 'reviewer'].includes(user.role)) throw new Error('Forbidden');
-
-    const pageId = formData.get('pageId') as string;
-    if (!pageId) return;
-
-    await db.transaction(async (tx) => {
-        await tx.update(pageDefinitions).set({
-            status: 'draft',
-            isPublished: false,
-            lastReviewedAt: new Date(),
-            lastReviewedBy: user.id,
-            updatedAt: new Date(),
-        }).where(eq(pageDefinitions.id, pageId));
-
-        await tx.insert(reviewEvents).values({
-            pageDefinitionId: pageId,
-            actorId: user.id,
-            actorRole: user.role,
-            eventType: 'rejected',
-        });
-    });
-    revalidatePath('/dashboard/review');
-}
 
 export default async function ReviewQueuePage() {
     const [reviewArticles, reviewPages, domainBuyCount, launchReviewSummary] = await Promise.all([
@@ -170,16 +63,23 @@ export default async function ReviewQueuePage() {
         : [];
     const domainMap = new Map(domainList.map(d => [d.id, d.domain]));
 
-    // Fetch QA status for each article
+    // Fetch QA status for each article (latest only)
     const articleIds = reviewArticles.map(a => a.id);
     const qaResults = articleIds.length > 0
         ? await db.select({
             articleId: qaChecklistResults.articleId,
             allPassed: qaChecklistResults.allPassed,
             results: qaChecklistResults.results,
-        }).from(qaChecklistResults).where(inArray(qaChecklistResults.articleId, articleIds))
+            completedAt: qaChecklistResults.completedAt,
+        })
+            .from(qaChecklistResults)
+            .where(inArray(qaChecklistResults.articleId, articleIds))
+            .orderBy(desc(qaChecklistResults.completedAt))
         : [];
-    const qaMap = new Map(qaResults.map(q => {
+    const qaMap = new Map<string, { allPassed: boolean; passed: number; total: number }>();
+    for (const q of qaResults) {
+        if (!q.articleId || qaMap.has(q.articleId)) continue;
+
         const results = (q.results && typeof q.results === 'object' && !Array.isArray(q.results))
             ? q.results as Record<string, { checked: boolean }>
             : null;
@@ -188,8 +88,26 @@ export default async function ReviewQueuePage() {
         const validEntries = entries.filter(r => r && typeof r.checked === 'boolean');
         const passed = validEntries.filter(r => r.checked).length;
         const total = validEntries.length;
-        return [q.articleId, { allPassed: q.allPassed, passed, total }];
-    }));
+        qaMap.set(q.articleId, { allPassed: Boolean(q.allPassed), passed, total });
+    }
+
+    const contentTaskRows = articleIds.length > 0
+        ? await db.select({
+            taskId: reviewTasks.id,
+            articleId: reviewTasks.articleId,
+        })
+            .from(reviewTasks)
+            .where(and(
+                eq(reviewTasks.taskType, 'content_publish'),
+                eq(reviewTasks.status, 'pending'),
+                inArray(reviewTasks.articleId, articleIds),
+            ))
+        : [];
+    const contentTaskMap = new Map(
+        contentTaskRows
+            .filter((t) => Boolean(t.articleId))
+            .map((t) => [t.articleId as string, t.taskId]),
+    );
 
     // eslint-disable-next-line react-hooks/purity
     const now = Date.now(); // Server Component — runs once at render time
@@ -415,33 +333,25 @@ export default async function ReviewQueuePage() {
                                                 </td>
                                                 <td className="px-4 py-3">
                                                     <div className="flex items-center justify-end gap-1.5">
-                                                        {article.status === 'review' && (
-                                                            <>
-                                                                <form action={approveAction}>
-                                                                    <input type="hidden" name="articleId" value={article.id} />
-                                                                    <button
-                                                                        type="submit"
-                                                                        className="inline-flex items-center px-2.5 py-1 rounded-md bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
-                                                                    >
-                                                                        Approve
-                                                                    </button>
-                                                                </form>
-                                                                <form action={rejectAction}>
-                                                                    <input type="hidden" name="articleId" value={article.id} />
-                                                                    <button
-                                                                        type="submit"
-                                                                        className="inline-flex items-center px-2.5 py-1 rounded-md border border-red-200 text-red-600 dark:border-red-800 dark:text-red-400 text-xs font-medium hover:bg-red-50 dark:hover:bg-red-950 transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
-                                                                    >
-                                                                        Reject
-                                                                    </button>
-                                                                </form>
-                                                            </>
+                                                        {article.status === 'review' && contentTaskMap.has(article.id) && (
+                                                            <Link
+                                                                href={`/dashboard/reviewer?taskId=${contentTaskMap.get(article.id)}`}
+                                                                className="inline-flex items-center px-2.5 py-1 rounded-md bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 transition-colors"
+                                                            >
+                                                                Workbench
+                                                            </Link>
                                                         )}
                                                         <Link
                                                             href={`/dashboard/content/articles/${article.id}/review`}
                                                             className="inline-flex items-center px-2.5 py-1 rounded-md border text-xs font-medium hover:bg-muted transition-colors"
                                                         >
-                                                            Open
+                                                            Full QA
+                                                        </Link>
+                                                        <Link
+                                                            href={`/dashboard/domains/${article.domainId}/preview?articleId=${article.id}&tab=review`}
+                                                            className="inline-flex items-center px-2.5 py-1 rounded-md border text-xs font-medium hover:bg-muted transition-colors"
+                                                        >
+                                                            Domain
                                                         </Link>
                                                     </div>
                                                 </td>
@@ -520,34 +430,18 @@ export default async function ReviewQueuePage() {
                                                 </td>
                                                 <td className="px-4 py-3">
                                                     <div className="flex items-center justify-end gap-1.5">
-                                                        {page.status === 'review' && (
-                                                            <>
-                                                                <form action={approvePageAction}>
-                                                                    <input type="hidden" name="pageId" value={page.id} />
-                                                                    <button
-                                                                        type="submit"
-                                                                        className="inline-flex items-center px-2.5 py-1 rounded-md bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
-                                                                    >
-                                                                        Approve
-                                                                    </button>
-                                                                </form>
-                                                                <form action={rejectPageAction}>
-                                                                    <input type="hidden" name="pageId" value={page.id} />
-                                                                    <button
-                                                                        type="submit"
-                                                                        className="inline-flex items-center px-2.5 py-1 rounded-md border border-red-200 text-red-600 dark:border-red-800 dark:text-red-400 text-xs font-medium hover:bg-red-50 dark:hover:bg-red-950 transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
-                                                                    >
-                                                                        Reject
-                                                                    </button>
-                                                                </form>
-                                                            </>
-                                                        )}
                                                         <Link
                                                             href={`/api/pages/${page.id}/preview`}
                                                             target="_blank"
                                                             className="inline-flex items-center px-2.5 py-1 rounded-md border text-xs font-medium hover:bg-muted transition-colors"
                                                         >
                                                             Preview
+                                                        </Link>
+                                                        <Link
+                                                            href={`/dashboard/domains/${page.domainId}/preview?tab=review`}
+                                                            className="inline-flex items-center px-2.5 py-1 rounded-md border text-xs font-medium hover:bg-muted transition-colors"
+                                                        >
+                                                            Domain
                                                         </Link>
                                                     </div>
                                                 </td>

@@ -164,54 +164,27 @@ export function getDefaultBlockContent(
         ComparisonTable: {
             config: { sortable: true },
             content: {
-                columns: [
-                    { key: 'quality', label: 'Quality', type: 'rating', sortable: true },
-                    { key: 'value', label: 'Value', type: 'rating', sortable: true },
-                    { key: 'price', label: 'Price Range', type: 'text', sortable: true },
-                ],
-                options: [
-                    { name: 'Premium Choice', badge: 'Editor\'s Pick', scores: { quality: 5, value: 4, price: '$$$' } },
-                    { name: 'Best Value', badge: 'Best Value', scores: { quality: 4, value: 5, price: '$$' } },
-                    { name: 'Budget Option', scores: { quality: 3, value: 4, price: '$' } },
-                ],
-                verdict: `For most people, we recommend the Best Value option — it offers the ideal balance of quality and affordability for ${nicheLabel}.`,
+                columns: [],
+                options: [],
+                verdict: '',
             },
         },
         PricingTable: {
             content: {
-                plans: [
-                    { name: 'Basic', price: 'Free', features: ['Core features', 'Community support', 'Basic analytics'], ctaText: 'Get Started', ctaUrl: '#' },
-                    { name: 'Professional', price: '$29/mo', features: ['Everything in Basic', 'Priority support', 'Advanced analytics', 'API access', 'Custom reports'], ctaText: 'Start Free Trial', ctaUrl: '#', highlighted: true, badge: 'Most Popular' },
-                    { name: 'Enterprise', price: '$99/mo', features: ['Everything in Pro', '24/7 phone support', 'Dedicated manager', 'Custom integrations', 'SLA guarantee'], ctaText: 'Contact Sales', ctaUrl: '#' },
-                ],
+                plans: [],
             },
         },
         RankingList: {
             content: {
                 title: `Top ${capitalize(nicheLabel)} Picks for ${year}`,
-                items: [
-                    { rank: 1, name: 'Best Overall', description: `Our top recommendation for most people. Excellent quality, competitive pricing, and outstanding customer service.`, rating: 4.9, badge: 'Editor\'s Choice' },
-                    { rank: 2, name: 'Runner Up', description: `A close second that excels in specific areas. Great for those who prioritize value without sacrificing quality.`, rating: 4.7 },
-                    { rank: 3, name: 'Best Budget', description: `The best option if you're cost-conscious. Delivers solid performance at the lowest price point.`, rating: 4.5, badge: 'Best Value' },
-                ],
+                items: [],
             },
         },
         ProsConsCard: {
-            content: {
-                name: `Top-Rated ${capitalize(nicheLabel)} Option`,
-                rating: 4.8,
-                badge: 'Editor\'s Choice',
-                pros: ['Excellent quality and durability', 'Outstanding customer support', 'Competitive pricing for the tier', 'Comprehensive warranty included'],
-                cons: ['Limited availability in some regions', 'Premium features require upgrade'],
-                summary: `This is our top pick for most consumers. It offers an exceptional balance of quality, value, and reliability that\'s hard to beat in the ${nicheLabel} category.`,
-            },
+            content: {},
         },
         VsCard: {
-            content: {
-                itemA: { name: 'Option A', description: 'The premium choice for those who want the best.', pros: ['Superior quality', 'Longer warranty', 'More features'], cons: ['Higher price point', 'Longer delivery'], rating: 4.8 },
-                itemB: { name: 'Option B', description: 'The value choice for budget-conscious buyers.', pros: ['Lower price', 'Faster delivery', 'Easy setup'], cons: ['Fewer features', 'Basic support only'], rating: 4.3 },
-                verdict: `Option A is the better choice if budget isn't a concern. For most people, Option B offers the best value for money.`,
-            },
+            content: {},
         },
         Sidebar: {
             config: { showSearch: true },

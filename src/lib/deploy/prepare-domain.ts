@@ -18,8 +18,9 @@ import { db, domains, pageDefinitions } from '@/lib/db';
 import { eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { assignThemeSkin } from './theme-assigner';
-import { getHomepagePreset } from './blocks/presets';
-import { generateSubPages } from './blocks/sub-page-presets';
+import { generateSubPagesFromBlueprint } from './blocks/sub-page-presets';
+import { mergeBlockDefaults } from './blocks/default-content';
+import type { BlockType } from './blocks/schemas';
 import { getRequiredCompliancePages } from './compliance-templates';
 import { enrichDomain, getCitations } from './enrich';
 import { validateDomain, type ValidationReport } from './validate';
@@ -27,6 +28,14 @@ import { extractSiteTitle } from './templates/shared';
 import type { BlockEnvelope } from './blocks/schemas';
 import { reviewSite, remediateSite } from './site-review';
 import { scanBlocksForBannedPatterns, rewriteBlockText } from './block-content-scanner';
+import {
+    generateBlueprint,
+    sectionSlotToBlockType,
+    headerStyleToBlock,
+    footerStructureToVariant,
+    heroStructureToVariant,
+    ctaStyleToConfig,
+} from './structural-blueprint';
 
 export interface DomainStrategy {
     wave?: number;
@@ -103,7 +112,6 @@ export async function prepareDomain(
     const effectiveNiche = strategy?.niche || domain.niche || 'general';
     const effectiveSubNiche = strategy?.subNiche ?? domain.subNiche ?? null;
     const effectiveCluster = strategy?.cluster ?? domain.cluster ?? null;
-    const effectiveTemplate = strategy?.siteTemplate ?? domain.siteTemplate ?? 'authority';
     const effectiveMonTier = strategy?.monetizationTier ?? domain.monetizationTier ?? 3;
     const effectiveHomeTitle = strategy?.homeTitle ?? extractSiteTitle(domainName);
     const effectiveHomeMeta = strategy?.homeMeta ?? null;
@@ -150,6 +158,8 @@ export async function prepareDomain(
     }).where(eq(pageDefinitions.domainId, domain.id));
 
     // ── Step 3: Pages — seed if empty, regenerate if strategy was explicitly provided ──
+    const blueprint = generateBlueprint(domainName);
+
     const existingPages = await db.select({ id: pageDefinitions.id })
         .from(pageDefinitions)
         .where(eq(pageDefinitions.domainId, domain.id))
@@ -158,16 +168,53 @@ export async function prepareDomain(
     const forceRegenerate = strategy !== undefined && !!strategy.niche;
 
     if (!hasPages || forceRegenerate) {
-        // Transaction: delete + re-insert is atomic — no partial-seed state on failure
         await db.transaction(async (tx) => {
             if (hasPages && forceRegenerate) {
                 await tx.delete(pageDefinitions).where(eq(pageDefinitions.domainId, domain.id));
             }
 
-            const homeBlocks = getHomepagePreset(effectiveTemplate, domainName, nicheForContent);
-            const subPages = generateSubPages(domainName, nicheForContent);
+            // Build homepage from blueprint layout (not a static preset)
+            const headerDef = headerStyleToBlock(blueprint.headerStyle);
+            const heroVar = heroStructureToVariant(blueprint.heroStructure);
+            const footerVar = footerStructureToVariant(blueprint.footerStructure);
+            const ctaCfg = ctaStyleToConfig(blueprint.ctaStyle);
 
-            // Single bulk INSERT — 1 round-trip instead of N+1
+            function mergedBlock(type: string, overrides?: { variant?: string; config?: Record<string, unknown>; content?: Record<string, unknown> }) {
+                const defaults = mergeBlockDefaults({ type: type as BlockType }, domainName, nicheForContent);
+                return {
+                    type,
+                    id: blkId(),
+                    variant: overrides?.variant,
+                    content: { ...(defaults.content || {}), ...(overrides?.content || {}) },
+                    config: { ...(defaults.config || {}), ...(overrides?.config || {}) },
+                };
+            }
+
+            const homeBlocks = [
+                mergedBlock('Header', {
+                    variant: headerDef.variant,
+                    config: headerDef.config,
+                    content: { navLinks: blueprint.nav.items, siteName: humanName },
+                }),
+            ];
+
+            for (const slot of blueprint.homepageLayout) {
+                const blockType = sectionSlotToBlockType(slot);
+                if (blockType === 'Hero') {
+                    homeBlocks.push(mergedBlock('Hero', { variant: heroVar }));
+                } else if (blockType === 'CTABanner') {
+                    if (ctaCfg) homeBlocks.push(mergedBlock('CTABanner', { config: ctaCfg }));
+                } else {
+                    homeBlocks.push(mergedBlock(blockType));
+                }
+            }
+
+            homeBlocks.push(mergedBlock('CitationBlock'));
+            homeBlocks.push(mergedBlock('Footer', { variant: footerVar, content: { siteName: humanName } }));
+
+            // Generate sub-pages from blueprint (structurally differentiated)
+            const subPages = generateSubPagesFromBlueprint(domainName, nicheForContent, blueprint);
+
             const allPages = [
                 {
                     domainId: domain.id,
@@ -187,7 +234,7 @@ export async function prepareDomain(
                     metaDescription: page.metaDescription,
                     theme: combo.theme,
                     skin: combo.skin,
-                    blocks: page.blocks.map(b => ({ ...b, id: blkId() })),
+                    blocks: page.blocks,
                     isPublished: true,
                     status: 'published' as const,
                 })),

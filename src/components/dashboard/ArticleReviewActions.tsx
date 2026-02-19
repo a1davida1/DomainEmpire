@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, CheckCircle2, Send, RotateCcw, Archive, RefreshCw } from 'lucide-react';
@@ -12,12 +13,8 @@ const TRANSITIONS: Record<string, { label: string; target: string; icon: 'check'
     draft: [
         { label: 'Submit for Review', target: 'review', icon: 'send', variant: 'default' },
     ],
-    review: [
-        { label: 'Approve', target: 'approved', icon: 'check', variant: 'default' },
-        { label: 'Back to Draft', target: 'draft', icon: 'back', variant: 'outline' },
-    ],
+    review: [],
     approved: [
-        { label: 'Publish', target: 'published', icon: 'check', variant: 'default' },
         { label: 'Back to Review', target: 'review', icon: 'back', variant: 'outline' },
     ],
     published: [
@@ -74,6 +71,15 @@ export function ArticleReviewActions({ articleId, currentStatus }: ArticleReview
     }
 
     if (actions.length === 0) {
+        if (currentStatus === 'review') {
+            return (
+                <Button asChild size="sm" variant="outline" className="h-6 px-2 text-[10px]">
+                    <Link href={`/dashboard/content/articles/${articleId}/review`}>
+                        Open review
+                    </Link>
+                </Button>
+            );
+        }
         return (
             <Badge variant="outline" className="text-[10px]">
                 {currentStatus === 'generating' ? 'Generating...' : 'No actions'}

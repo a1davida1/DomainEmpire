@@ -652,6 +652,8 @@ export interface SubPageResult {
 /**
  * Generate all sub-page definitions for a domain.
  * Returns ~19 pages (homepage is not included — it already exists).
+ *
+ * @deprecated Use generateSubPagesFromBlueprint for structurally differentiated sites.
  */
 export function generateSubPages(domain: string, niche?: string): SubPageResult[] {
     const nicheLabel = niche || domain.replace(/\.[a-z]{2,}(?:\.[a-z]{2,})?$/i, '').replace(/[-_]/g, ' ');
@@ -720,4 +722,289 @@ export function generateSubPages(domain: string, niche?: string): SubPageResult[
             blocks,
         };
     });
+}
+
+// ============================================================
+// Blueprint-aware generation: structurally differentiated sites
+// ============================================================
+
+import {
+    type StructuralBlueprint,
+    type SubPageSlot,
+    shouldHaveSidebar,
+    headerStyleToBlock,
+    footerStructureToVariant,
+    heroStructureToVariant,
+    ctaStyleToConfig,
+} from '../structural-blueprint';
+
+const SLOT_GENERATORS: Record<SubPageSlot, (n: string, s: string, d: string) => SubPageDefinition> = {
+    'guides-hub': guidesHub,
+    'guide-complete': guideComplete,
+    'guide-save-money': guideSaveMoney,
+    'guide-mistakes': guideMistakes,
+    'calculator': calculatorPage,
+    'compare': comparePage,
+    'reviews': reviewsPage,
+    'faq': faqPage,
+    'pricing': pricingPage,
+    'blog': blogPage,
+    'resources': resourcesPage,
+    'about': aboutPage,
+    'contact': (n, s, d) => contactPage(n, s, d),
+    'how-it-works': howItWorksPage,
+    'checklist': checklistPage,
+    'glossary': glossaryPage,
+    'case-studies': caseStudiesPage,
+};
+
+function howItWorksPage(niche: string, _siteName: string, _domain: string): SubPageDefinition {
+    const n = capitalize(niche);
+    return {
+        route: '/how-it-works',
+        title: `How ${n} Works — Step by Step`,
+        metaDescription: `Understand how ${niche} works from start to finish. A clear step-by-step breakdown for first-timers and returners alike.`,
+        blocks: [
+            { type: 'Header', variant: 'topbar', config: { sticky: true } },
+            { type: 'Hero', variant: 'minimal', content: {
+                heading: `How ${n} Works`,
+                subheading: `A clear, step-by-step breakdown so you know exactly what to expect.`,
+                badge: 'Step-by-Step',
+            }},
+            { type: 'Checklist', content: {
+                title: `${n} Process Overview`,
+                steps: [
+                    { label: 'Research your options and define your requirements', done: false },
+                    { label: 'Get quotes from 3-5 qualified providers', done: false },
+                    { label: 'Compare on quality, price, and reputation', done: false },
+                    { label: 'Choose your provider and agree on terms in writing', done: false },
+                    { label: 'Monitor progress and communicate regularly', done: false },
+                    { label: 'Review the final result against original requirements', done: false },
+                ],
+            }},
+            { type: 'ArticleBody', content: {
+                title: `The ${n} Process Explained`,
+                markdown: `## Step 1: Research\n\nBefore anything else, understand what you need. Read our [complete guide](/guides/complete-guide) and use the [calculator](/calculator) to set a realistic budget.\n\n` +
+                    `## Step 2: Get Quotes\n\nNever go with the first option. Getting multiple quotes helps you understand fair pricing and find the best fit.\n\n` +
+                    `## Step 3: Compare\n\nUse our [comparison tool](/compare) to evaluate options on the metrics that matter most to you.\n\n` +
+                    `## Step 4: Decide\n\nOnce you've done your research, make a decision with confidence. Get everything in writing.\n\n` +
+                    `## Step 5: Follow Through\n\nStay involved throughout the process. Good communication prevents most problems.`,
+            }},
+            { type: 'FAQ' },
+            { type: 'Footer', variant: 'multi-column' },
+        ],
+    };
+}
+
+function checklistPage(niche: string, _siteName: string): SubPageDefinition {
+    const n = capitalize(niche);
+    return {
+        route: '/checklist',
+        title: `${n} Checklist — Don't Miss a Step`,
+        metaDescription: `A printable ${niche} checklist to make sure you don't miss any important steps. Free to use.`,
+        blocks: [
+            { type: 'Header', variant: 'topbar', config: { sticky: true } },
+            { type: 'Hero', variant: 'minimal', content: {
+                heading: `Your ${n} Checklist`,
+                subheading: `Print this out or bookmark it — a step-by-step checklist so nothing falls through the cracks.`,
+                badge: 'Free Checklist',
+            }},
+            { type: 'Checklist', content: {
+                title: `Essential ${n} Checklist`,
+                steps: [
+                    { label: 'Define your specific requirements and goals', done: false },
+                    { label: 'Set a realistic budget (use our calculator)', done: false },
+                    { label: 'Research at least 5 potential options', done: false },
+                    { label: 'Check reviews and ratings for each', done: false },
+                    { label: 'Request and compare at least 3 quotes', done: false },
+                    { label: 'Verify licenses, insurance, and credentials', done: false },
+                    { label: 'Read all contracts and terms carefully', done: false },
+                    { label: 'Check warranty and support policies', done: false },
+                    { label: 'Ask about hidden fees or additional costs', done: false },
+                    { label: 'Get everything agreed upon in writing', done: false },
+                    { label: 'Set clear timelines and milestones', done: false },
+                    { label: 'Plan for contingencies and unexpected costs (10-20% buffer)', done: false },
+                ],
+            }},
+            { type: 'ArticleBody', content: {
+                title: 'Why Use a Checklist?',
+                markdown: `Research shows that using a checklist reduces errors by up to 30% and improves outcomes significantly. Don't rely on memory — especially for high-stakes ${niche} decisions.\n\n` +
+                    `**Helpful tools:**\n- [Cost Calculator](/calculator) — Get your budget estimate\n- [Comparison Guide](/compare) — See options side by side\n- [Complete Guide](/guides/complete-guide) — Deep-dive into everything`,
+            }},
+            { type: 'Footer', variant: 'multi-column' },
+        ],
+    };
+}
+
+function glossaryPage(niche: string, _siteName: string): SubPageDefinition {
+    const n = capitalize(niche);
+    return {
+        route: '/glossary',
+        title: `${n} Glossary — Key Terms Explained`,
+        metaDescription: `A plain-language glossary of ${niche} terms. Understand the jargon before you commit.`,
+        blocks: [
+            { type: 'Header', variant: 'topbar', config: { sticky: true } },
+            { type: 'Hero', variant: 'minimal', content: {
+                heading: `${n} Glossary`,
+                subheading: `Industry jargon shouldn't be a barrier. Here's every term you need to know, explained simply.`,
+                badge: 'Reference',
+            }},
+            { type: 'ArticleBody', content: {
+                title: `${n} Terms & Definitions`,
+                markdown: `## Key ${n} Terms\n\nUnderstanding industry terminology is the first step to making smart decisions. This reference covers the essential ${niche} terms you'll encounter when researching options, comparing providers, and reading contracts.\n\nUse Ctrl+F (or Cmd+F on Mac) to search for a specific term.`,
+            }},
+            { type: 'FAQ' },
+            { type: 'Footer', variant: 'multi-column' },
+        ],
+    };
+}
+
+function caseStudiesPage(niche: string, siteName: string): SubPageDefinition {
+    const n = capitalize(niche);
+    return {
+        route: '/case-studies',
+        title: `${n} Case Studies & Success Stories`,
+        metaDescription: `Real ${niche} case studies showing costs, timelines, and outcomes. Learn from others' experiences.`,
+        blocks: [
+            { type: 'Header', variant: 'topbar', config: { sticky: true } },
+            { type: 'Hero', variant: 'centered', content: {
+                heading: `${n} Case Studies`,
+                subheading: `Real stories, real numbers, real outcomes. See how others approached their ${niche} decisions.`,
+                badge: 'Real Stories',
+            }},
+            { type: 'TestimonialGrid' },
+            { type: 'ArticleBody', content: {
+                title: `What We Can Learn`,
+                markdown: `## Why Case Studies Matter\n\nNothing beats learning from real experiences. At ${siteName}, we collect and verify real-world ${niche} stories so you can make better decisions.\n\n` +
+                    `Each case study includes actual costs, timelines, and honest assessments of what went well and what could have been better.\n\n` +
+                    `**Ready to start your own journey?**\n- [Calculate your costs](/calculator)\n- [Compare options](/compare)\n- [Read our guides](/guides)`,
+            }},
+            { type: 'StatGrid' },
+            { type: 'Footer', variant: 'multi-column' },
+        ],
+    };
+}
+
+/**
+ * Generate sub-pages driven by a structural blueprint.
+ * Only generates pages for slots included in the blueprint, and applies
+ * the blueprint's header/footer/hero/sidebar/CTA choices to each page.
+ */
+export function generateSubPagesFromBlueprint(
+    domain: string,
+    niche: string | undefined,
+    blueprint: StructuralBlueprint,
+): SubPageResult[] {
+    const nicheLabel = niche || domain.replace(/\.[a-z]{2,}(?:\.[a-z]{2,})?$/i, '').replace(/[-_]/g, ' ');
+    const siteName = domainToSiteName(domain);
+
+    const allSlots: SubPageSlot[] = [...blueprint.pages];
+
+    const headerBlock = headerStyleToBlock(blueprint.headerStyle);
+    const footerVariant = footerStructureToVariant(blueprint.footerStructure);
+    const heroVariant = heroStructureToVariant(blueprint.heroStructure);
+    const ctaConfig = ctaStyleToConfig(blueprint.ctaStyle);
+
+    const results: SubPageResult[] = [];
+
+    for (const slot of allSlots) {
+        const gen = SLOT_GENERATORS[slot];
+        if (!gen) continue;
+
+        const def = gen(nicheLabel, siteName, domain);
+        const blocks = def.blocks.map(b => {
+            const merged = mergeBlockDefaults(b, domain, niche);
+            const result = {
+                ...b,
+                id: blkId(),
+                content: { ...(merged.content || {}), ...(b.content || {}) },
+                config: { ...(merged.config || {}), ...(b.config || {}) },
+            };
+
+            // Apply blueprint structural choices
+            if (b.type === 'Header') {
+                result.variant = headerBlock.variant;
+                result.config = { ...result.config, ...headerBlock.config };
+                // Inject blueprint nav
+                if (result.content) {
+                    (result.content as Record<string, unknown>).navLinks = blueprint.nav.items;
+                }
+            }
+            if (b.type === 'Footer') {
+                result.variant = footerVariant;
+            }
+            if (b.type === 'Hero' && !b.content?.heading) {
+                result.variant = heroVariant;
+            }
+            if (b.type === 'CTABanner' && ctaConfig) {
+                result.config = { ...result.config, ...ctaConfig };
+            }
+
+            return result;
+        });
+
+        // Remove Sidebar blocks if blueprint says no sidebar for this route
+        const hasSidebar = shouldHaveSidebar(blueprint, def.route);
+        const filteredBlocks = hasSidebar ? blocks : blocks.filter(b => b.type !== 'Sidebar');
+
+        // Remove CTA blocks if blueprint says no CTA
+        const finalBlocks = ctaConfig === null
+            ? filteredBlocks.filter(b => b.type !== 'CTABanner')
+            : filteredBlocks;
+
+        // Inject LastUpdated + AuthorBio on content pages
+        const skipRoutes = new Set(['/privacy-policy', '/privacy', '/terms', '/contact']);
+        if (!skipRoutes.has(def.route)) {
+            if (!finalBlocks.some(b => b.type === 'LastUpdated')) {
+                const heroIdx = finalBlocks.findIndex(b => b.type === 'Hero');
+                const insertIdx = heroIdx >= 0 ? heroIdx + 1 : 1;
+                const luDefaults = mergeBlockDefaults({ type: 'LastUpdated' as BlockType }, domain, niche);
+                finalBlocks.splice(insertIdx, 0, {
+                    type: 'LastUpdated' as BlockType, id: blkId(),
+                    content: luDefaults.content || {}, config: luDefaults.config || {},
+                });
+            }
+            if (!finalBlocks.some(b => b.type === 'AuthorBio')) {
+                const footerIdx = finalBlocks.findIndex(b => b.type === 'Footer');
+                const insertIdx = footerIdx >= 0 ? footerIdx : finalBlocks.length;
+                const abDefaults = mergeBlockDefaults({ type: 'AuthorBio' as BlockType }, domain, niche);
+                finalBlocks.splice(insertIdx, 0, {
+                    type: 'AuthorBio' as BlockType, id: blkId(),
+                    content: abDefaults.content || {}, config: abDefaults.config || {},
+                });
+            }
+        }
+
+        results.push({
+            route: def.route,
+            title: def.title,
+            metaDescription: def.metaDescription,
+            blocks: finalBlocks,
+        });
+    }
+
+    // Always add legal pages (not in blueprint.pages but always required)
+    for (const legalGen of [privacyPage, termsPage]) {
+        const def = legalGen(nicheLabel, siteName);
+        const blocks = def.blocks.map(b => {
+            const merged = mergeBlockDefaults(b, domain, niche);
+            const result = {
+                ...b,
+                id: blkId(),
+                content: { ...(merged.content || {}), ...(b.content || {}) },
+                config: { ...(merged.config || {}), ...(b.config || {}) },
+            };
+            if (b.type === 'Header') {
+                result.variant = headerBlock.variant;
+                result.config = { ...result.config, ...headerBlock.config };
+                if (result.content) {
+                    (result.content as Record<string, unknown>).navLinks = blueprint.nav.items;
+                }
+            }
+            return result;
+        });
+        results.push({ route: def.route, title: def.title, metaDescription: def.metaDescription, blocks });
+    }
+
+    return results;
 }

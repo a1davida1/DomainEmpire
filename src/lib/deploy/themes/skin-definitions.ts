@@ -736,13 +736,17 @@ export function generateHueShiftCSS(skinName: string, hueDegrees: number): strin
 }
 
 /**
- * Compute a deterministic hue offset (0-359) from a domain name.
- * Uses DJB2 hash for speed (no crypto import needed).
+ * Compute a deterministic hue offset from a domain name.
+ * Constrained to ±25° so the skin's designed color character is preserved
+ * while still providing per-domain visual differentiation.
  */
+const HUE_SHIFT_RANGE = 50; // total range: -25° to +25°
+
 export function domainHueOffset(domain: string): number {
     let hash = 5381;
     for (let i = 0; i < domain.length; i++) {
         hash = ((hash << 5) + hash + domain.charCodeAt(i)) | 0;
     }
-    return Math.abs(hash) % 360;
+    const raw = Math.abs(hash) % HUE_SHIFT_RANGE;
+    return raw - Math.floor(HUE_SHIFT_RANGE / 2);
 }

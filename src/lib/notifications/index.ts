@@ -6,7 +6,7 @@
 
 import { db } from '@/lib/db';
 import { notifications } from '@/lib/db/schema';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, gt, lt, sql } from 'drizzle-orm';
 import { sendNotificationEmail } from './email';
 
 type NotificationType = 'renewal_warning' | 'job_failed' | 'deploy_failed' | 'traffic_drop' |
@@ -51,12 +51,11 @@ export async function createNotification(options: CreateNotificationOptions): Pr
 
     // Deduplicate: skip if same type+title+domainId exists unread in last 24h
     const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const oneDayAgoIso = oneDayAgo.toISOString();
     const conditions = [
         eq(notifications.type, type),
         eq(notifications.title, title),
         eq(notifications.isRead, false),
-        sql`${notifications.createdAt} > ${oneDayAgoIso}::timestamp`,
+        gt(notifications.createdAt, oneDayAgo),
     ];
     if (domainId) conditions.push(eq(notifications.domainId, domainId));
 
@@ -169,13 +168,12 @@ export async function getUnreadCount(): Promise<number> {
  */
 export async function purgeOldNotifications(olderThanDays = 90): Promise<number> {
     const cutoff = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000);
-    const cutoffIso = cutoff.toISOString();
 
     const deleted = await db.delete(notifications)
         .where(
             and(
                 eq(notifications.isRead, true),
-                sql`${notifications.createdAt} < ${cutoffIso}::timestamp`
+                lt(notifications.createdAt, cutoff),
             )
         )
         .returning({ id: notifications.id });

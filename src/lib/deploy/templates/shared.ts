@@ -165,6 +165,7 @@ export async function renderMarkdownToHtml(markdown: string, options: RenderMark
     const cleaned = markdown
         .replace(/\[INTERNAL_LINK.*?\]/g, '')
         .replace(/\[EXTERNAL_LINK:\s*(.+?)\s*\|[^\]]*\]/g, '$1')  // preserve anchor text from unresolved leftovers
+        .replace(/\[EXTERNAL_LINK[^\]]*\]/g, '')                  // catch-all for any remaining variant formats
         .replace(/\[IMAGE.*?\]/g, '');
 
     const result = marked.parse(cleaned, { async: false });

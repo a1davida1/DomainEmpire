@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { Loader2, CheckCircle2, XCircle, Save, Send, RotateCcw, ShieldAlert } from 'lucide-react';
+import type { QualityAnalysis } from '@/lib/review/content-quality';
 
 type ChecklistItem = {
   id: string;
@@ -40,9 +41,52 @@ type ArticleInfo = {
   contentType: string | null;
 };
 
-type Me = { id: string; role: 'admin' | 'editor' | 'reviewer' | 'expert'; name: string };
-
-const ROLE_LEVEL: Record<Me['role'], number> = { editor: 1, reviewer: 2, expert: 3, admin: 4 };
+type ReviewReadiness = {
+  article: {
+    id: string;
+    domainId: string;
+    title: string | null;
+    status: string | null;
+    ymylLevel: string | null;
+    contentType: string | null;
+  };
+  policy: {
+    requiredRole: string;
+    requiresQaChecklist: boolean;
+    requiresExpertSignoff: boolean;
+    autoPublish: boolean;
+  };
+  roleGate: {
+    userRole: string;
+    requiredRole: string;
+    ok: boolean;
+  };
+  qaGate: {
+    required: boolean;
+    ok: boolean;
+    requiredTotal: number;
+    requiredPassed: number;
+    lastCompletedAt: string | null;
+  };
+  assignmentGate: {
+    ok: boolean;
+    reviewTaskId: string | null;
+    reviewerId: string | null;
+  };
+  qualityGate: {
+    gate: { minQualityScore: number; minWordCount: number; isInteractive: boolean };
+    ok: boolean;
+    failures: string[];
+    quality: {
+      score: number;
+      status: string;
+      metrics: QualityAnalysis['metrics'];
+      recommendations: string[];
+    };
+  };
+  canApprove: boolean;
+  blockingReasons: string[];
+};
 
 function parseIssueCodes(raw: string): string[] {
   return raw
@@ -64,9 +108,9 @@ function isToolContentType(contentType: string | null): boolean {
 
 export function ToolReviewPanel({ articleId }: { articleId: string }) {
   const router = useRouter();
-  const [me, setMe] = useState<Me | null>(null);
   const [qa, setQa] = useState<QaData | null>(null);
   const [article, setArticle] = useState<ArticleInfo | null>(null);
+  const [readiness, setReadiness] = useState<ReviewReadiness | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [checked, setChecked] = useState<Record<string, boolean>>({});
@@ -95,28 +139,25 @@ export function ToolReviewPanel({ articleId }: { articleId: string }) {
   async function load() {
     setLoading(true);
     try {
-      const [meRes, qaRes, articleRes] = await Promise.all([
-        fetch('/api/auth/me'),
+      const [qaRes, readinessRes] = await Promise.all([
         fetch(`/api/articles/${articleId}/qa`),
-        fetch(`/api/articles/${articleId}`),
+        fetch(`/api/articles/${articleId}/review-readiness`),
       ]);
 
-      if (!meRes.ok) throw new Error('Failed to load user session');
       if (!qaRes.ok) throw new Error('Failed to load QA checklist');
-      if (!articleRes.ok) throw new Error('Failed to load article');
+      if (!readinessRes.ok) throw new Error('Failed to load approval gates');
 
-      const meJson = await meRes.json();
       const qaJson = await qaRes.json();
-      const articleJson = await articleRes.json();
+      const readinessJson = await readinessRes.json();
 
-      setMe({ id: meJson.id, role: meJson.role, name: meJson.name });
       setQa(qaJson as QaData);
+      setReadiness(readinessJson as ReviewReadiness);
       setArticle({
-        id: articleJson.id,
-        title: articleJson.title ?? null,
-        status: articleJson.status ?? null,
-        ymylLevel: articleJson.ymylLevel ?? null,
-        contentType: articleJson.contentType ?? null,
+        id: (readinessJson as ReviewReadiness).article.id,
+        title: (readinessJson as ReviewReadiness).article.title ?? null,
+        status: (readinessJson as ReviewReadiness).article.status ?? null,
+        ymylLevel: (readinessJson as ReviewReadiness).article.ymylLevel ?? null,
+        contentType: (readinessJson as ReviewReadiness).article.contentType ?? null,
       });
 
       const latest = (qaJson as QaData).latestResult?.results ?? {};
@@ -151,7 +192,7 @@ export function ToolReviewPanel({ articleId }: { articleId: string }) {
     || contentType === 'lead_capture'
     || contentType === 'health_decision';
 
-  const canApprove = me ? ROLE_LEVEL[me.role] >= ROLE_LEVEL.reviewer : false;
+  const canDecideByRole = readiness ? readiness.roleGate.ok : false;
 
   function buildStructuredRationale() {
     const base = {
@@ -246,18 +287,26 @@ export function ToolReviewPanel({ articleId }: { articleId: string }) {
 
   const approveDisabledReason = (() => {
     if (unsupportedDecisionType) return 'Use the Full QA form for this content type';
-    if (!canApprove) return 'Requires reviewer role';
+    if (!readiness) return 'Loading approval gates...';
+    if (!readiness.roleGate.ok) return `Requires ${readiness.roleGate.requiredRole} role`;
+    if (!readiness.assignmentGate.ok) return 'Task is assigned to another reviewer';
     if (currentStatus !== 'review') return 'Article is not in review';
     if (!qa) return 'QA not loaded';
-    if (!allRequiredChecked) return 'All required QA items must be checked';
+    if (readiness.qaGate.required) {
+      if (!allRequiredChecked) return 'All required QA items must be checked';
+      if (!readiness.qaGate.ok) return 'Save QA to satisfy the approval checklist gate';
+    }
+    if (!readiness.qualityGate.ok) return readiness.qualityGate.failures[0] || 'Content quality gate not satisfied';
     if (rationale.trim().length < 20) return 'Rationale must be at least 20 characters';
     return null;
   })();
 
   const sendBackDisabledReason = (() => {
     if (unsupportedDecisionType) return 'Use the Full QA form for this content type';
-    if (!canApprove) return 'Requires reviewer role';
-    if (!(currentStatus === 'review' || currentStatus === 'approved')) return 'Only review/approved can be sent back';
+    if (!readiness) return 'Loading approval gates...';
+    if (!canDecideByRole) return `Requires ${readiness.roleGate.requiredRole} role`;
+    if (!readiness.assignmentGate.ok) return 'Task is assigned to another reviewer';
+    if (currentStatus !== 'review') return 'Only review can be sent back to draft';
     if (rationale.trim().length < 20) return 'Rationale must be at least 20 characters';
     if (parseIssueCodes(issueCodesInput).length === 0) return 'At least one issue code is required';
     return null;
@@ -318,6 +367,17 @@ export function ToolReviewPanel({ articleId }: { articleId: string }) {
           <Link href={`/dashboard/content/articles/${articleId}/review`} className="text-xs text-primary hover:underline">
             Full QA form
           </Link>
+          {readiness?.assignmentGate.reviewTaskId && (
+            <>
+              <span className="text-xs text-muted-foreground">·</span>
+              <Link
+                href={`/dashboard/reviewer?taskId=${readiness.assignmentGate.reviewTaskId}`}
+                className="text-xs text-primary hover:underline"
+              >
+                Workbench
+              </Link>
+            </>
+          )}
         </div>
       </div>
 
@@ -383,6 +443,34 @@ export function ToolReviewPanel({ articleId }: { articleId: string }) {
           <p className="text-[11px] text-muted-foreground">Required to approve / send back.</p>
         </div>
         <div className="p-3 space-y-3">
+          {readiness && (
+            <div className="rounded-md border bg-muted/20 p-2 space-y-1">
+              <p className="text-xs font-medium">Approval gates</p>
+              <p className="text-[11px] text-muted-foreground">
+                Role: <span className={cn('font-medium', readiness.roleGate.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-400')}>
+                  {readiness.policy.requiredRole}
+                </span>
+                {readiness.policy.requiresExpertSignoff && <span className="ml-1">(expert sign-off required to publish)</span>}
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                QA: <span className={cn('font-medium', readiness.qaGate.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-400')}>
+                  {readiness.qaGate.required ? `${readiness.qaGate.requiredPassed}/${readiness.qaGate.requiredTotal} required saved` : 'not required'}
+                </span>
+                {readiness.qaGate.lastCompletedAt && <span className="ml-1">· last saved {new Date(readiness.qaGate.lastCompletedAt).toLocaleString()}</span>}
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                Task: <span className={cn('font-medium', readiness.assignmentGate.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-400')}>
+                  {readiness.assignmentGate.ok ? 'available' : 'assigned elsewhere'}
+                </span>
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                Quality: <span className={cn('font-medium', readiness.qualityGate.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-400')}>
+                  score {readiness.qualityGate.quality.score} (min {readiness.qualityGate.gate.minQualityScore}) · words {readiness.qualityGate.quality.metrics.wordCount} (min {readiness.qualityGate.gate.minWordCount})
+                </span>
+              </p>
+            </div>
+          )}
+
           <div className="space-y-1">
             <Label htmlFor="rationale" className="text-xs">Rationale / notes</Label>
             <textarea
@@ -567,11 +655,11 @@ export function ToolReviewPanel({ articleId }: { articleId: string }) {
               </Button>
             )}
 
-            {!canApprove && (
+            {readiness && !readiness.roleGate.ok && (
               <div className="rounded-md border bg-muted/20 p-2 text-[11px] text-muted-foreground flex items-start gap-2">
                 <XCircle className="mt-0.5 h-3.5 w-3.5" />
                 <p>
-                  You’re logged in as <span className="font-medium">{me?.role || 'editor'}</span>. You can save QA, but approvals require reviewer+.
+                  You’re logged in as <span className="font-medium">{readiness.roleGate.userRole || 'editor'}</span>. Approvals require <span className="font-medium">{readiness.policy.requiredRole}</span> role or higher.
                 </p>
               </div>
             )}

@@ -4,9 +4,10 @@
  * Creates a temporary domain + calculator article + reviewer user,
  * logs in via /api/auth/login, then exercises the endpoints used by the UI:
  * - GET /api/auth/me
- * - GET /api/articles/:id
+ * - GET /api/articles/:id/review-readiness
  * - GET /api/articles/:id/qa
  * - POST /api/articles/:id/qa
+ * - POST /api/articles/:id/status (submit for review)
  * - POST /api/articles/:id/status (approve)
  *
  * Cleanup runs at the end (best-effort).
@@ -16,7 +17,7 @@ dotenv.config({ path: '.env.local' });
 
 import { randomUUID } from 'node:crypto';
 import { db } from '@/lib/db';
-import { articles, domains, users } from '@/lib/db/schema';
+import { articles, domains, reviewTasks, users } from '@/lib/db/schema';
 import { createUser } from '@/lib/auth';
 import { eq } from 'drizzle-orm';
 
@@ -138,6 +139,7 @@ async function main() {
 
     let domainId: string | null = null;
     let articleId: string | null = null;
+    let reviewTaskId: string | null = null;
     let userId: string | null = null;
 
     try {
@@ -168,8 +170,7 @@ async function main() {
                 domainId,
                 title: `Smoke Calculator (${runId})`,
                 slug,
-                status: 'review',
-                reviewRequestedAt: new Date(),
+                status: 'draft',
                 ymylLevel: 'medium',
                 contentType: 'calculator',
                 contentMarkdown: htmlCalculator,
@@ -206,17 +207,34 @@ async function main() {
         const meRes = await httpJson({ method: 'GET', path: '/api/auth/me', cookie });
         logStep('GET /api/auth/me', meRes, { status: 200 });
 
+        // --- Submit for review (creates a content_publish review task) ---
+        const submitRes = await httpJson({
+            method: 'POST',
+            path: `/api/articles/${articleId}/status`,
+            cookie,
+            body: { status: 'review' },
+        });
+        logStep('POST /api/articles/:id/status (submit for review)', submitRes, { status: 200 });
+        if (submitRes.status !== 200 || !submitRes.json || typeof submitRes.json !== 'object') {
+            throw new Error('Submit-for-review failed; cannot continue');
+        }
+        const submitJson = submitRes.json as Record<string, unknown>;
+        reviewTaskId = typeof submitJson.reviewTaskId === 'string' ? submitJson.reviewTaskId : null;
+        if (!reviewTaskId) {
+            throw new Error('Submit-for-review did not return reviewTaskId (content_publish task missing)');
+        }
+
         // --- Workbench page render (server component) ---
-        const pageRes = await fetch(`${BASE_URL}/dashboard/reviewer?articleId=${articleId}`, {
+        const pageRes = await fetch(`${BASE_URL}/dashboard/reviewer?taskId=${reviewTaskId}`, {
             method: 'GET',
             headers: { cookie },
             redirect: 'manual',
         });
         console.log(`\n[${pageRes.status >= 200 && pageRes.status < 300 ? 'OK' : 'FAIL'}] GET /dashboard/reviewer → ${pageRes.status}`);
 
-        // --- Article fetch ---
-        const articleRes = await httpJson({ method: 'GET', path: `/api/articles/${articleId}`, cookie });
-        logStep('GET /api/articles/:id', articleRes, { status: 200 });
+        // --- Review readiness gates ---
+        const readinessRes = await httpJson({ method: 'GET', path: `/api/articles/${articleId}/review-readiness`, cookie });
+        logStep('GET /api/articles/:id/review-readiness', readinessRes, { status: 200 });
 
         // --- QA fetch ---
         const qaRes = await httpJson({ method: 'GET', path: `/api/articles/${articleId}/qa`, cookie });
@@ -306,6 +324,9 @@ async function main() {
     } finally {
         // Best-effort cleanup
         try {
+            if (reviewTaskId) {
+                await db.delete(reviewTasks).where(eq(reviewTasks.id, reviewTaskId));
+            }
             if (domainId) {
                 await db.delete(domains).where(eq(domains.id, domainId));
             } else if (articleId) {

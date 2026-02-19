@@ -509,7 +509,17 @@ export async function directUploadDeploy(
     try {
         const { mkdirSync, writeFileSync, rmSync } = await import('node:fs');
         const { join, dirname } = await import('node:path');
-        const { execSync } = await import('node:child_process');
+        const { spawnSync } = await import('node:child_process');
+
+        // Validate inputs to prevent command injection via args
+        const SAFE_NAME_RE = /^[a-z0-9][a-z0-9-]*$/i;
+        if (!SAFE_NAME_RE.test(projectName)) {
+            return { success: false, error: 'Invalid project name for deploy' };
+        }
+        const branch = deployOptions?.branch || 'main';
+        if (!SAFE_NAME_RE.test(branch)) {
+            return { success: false, error: 'Invalid branch name for deploy' };
+        }
 
         const tmpDir = join(process.env.TMPDIR || '/tmp', `cf-deploy-${projectName}-${Date.now()}`);
         rmSync(tmpDir, { recursive: true, force: true });
@@ -525,21 +535,26 @@ export async function directUploadDeploy(
                 }
             }
 
-            const branchArg = deployOptions?.branch ? `--branch=${deployOptions.branch}` : '--branch=main';
-
             const env = {
                 ...process.env,
                 CLOUDFLARE_API_TOKEN: config.apiToken,
                 CLOUDFLARE_ACCOUNT_ID: config.accountId,
             };
 
-            const cmd = `npx wrangler pages deploy ${tmpDir} --project-name=${projectName} ${branchArg} --commit-dirty=true 2>&1`;
-            const output = execSync(cmd, {
+            const proc = spawnSync('npx', [
+                'wrangler', 'pages', 'deploy', tmpDir,
+                `--project-name=${projectName}`,
+                `--branch=${branch}`,
+                '--commit-dirty=true',
+            ], {
                 env,
                 timeout: CF_UPLOAD_TIMEOUT_MS,
-                encoding: 'utf-8',
+                encoding: 'utf-8' as BufferEncoding,
                 maxBuffer: 10 * 1024 * 1024,
             });
+
+            if (proc.error) throw proc.error;
+            const output = `${proc.stdout || ''}${proc.stderr || ''}`;
 
             const urlMatch = output.match(/https:\/\/[a-z0-9-]+\.[a-z0-9-]+\.pages\.dev/);
             const url = urlMatch ? urlMatch[0] : undefined;

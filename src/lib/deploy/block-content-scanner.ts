@@ -141,15 +141,20 @@ ${JSON.stringify(content, null, 2)}`;
         const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
         const updatedBlock: BlockEnvelope = { ...block, content: parsed };
 
-        // Verify the rewrite actually removed the original violations (not just reduced count)
+        // Verify the rewrite removed original violations and didn't introduce new ones
         const recheck = scanBlocksForBannedPatterns(updatedBlock);
-        const recheckPatterns = new Set(recheck.violations.map(v => v.pattern));
-        const originalStillPresent = violations.some(v => recheckPatterns.has(v.pattern));
-        if (!originalStillPresent) {
+        if (recheck.violations.length === 0) {
             return { rewritten: true, block: updatedBlock, aiCalls: 1, cost: resp.cost };
         }
 
-        // Some original violations remain — return original to avoid regression
+        // Some violations remain or new ones appeared — only accept if strictly fewer total
+        const recheckPatterns = new Set(recheck.violations.map(v => v.pattern));
+        const originalStillPresent = violations.some(v => recheckPatterns.has(v.pattern));
+        if (!originalStillPresent && recheck.violations.length < violations.length) {
+            return { rewritten: true, block: updatedBlock, aiCalls: 1, cost: resp.cost };
+        }
+
+        // Violations remain or new ones introduced — return original to avoid regression
         return { rewritten: false, block, aiCalls: 1, cost: resp.cost };
     } catch (err) {
         console.error(`[block-content-scanner] Rewrite failed for ${block.type}:`, err instanceof Error ? err.message : err);

@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { articles, reviewEvents } from '@/lib/db/schema';
+import { articles, reviewEvents, reviewTasks } from '@/lib/db/schema';
 import { requireAuth, getRequestUser } from '@/lib/auth';
 import { canTransition, getApprovalPolicy } from '@/lib/review/workflow';
 import type { YmylLevel } from '@/lib/review/ymyl';
-import { parseStructuredRationale } from '@/lib/review/rationale-policy';
-import { analyzeContentQuality, toPlainText } from '@/lib/review/content-quality';
-import { eq } from 'drizzle-orm';
+import { parseStructuredRationale, requiresStructuredRationale } from '@/lib/review/rationale-policy';
+import { evaluateQualityGate } from '@/lib/review/quality-gate';
+import { ensureContentPublishTask, finalizeContentPublishTask } from '@/lib/review/content-review-tasks';
+import { and, desc, eq } from 'drizzle-orm';
 
 // Valid status transitions
 const TRANSITIONS: Record<string, string[]> = {
@@ -21,30 +22,6 @@ const TRANSITIONS: Record<string, string[]> = {
     published: ['archived', 'review'],  // archive or pull back for review
     archived: ['draft'],                // unarchive back to draft
 };
-
-const MIN_REVIEW_QUALITY_SCORE = 70;
-
-const INTERACTIVE_CONTENT_TYPES = new Set([
-    'calculator',
-    'wizard',
-    'configurator',
-    'quiz',
-    'survey',
-    'assessment',
-    'interactive_infographic',
-    'interactive_map',
-]);
-
-function resolveQualityGate(input: { contentType: string | null; ymylLevel: string | null }) {
-    const isInteractive = input.contentType ? INTERACTIVE_CONTENT_TYPES.has(input.contentType) : false;
-    if (!isInteractive) {
-        return { minQualityScore: MIN_REVIEW_QUALITY_SCORE, minWordCount: 900 };
-    }
-
-    const ymyl = (input.ymylLevel || 'none') as 'none' | 'low' | 'medium' | 'high';
-    const minWordCount = ymyl === 'high' ? 350 : ymyl === 'medium' ? 250 : 150;
-    return { minQualityScore: MIN_REVIEW_QUALITY_SCORE, minWordCount };
-}
 
 async function tryAutoPublish(
     articleId: string,
@@ -137,6 +114,31 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
             );
         }
 
+        // Prevent double-decisions: if a pending content_publish review task is assigned to
+        // another reviewer, only that reviewer (or admin) may approve/send-back.
+        if (currentStatus === 'review' && (newStatus === 'approved' || newStatus === 'draft')) {
+            const taskRows = await db.select({
+                id: reviewTasks.id,
+                reviewerId: reviewTasks.reviewerId,
+            })
+                .from(reviewTasks)
+                .where(and(
+                    eq(reviewTasks.taskType, 'content_publish'),
+                    eq(reviewTasks.status, 'pending'),
+                    eq(reviewTasks.articleId, params.id),
+                ))
+                .orderBy(desc(reviewTasks.createdAt))
+                .limit(1);
+
+            const task = taskRows[0] || null;
+            if (task?.reviewerId && task.reviewerId !== user.id && user.role !== 'admin') {
+                return NextResponse.json(
+                    { error: 'This review task is assigned to another reviewer' },
+                    { status: 403 },
+                );
+            }
+        }
+
         const rationaleValidation = parseStructuredRationale({
             contentType: article.contentType,
             rationale,
@@ -153,6 +155,24 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
                 },
                 { status: 400 },
             );
+        }
+
+        // Enforce role requirements for reviewer decisions (approve/send-back/publish)
+        if (requiresStructuredRationale(currentStatus, newStatus)) {
+            const policy = await getApprovalPolicy({
+                domainId: article.domainId,
+                ymylLevel: (article.ymylLevel || 'none') as YmylLevel,
+            });
+
+            const ROLE_HIERARCHY: Record<string, number> = { editor: 1, reviewer: 2, expert: 3, admin: 4 };
+            const userLevel = ROLE_HIERARCHY[user.role] || 0;
+            const requiredLevel = ROLE_HIERARCHY[policy.requiredRole] || 0;
+            if (userLevel < requiredLevel) {
+                return NextResponse.json(
+                    { error: `Requires ${policy.requiredRole} role or higher (you are ${user.role})` },
+                    { status: 403 },
+                );
+            }
         }
 
         // Enforce approval policies (role, QA checklist, expert sign-off)
@@ -172,34 +192,24 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         }
 
         if (newStatus === 'approved' || newStatus === 'published') {
-            const plainText = toPlainText(article.contentMarkdown, article.contentHtml);
-            const quality = analyzeContentQuality(plainText);
-            const gate = resolveQualityGate({ contentType: article.contentType, ymylLevel: article.ymylLevel });
-            const qualityFailures: string[] = [];
+            const evaluation = evaluateQualityGate({
+                contentType: article.contentType,
+                ymylLevel: article.ymylLevel,
+                contentMarkdown: article.contentMarkdown,
+                contentHtml: article.contentHtml,
+            });
 
-            if (quality.qualityScore < gate.minQualityScore) {
-                qualityFailures.push(
-                    `Quality score ${quality.qualityScore} is below required ${gate.minQualityScore}`,
-                );
-            }
-
-            if (quality.metrics.wordCount < gate.minWordCount) {
-                qualityFailures.push(
-                    `Word count ${quality.metrics.wordCount} is below required ${gate.minWordCount}`,
-                );
-            }
-
-            if (qualityFailures.length > 0) {
+            if (!evaluation.passed) {
                 return NextResponse.json(
                     {
                         error: 'Content quality gate failed. Improve content before approving/publishing.',
-                        details: qualityFailures,
-                        qualityGate: gate,
+                        details: evaluation.failures,
+                        qualityGate: evaluation.gate,
                         quality: {
-                            score: quality.qualityScore,
-                            status: quality.status,
-                            metrics: quality.metrics,
-                            recommendations: quality.recommendations,
+                            score: evaluation.quality.qualityScore,
+                            status: evaluation.quality.status,
+                            metrics: evaluation.quality.metrics,
+                            recommendations: evaluation.quality.recommendations,
                         },
                     },
                     { status: 403 },
@@ -218,6 +228,9 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
             updates.lastReviewedAt = new Date();
             updates.lastReviewedBy = user.id;
         }
+        if (newStatus === 'review') {
+            updates.reviewRequestedAt = new Date();
+        }
         if (newStatus === 'published') {
             updates.publishedBy = user.id;
         }
@@ -235,6 +248,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         const eventType = (eventTypeMap[newStatus] || 'edited') as NonNullable<ReviewEventType>;
 
         let autoPublished = false;
+        let reviewTaskId: string | null = null;
 
         // Perform status update and event logging atomically in a transaction
         await db.transaction(async (tx) => {
@@ -258,6 +272,32 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
                 },
             });
 
+            if (newStatus === 'review') {
+                reviewTaskId = await ensureContentPublishTask(tx, {
+                    articleId: params.id,
+                    domainId: article.domainId,
+                    createdBy: user.id,
+                });
+            }
+            if (newStatus === 'approved') {
+                const finalized = await finalizeContentPublishTask(tx, {
+                    articleId: params.id,
+                    status: 'approved',
+                    reviewerId: user.id,
+                    reviewNotes: (rationale || 'Approved').trim(),
+                });
+                reviewTaskId = finalized.taskId;
+            }
+            if (newStatus === 'draft' && currentStatus === 'review') {
+                const finalized = await finalizeContentPublishTask(tx, {
+                    articleId: params.id,
+                    status: 'rejected',
+                    reviewerId: user.id,
+                    reviewNotes: (rationale || 'Sent back to draft').trim(),
+                });
+                reviewTaskId = finalized.taskId;
+            }
+
             // If approving, attempt auto-publish within the same transaction if possible
             if (newStatus === 'approved') {
                 autoPublished = await tryAutoPublish(params.id, article.domainId, article.ymylLevel || 'none', user, tx);
@@ -269,6 +309,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
             previousStatus: currentStatus,
             newStatus: autoPublished ? 'published' : newStatus,
             autoPublished,
+            reviewTaskId,
             rationale: rationale || null,
             rationaleDetails: Object.keys(rationaleValidation.parsed || {}).length > 0
                 ? rationaleValidation.parsed

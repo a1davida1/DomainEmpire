@@ -6,6 +6,7 @@ const mockGetRequestUser = vi.fn();
 const mockCanTransition = vi.fn();
 const mockGetApprovalPolicy = vi.fn();
 const mockParseStructuredRationale = vi.fn();
+const mockRequiresStructuredRationale = vi.fn();
 const mockFindFirst = vi.fn();
 
 vi.mock('@/lib/auth', () => ({
@@ -20,10 +21,13 @@ vi.mock('@/lib/review/workflow', () => ({
 
 vi.mock('@/lib/review/rationale-policy', () => ({
     parseStructuredRationale: mockParseStructuredRationale,
+    requiresStructuredRationale: mockRequiresStructuredRationale,
 }));
 
 vi.mock('drizzle-orm', () => ({
     eq: vi.fn((...args: unknown[]) => args),
+    and: vi.fn((...args: unknown[]) => args),
+    desc: vi.fn((arg: unknown) => arg),
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -33,6 +37,15 @@ vi.mock('@/lib/db', () => ({
                 findFirst: (...args: unknown[]) => mockFindFirst(...args),
             },
         },
+        select: vi.fn(() => ({
+            from: vi.fn(() => ({
+                where: vi.fn(() => ({
+                    orderBy: vi.fn(() => ({
+                        limit: vi.fn(async () => []),
+                    })),
+                })),
+            })),
+        })),
         update: () => ({
             set: () => ({
                 where: vi.fn(),
@@ -49,6 +62,14 @@ vi.mock('@/lib/db', () => ({
 
 vi.mock('@/lib/db/schema', () => ({
     articles: { id: 'id' },
+    reviewTasks: {
+        id: 'id',
+        reviewerId: 'reviewerId',
+        taskType: 'taskType',
+        status: 'status',
+        articleId: 'articleId',
+        createdAt: 'createdAt',
+    },
     reviewEvents: {
         $inferInsert: { eventType: 'string' },
     },
@@ -71,6 +92,7 @@ describe('POST /api/articles/[id]/status quality gate', () => {
         mockCanTransition.mockResolvedValue({ allowed: true });
         mockGetApprovalPolicy.mockResolvedValue({ autoPublish: false });
         mockParseStructuredRationale.mockReturnValue({ ok: true, parsed: {} });
+        mockRequiresStructuredRationale.mockReturnValue(true);
     });
 
     it('blocks review->approved when content quality is too low', async () => {
