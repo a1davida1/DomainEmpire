@@ -192,29 +192,53 @@ export function DeleteDomainButton({ domainId, domainName }: { domainId: string;
 export function SeedPagesButton({ domainId }: { domainId: string }) {
     const router = useRouter();
     const [loading, setLoading] = useState(false);
+    const [status, setStatus] = useState<string | null>(null);
+
+    async function handlePrepare() {
+        setLoading(true);
+        setStatus('Starting full pipeline...');
+        try {
+            const res = await fetch(`/api/domains/${domainId}/prepare`, {
+                method: 'POST',
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) {
+                const parts: string[] = [];
+                if (data.pagesSeeded) parts.push('pages seeded');
+                if (data.enrichment?.aiCalls > 0) parts.push(`${data.enrichment.aiCalls} AI enrichments`);
+                if (data.contentScan?.blocksRewritten > 0) parts.push(`${data.contentScan.blocksRewritten} blocks cleaned`);
+                if (data.validation?.ready) parts.push('validation passed');
+                const score = data.validation?.ready ? '✓ Ready' : '⚠ Needs attention';
+                toast.success(`Pipeline complete: ${score}. ${parts.join(', ')}`);
+                setStatus(`Score: ${data.validation?.errorCount === 0 ? 'Ready' : `${data.validation?.errorCount} issues`} | ${data.pageCount} pages`);
+                router.refresh();
+            } else {
+                toast.error(data.error || 'Pipeline failed');
+                setStatus(null);
+            }
+        } catch {
+            toast.error('Pipeline failed');
+            setStatus(null);
+        } finally {
+            setLoading(false);
+        }
+    }
 
     return (
-        <Button size="sm" variant="outline" disabled={loading} onClick={async () => {
-            setLoading(true);
-            try {
-                const res = await fetch('/api/pages/seed', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ domainId }),
-                });
-                const data = await res.json().catch(() => ({}));
-                if (res.ok) {
-                    toast.success(`Seeded ${data.created || 0} page(s)`);
-                    router.refresh();
-                } else {
-                    toast.error(data.error || 'Failed to seed pages');
-                }
-            } catch { toast.error('Failed to seed pages'); }
-            finally { setLoading(false); }
-        }}>
-            {loading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <FileStack className="mr-1.5 h-3.5 w-3.5" />}
-            Seed Pages
-        </Button>
+        <div className="flex items-center gap-2">
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <Button size="sm" variant="outline" disabled={loading} onClick={handlePrepare}>
+                        {loading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <FileStack className="mr-1.5 h-3.5 w-3.5" />}
+                        {loading ? 'Running Pipeline...' : 'Prepare Site'}
+                    </Button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs">
+                    Full pipeline: seed pages → assign theme → programmatic fixes → AI enrichment → content scan (banned words + burstiness) → Opus site review → auto-remediation → validation.
+                </TooltipContent>
+            </Tooltip>
+            {status && !loading && <span className="text-xs text-muted-foreground">{status}</span>}
+        </div>
     );
 }
 

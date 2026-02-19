@@ -6,7 +6,6 @@
  * and wraps the result in a complete HTML document.
  */
 
-import { createHash } from 'node:crypto';
 import type { BlockEnvelope, BlockType } from './schemas';
 import {
     escapeHtml,
@@ -14,15 +13,6 @@ import {
     sanitizeArticleHtml,
 } from '../templates/shared';
 import { marked } from 'marked';
-
-/**
- * Deterministic probability check based on a seed string.
- * Returns a stable value in [0, 1) for the same seed.
- */
-function hashProbability(seed: string): number {
-    const hash = createHash('sha256').update(seed).digest();
-    return hash.readUInt32BE(0) / 0x100000000;
-}
 import {
     registerBlockRenderer as _registerBlockRenderer,
     getBlockRenderer,
@@ -47,6 +37,11 @@ const THEME_FONT_URLS: Record<string, string> = {
     brutalist: 'https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap',
     glass: 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap',
     retro: 'https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&family=Nunito:wght@400;500;600;700;800&display=swap',
+    corporate: 'https://fonts.googleapis.com/css2?family=Libre+Franklin:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap',
+    craft: 'https://fonts.googleapis.com/css2?family=Vollkorn:ital,wght@0,400;0,500;0,600;0,700;0,800;0,900;1,400&family=Cabin:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap',
+    academic: 'https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap',
+    startup: 'https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap',
+    noir: 'https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Karla:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap',
 };
 
 // ============================================================
@@ -184,9 +179,9 @@ const POPUP_EXCLUDED_ROUTES = new Set([
 
 function getNewsletterPopupScript(collectUrl: string, niche: string): string {
     const safeCollectUrl = JSON.stringify(collectUrl);
-    // Fix 3: JSON.stringify escapes all special chars (quotes, backslashes, unicode)
-    // then slice off the wrapping quotes to get a safe JS string literal body.
-    const safeNiche = JSON.stringify(niche).slice(1, -1);
+    // Defense-in-depth: niche is set via textContent (not interpolated into innerHTML)
+    // so even a malicious niche value cannot execute as HTML.
+    const safeNiche = JSON.stringify(niche);
     return `
   /* Newsletter popup for returning visitors */
   (function(){
@@ -211,7 +206,7 @@ function getNewsletterPopupScript(collectUrl: string, niche: string): string {
       overlay.setAttribute('aria-label','Newsletter signup');
       overlay.innerHTML='<div class="nl-popup">'
         +'<button class="nl-popup-close" aria-label="Close" type="button">&times;</button>'
-        +'<h3>Get ${safeNiche} updates</h3>'
+        +'<h3 class="nl-popup-heading"></h3>'
         +'<p>Join our newsletter for the latest guides and insights.</p>'
         +'<form class="nl-popup-form">'
         +'<input type="email" name="email" placeholder="your@email.com" required autocomplete="email" aria-label="Email address">'
@@ -219,6 +214,7 @@ function getNewsletterPopupScript(collectUrl: string, niche: string): string {
         +'</form>'
         +'<p class="nl-popup-msg" style="display:none"></p>'
         +'</div>';
+      overlay.querySelector('.nl-popup-heading').textContent='Get '+${safeNiche}+' updates';
       var style=document.createElement('style');
       style.textContent='.nl-popup-overlay{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;animation:nlFadeIn .3s ease}'
         +'.nl-popup{background:var(--color-bg,#fff);color:var(--color-text,#1a1a1a);border-radius:12px;padding:2rem;max-width:400px;width:90%;position:relative;box-shadow:0 20px 60px rgba(0,0,0,.3)}'
@@ -491,17 +487,10 @@ function buildOpenGraphMeta(ctx: RenderContext, pageUrl: string): string {
 function buildStructuredData(ctx: RenderContext, canonicalUrl: string, blocks: BlockEnvelope[] = []): string {
     const scripts: string[] = [];
     const isHomepage = ctx.route === '/';
+    const hasArticleBody = blocks.some(b => b.type === 'ArticleBody');
 
-    // Deterministic seed for schema emission probability
-    const schemaSeed = `${ctx.route}:${ctx.domain}`;
-
-    // WebPage or Article schema — 70% WebPage, 30% Article (for non-homepage)
-    let pageType: string;
-    if (isHomepage) {
-        pageType = 'WebPage';
-    } else {
-        pageType = hashProbability(`${schemaSeed}:pageType`) < 0.7 ? 'WebPage' : 'Article';
-    }
+    // WebPage on homepage; Article only when content exists.
+    const pageType = isHomepage ? 'WebPage' : (hasArticleBody ? 'Article' : 'WebPage');
 
     const pageSchema: Record<string, unknown> = {
         '@context': 'https://schema.org',
@@ -566,10 +555,9 @@ function buildStructuredData(ctx: RenderContext, canonicalUrl: string, blocks: B
     // NOTE: FAQPage JSON-LD is emitted by the FAQ block renderer itself
     // (when emitJsonLd !== false), so we don't duplicate it here.
 
-    // HowTo schema — extract from StepByStep/Checklist blocks (80% emission rate)
+    // HowTo schema — extract from StepByStep/Checklist blocks
     const howToBlocks = blocks.filter(b => b.type === 'StepByStep' || b.type === 'Checklist');
-    const emitHowTo = hashProbability(`${schemaSeed}:howTo`) < 0.8;
-    for (const hb of emitHowTo ? howToBlocks : []) {
+    for (const hb of howToBlocks) {
         const c = (hb.content || {}) as Record<string, unknown>;
         const heading = (c.heading as string) || (c.title as string) || '';
         const steps = (c.steps as Array<{ title?: string; text?: string; label?: string }>) || [];
@@ -636,9 +624,9 @@ function buildStructuredData(ctx: RenderContext, canonicalUrl: string, blocks: B
         }
     }
 
-    // SoftwareApplication schema for Calculator/Wizard blocks (60% emission rate)
+    // SoftwareApplication schema for Calculator/Wizard blocks
     const toolBlocks = blocks.filter(b => b.type === 'QuoteCalculator' || b.type === 'CostBreakdown' || b.type === 'Wizard');
-    if (toolBlocks.length > 0 && hashProbability(`${schemaSeed}:softwareApp`) < 0.6) {
+    if (toolBlocks.length > 0) {
         const toolSchema = {
             '@context': 'https://schema.org',
             '@type': 'SoftwareApplication',
@@ -651,9 +639,8 @@ function buildStructuredData(ctx: RenderContext, canonicalUrl: string, blocks: B
         scripts.push(`<script type="application/ld+json">${JSON.stringify(toolSchema)}</script>`);
     }
 
-    // Review/AggregateRating for ProsConsCard blocks (75% emission rate)
-    const emitReview = hashProbability(`${schemaSeed}:review`) < 0.75;
-    const reviewBlocks = emitReview ? blocks.filter(b => b.type === 'ProsConsCard') : [];
+    // Review/AggregateRating for ProsConsCard blocks
+    const reviewBlocks = blocks.filter(b => b.type === 'ProsConsCard');
     for (const rb of reviewBlocks) {
         const c = (rb.content || {}) as Record<string, unknown>;
         const name = (c.name as string) || '';
@@ -675,9 +662,8 @@ function buildStructuredData(ctx: RenderContext, canonicalUrl: string, blocks: B
         }
     }
 
-    // Product schema for ComparisonTable blocks (70% emission rate)
-    const emitProduct = hashProbability(`${schemaSeed}:product`) < 0.7;
-    const compBlocks = emitProduct ? blocks.filter(b => b.type === 'ComparisonTable') : [];
+    // Product schema for ComparisonTable blocks
+    const compBlocks = blocks.filter(b => b.type === 'ComparisonTable');
     for (const cb of compBlocks) {
         const c = (cb.content || {}) as Record<string, unknown>;
         const options = (c.options as Array<{ name: string; badge?: string; scores?: Record<string, unknown> }>) || [];
@@ -1239,7 +1225,7 @@ registerBlockRenderer('ArticleBody', (block, ctx) => {
 });
 
 // --- FAQ ---
-registerBlockRenderer('FAQ', (block, ctx) => {
+registerBlockRenderer('FAQ', (block, _ctx) => {
     const content = (block.content || {}) as Record<string, unknown>;
     const config = (block.config || {}) as Record<string, unknown>;
     const items = (content.items as Array<{ question: string; answer: string }>) || [];
@@ -1247,8 +1233,8 @@ registerBlockRenderer('FAQ', (block, ctx) => {
     if (items.length === 0) return '';
 
     const openFirst = config.openFirst === true;
-    // 90% emission rate for FAQ JSON-LD, gated by deterministic hash
-    const emitJsonLd = config.emitJsonLd !== false && hashProbability(`${ctx.route}:${ctx.domain}:faq`) < 0.9;
+    // Emit FAQPage JSON-LD deterministically when enabled.
+    const emitJsonLd = config.emitJsonLd !== false;
 
     const faqHtml = items.map((item, i) => {
         const open = i === 0 && openFirst ? ' open' : '';

@@ -13,6 +13,7 @@
 
 import { db, domains, contentQueue, articles, pageDefinitions } from '@/lib/db';
 import { eq, and, count } from 'drizzle-orm';
+import { createHash } from 'node:crypto';
 import { createDirectUploadProject, directUploadDeploy, addCustomDomain, getZoneNameservers, verifyDomainPointsToCloudflare, ensurePagesDnsRecord } from './cloudflare';
 import {
     hasRegistrarNameserverCredentials,
@@ -27,6 +28,11 @@ import {
     type CloudflareHostShard,
 } from './host-sharding';
 import { advanceDomainLifecycleForAcquisition } from '@/lib/domain/lifecycle-sync';
+
+/** Deterministic IndexNow key derived from the domain name. */
+function getIndexNowKey(domain: string): string {
+    return createHash('sha256').update(`indexnow-${domain}`).digest('hex').slice(0, 32);
+}
 
 interface DeployPayload {
     domain: string;
@@ -136,6 +142,10 @@ async function stepGenerateFiles(ctx: DeployContext): Promise<{ path: string; co
         await failStep(ctx, 0, 'No files generated');
         throw new Error('Site generator produced zero files');
     }
+
+    // Inject IndexNow verification key file so search engine pings succeed
+    const indexNowKey = getIndexNowKey(ctx.payload.domain);
+    files.push({ path: `/${indexNowKey}.txt`, content: indexNowKey });
 
     const binaryCount = files.filter(f => f.isBase64).length;
     const detail = binaryCount > 0
@@ -437,9 +447,10 @@ async function stepPingSearchEngines(ctx: DeployContext): Promise<void> {
     }
 
     // IndexNow — notify Bing (which shares with Google, Yandex, Seznam, Naver)
-    // Uses the domain as a simple key; no key file needed for basic submission
+    // Key file is deployed as /{key}.txt by stepGenerateFiles
     try {
-        const indexNowUrl = `https://api.indexnow.org/indexnow?url=${encodeURIComponent(`https://${domainName}/`)}&key=${encodeURIComponent(domainName)}`;
+        const key = getIndexNowKey(domainName);
+        const indexNowUrl = `https://api.indexnow.org/indexnow?url=${encodeURIComponent(`https://${domainName}/`)}&key=${encodeURIComponent(key)}&keyLocation=${encodeURIComponent(`https://${domainName}/${key}.txt`)}`;
         const response = await fetch(indexNowUrl, { signal: AbortSignal.timeout(10_000) });
         results.push(`IndexNow: ${response.status}`);
     } catch (err) {
@@ -598,11 +609,21 @@ export async function processDeployJob(jobId: string): Promise<void> {
             },
         }).where(eq(contentQueue.id, jobId));
 
-        await db.update(domains).set({
-            isDeployed: shouldMarkDeployed,
+        // Only flip isDeployed to true, never back to false on a re-deploy.
+        // A transient DNS check failure during re-deploy must not un-deploy a live site.
+        const deployUpdate: Record<string, unknown> = {
             lastDeployedAt: new Date(),
             updatedAt: new Date(),
-        }).where(eq(domains.id, ctx.domainId));
+        };
+        if (shouldMarkDeployed) {
+            deployUpdate.isDeployed = true;
+        } else if (!domain.isDeployed) {
+            // First deploy and DNS not verified — mark not deployed
+            deployUpdate.isDeployed = false;
+        }
+        // else: domain.isDeployed is already true, leave it untouched
+
+        await db.update(domains).set(deployUpdate).where(eq(domains.id, ctx.domainId));
 
         try {
             await advanceDomainLifecycleForAcquisition({

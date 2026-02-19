@@ -345,16 +345,21 @@ export type ProsConsCardConfig = z.infer<typeof ProsConsCardConfigSchema>;
 
 // --- LeadForm ---
 export const LeadFormContentSchema = z.object({
+  heading: z.string().optional(),
+  subheading: z.string().optional(),
   fields: z.array(z.object({
     name: z.string(),
     label: z.string(),
     type: z.enum(['text', 'email', 'tel', 'select', 'number']),
     required: z.boolean().optional(),
     options: z.array(z.string()).optional(),
+    half: z.boolean().optional(),
+    placeholder: z.string().optional(),
   })),
   consentText: z.string(),
   successMessage: z.string(),
   disclosureAboveFold: z.string().optional(),
+  privacyUrl: z.string().optional(),
   privacyPolicyUrl: z.string().optional(),
 });
 

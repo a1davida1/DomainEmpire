@@ -15,19 +15,27 @@ export async function POST(
     const [domain] = await db.select().from(domains).where(eq(domains.id, id)).limit(1);
     if (!domain) return NextResponse.json({ error: 'Domain not found' }, { status: 404 });
 
-    let strategy: DomainStrategy;
+    let strategy: DomainStrategy | undefined;
     try {
-        const body = await request.json();
-        strategy = body as DomainStrategy;
-        if (!strategy.homeTitle || !strategy.cluster || !strategy.niche) {
-            return NextResponse.json({ error: 'Missing required strategy fields: homeTitle, cluster, niche' }, { status: 400 });
+        const text = await request.text();
+        if (text.trim()) {
+            const body = JSON.parse(text) as Record<string, unknown>;
+            const ALLOWED_KEYS = new Set<string>(['wave', 'cluster', 'niche', 'subNiche', 'vertical', 'siteTemplate', 'monetizationTier', 'homeTitle', 'homeMeta']);
+            const hasStrategyFields = body.niche || body.cluster || body.siteTemplate || body.homeTitle;
+            if (hasStrategyFields) {
+                const filtered: Record<string, unknown> = {};
+                for (const key of Object.keys(body)) {
+                    if (ALLOWED_KEYS.has(key)) filtered[key] = body[key];
+                }
+                strategy = filtered as DomainStrategy;
+            }
         }
     } catch {
         return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
 
     try {
-        const result = await prepareDomain(domain.domain, strategy);
+        const result = await prepareDomain(domain.id, strategy);
         return NextResponse.json(result);
     } catch (err) {
         console.error('[prepare]', err);

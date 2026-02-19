@@ -5,12 +5,13 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, Eye, FileText, CheckCircle2, AlertCircle, Clock } from 'lucide-react';
 import { db, domains, articles } from '@/lib/db';
-import { ArticleReviewActions } from '@/components/dashboard/ArticleReviewActions';
 import { BulkArticleActions } from '@/components/dashboard/BulkArticleActions';
+import { ToolReviewPanel } from '@/components/dashboard/ToolReviewPanel';
+import { cn } from '@/lib/utils';
 
 interface PageProps {
     params: Promise<{ id: string }>;
-    searchParams: Promise<{ articleId?: string }>;
+    searchParams: Promise<{ articleId?: string; tab?: string }>;
 }
 
 const statusConfig: Record<string, { label: string; color: string; icon: 'check' | 'clock' | 'alert' }> = {
@@ -32,7 +33,8 @@ function StatusIcon({ status }: { status: string }) {
 
 export default async function PreviewPage({ params, searchParams }: PageProps) {
     const { id } = await params;
-    const { articleId } = await searchParams;
+    const { articleId, tab } = await searchParams;
+    const activeTab: 'content' | 'review' = tab === 'review' ? 'review' : 'content';
 
     const [domain] = await db.select({
         id: domains.id,
@@ -64,6 +66,14 @@ export default async function PreviewPage({ params, searchParams }: PageProps) {
     const previewUrl = articleId
         ? `/api/domains/${id}/preview?articleId=${articleId}`
         : `/api/domains/${id}/preview`;
+
+    const makeUrl = (opts: { articleId?: string; tab?: 'content' | 'review' }) => {
+        const sp = new URLSearchParams();
+        if (opts.articleId) sp.set('articleId', opts.articleId);
+        if (opts.tab && opts.tab !== 'content') sp.set('tab', opts.tab);
+        const qs = sp.toString();
+        return `/dashboard/domains/${id}/preview${qs ? `?${qs}` : ''}`;
+    };
 
     const statusCounts = allArticles.reduce((acc, a) => {
         const s = a.status || 'draft';
@@ -100,16 +110,46 @@ export default async function PreviewPage({ params, searchParams }: PageProps) {
             {/* Main Content: Sidebar + Preview */}
             <div className="flex flex-1 overflow-hidden">
                 {/* Article Sidebar */}
-                <div className="w-72 shrink-0 overflow-y-auto border-r bg-muted/30">
+                <div className={cn('shrink-0 overflow-y-auto border-r bg-muted/30', activeTab === 'review' ? 'w-96' : 'w-72')}>
                     <div className="p-3">
-                        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                            Content ({allArticles.length})
-                        </h2>
-                        <BulkArticleActions articles={allArticles.map(a => ({ id: a.id, status: a.status }))} />
+                        <div className="mb-3 flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1 rounded-md border bg-card p-1">
+                                <Link
+                                    href={makeUrl({ articleId, tab: 'content' })}
+                                    className={cn(
+                                        'rounded px-2 py-1 text-[11px] font-medium transition-colors',
+                                        activeTab === 'content' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+                                    )}
+                                >
+                                    Content
+                                </Link>
+                                <Link
+                                    href={makeUrl({ articleId, tab: 'review' })}
+                                    className={cn(
+                                        'rounded px-2 py-1 text-[11px] font-medium transition-colors',
+                                        activeTab === 'review' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+                                    )}
+                                >
+                                    Review
+                                </Link>
+                            </div>
+                            {activeTab === 'content' && (
+                                <span className="text-[10px] text-muted-foreground">
+                                    {allArticles.length} items
+                                </span>
+                            )}
+                        </div>
+
+                        {activeTab === 'content' && (
+                            <>
+                                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                    Content ({allArticles.length})
+                                </h2>
+                                <BulkArticleActions articles={allArticles.map(a => ({ id: a.id, status: a.status }))} />
 
                         {/* Homepage link */}
                         <Link
-                            href={`/dashboard/domains/${id}/preview`}
+                            href={makeUrl({ tab: 'content' })}
                             className={`mb-2 flex items-center gap-2 rounded-md border px-3 py-2 text-xs transition-colors ${
                                 !articleId ? 'border-blue-300 bg-blue-50 dark:bg-blue-950/30' : 'hover:bg-muted'
                             }`}
@@ -124,23 +164,41 @@ export default async function PreviewPage({ params, searchParams }: PageProps) {
                                 const isActive = articleId === article.id;
                                 const sc = statusConfig[article.status || 'draft'] || statusConfig.draft;
                                 return (
-                                    <Link
+                                    <div
                                         key={article.id}
-                                        href={`/dashboard/domains/${id}/preview?articleId=${article.id}`}
-                                        className={`flex flex-col gap-1 rounded-md border px-3 py-2 text-xs transition-colors ${
-                                            isActive ? 'border-blue-300 bg-blue-50 dark:bg-blue-950/30' : 'hover:bg-muted'
-                                        }`}
+                                        className={cn(
+                                            'flex flex-col gap-2 rounded-md border px-3 py-2 text-xs transition-colors',
+                                            isActive ? 'border-blue-300 bg-blue-50 dark:bg-blue-950/30' : 'hover:bg-muted',
+                                        )}
                                     >
-                                        <div className="flex items-start justify-between gap-1">
-                                            <span className="line-clamp-2 font-medium leading-tight">{article.title}</span>
-                                            <StatusIcon status={article.status || 'draft'} />
+                                        <Link
+                                            href={makeUrl({ articleId: article.id, tab: 'content' })}
+                                            className="block"
+                                        >
+                                            <div className="flex items-start justify-between gap-1">
+                                                <span className="line-clamp-2 font-medium leading-tight">{article.title}</span>
+                                                <StatusIcon status={article.status || 'draft'} />
+                                            </div>
+                                            <div className="mt-1 flex items-center gap-1.5 text-muted-foreground">
+                                                <Badge className={`${sc.color} px-1 py-0 text-[9px]`}>{sc.label}</Badge>
+                                                {article.wordCount && <span>{article.wordCount.toLocaleString('en-US')}w</span>}
+                                            </div>
+                                        </Link>
+                                        <div className="flex flex-wrap gap-2">
+                                            <Link
+                                                href={makeUrl({ articleId: article.id, tab: 'review' })}
+                                                className="text-[11px] text-primary hover:underline"
+                                            >
+                                                Review tool →
+                                            </Link>
+                                            <Link
+                                                href={`/dashboard/content/articles/${article.id}/review`}
+                                                className="text-[11px] text-muted-foreground hover:underline"
+                                            >
+                                                Full QA
+                                            </Link>
                                         </div>
-                                        <div className="flex items-center gap-1.5 text-muted-foreground">
-                                            <Badge className={`${sc.color} px-1 py-0 text-[9px]`}>{sc.label}</Badge>
-                                            {article.wordCount && <span>{article.wordCount.toLocaleString('en-US')}w</span>}
-                                        </div>
-                                        <ArticleReviewActions articleId={article.id} currentStatus={article.status || 'draft'} />
-                                    </Link>
+                                    </div>
                                 );
                             })}
                             {allArticles.length === 0 && (
@@ -154,6 +212,42 @@ export default async function PreviewPage({ params, searchParams }: PageProps) {
                                 </div>
                             )}
                         </div>
+                            </>
+                        )}
+
+                        {activeTab === 'review' && (
+                            <div className="space-y-3">
+                                {!articleId ? (
+                                    <div className="rounded-md border bg-card p-3 text-xs text-muted-foreground">
+                                        Select a tool/article from the Content tab, then come back here to review it side-by-side with the live preview.
+                                    </div>
+                                ) : (
+                                    <ToolReviewPanel articleId={articleId} />
+                                )}
+
+                                <div className="rounded-md border bg-card p-3">
+                                    <p className="text-xs font-semibold">Quick pick</p>
+                                    <p className="mt-1 text-[11px] text-muted-foreground">
+                                        Jump straight into review mode for another item.
+                                    </p>
+                                    <div className="mt-2 space-y-1 max-h-[220px] overflow-auto pr-1">
+                                        {allArticles.slice(0, 40).map((a) => (
+                                            <Link
+                                                key={a.id}
+                                                href={makeUrl({ articleId: a.id, tab: 'review' })}
+                                                className={cn(
+                                                    'block rounded-md border px-2 py-1.5 text-[11px] hover:bg-muted',
+                                                    articleId === a.id && 'border-blue-300 bg-blue-50 dark:bg-blue-950/30',
+                                                )}
+                                            >
+                                                <span className="font-medium">{a.title}</span>
+                                                <span className="ml-2 text-muted-foreground">{(a.contentType || 'article').replaceAll('_', ' ')}</span>
+                                            </Link>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
 

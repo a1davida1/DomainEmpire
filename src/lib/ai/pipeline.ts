@@ -950,6 +950,15 @@ You MUST aggressively rewrite to evade AI detection. Apply ALL of these techniqu
 
     const sanitizedHumanized = stripMetadataPreamble(stripEmDashes(response.content).content);
     const wordCount = sanitizedHumanized.split(/\s+/).filter(Boolean).length;
+    const originalWordCount = draft.split(/\s+/).filter(Boolean).length;
+
+    // Guard: humanized content must not be suspiciously short or drastically truncated
+    if (wordCount < 100) {
+        throw new Error(`Humanized content suspiciously short (${wordCount} words). AI may have refused or errored.`);
+    }
+    if (originalWordCount > 200 && wordCount < originalWordCount * 0.4) {
+        throw new Error(`Humanized content lost >60% of original (${wordCount}/${originalWordCount} words). Possible AI truncation.`);
+    }
 
     await db.update(articles).set({
         contentMarkdown: sanitizedHumanized,
@@ -1262,8 +1271,33 @@ export async function processResolveExternalLinksJob(jobId: string): Promise<voi
             totalOutputTokens = response.outputTokens;
             totalCost = response.cost;
 
+            // Reserved/example domains per RFC 2606 + common AI hallucination patterns
+            const RESERVED_DOMAINS = new Set([
+                'example.com', 'example.org', 'example.net',
+                'test.com', 'test.org', 'test.net',
+                'localhost', 'invalid',
+                'www.example.com', 'www.example.org', 'www.example.net',
+            ]);
+
             resolvedLinks = (response.data.links || [])
-                .filter((l) => l.url)
+                .filter((l) => {
+                    if (!l.url) return false;
+                    try {
+                        const parsed = new URL(l.url);
+                        // Only allow http/https — reject javascript:, data:, ftp:, etc.
+                        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+                        // Reject empty host or bare TLDs (no dot)
+                        if (!parsed.hostname || !parsed.hostname.includes('.')) return false;
+                        // Reject reserved/example domains AI loves to hallucinate
+                        const bare = parsed.hostname.replace(/^www\./, '');
+                        if (RESERVED_DOMAINS.has(bare) || RESERVED_DOMAINS.has(parsed.hostname)) return false;
+                        // Reject IP addresses (v4)
+                        if (/^\d{1,3}(\.\d{1,3}){3}$/.test(parsed.hostname)) return false;
+                        return true;
+                    } catch {
+                        return false; // Malformed URL
+                    }
+                })
                 .map((l) => ({
                     anchorText: l.anchorText,
                     url: l.url!,
@@ -1281,9 +1315,15 @@ export async function processResolveExternalLinksJob(jobId: string): Promise<voi
             });
         } catch (err) {
             console.error(`[Pipeline] External link resolution failed for article ${article.id}:`, err);
+            // Do NOT call replaceExternalLinks with empty resolvedLinks — that would
+            // strip all [EXTERNAL_LINK: ...] markers to plain text, losing citations.
+            // Leave markdown unchanged; placeholders will be cleaned on next pass or review.
         }
 
-        updatedMarkdown = replaceExternalLinks(article.contentMarkdown, placeholders, resolvedLinks);
+        if (resolvedLinks.length > 0) {
+            updatedMarkdown = replaceExternalLinks(article.contentMarkdown, placeholders, resolvedLinks);
+        }
+        // else: AI failed or returned no valid links — leave original markdown intact
     }
 
     const externalLinksPayload = resolvedLinks.map((l) => ({
@@ -1295,29 +1335,39 @@ export async function processResolveExternalLinksJob(jobId: string): Promise<voi
         resolvedAt: new Date().toISOString(),
     }));
 
-    await db.update(articles).set({
-        contentMarkdown: updatedMarkdown,
-        externalLinks: externalLinksPayload.length > 0 ? externalLinksPayload : null,
-    }).where(eq(articles.id, articleId));
+    // Pass rehumanizeCount through for the detection stage
+    const resolvePayload = job.payload as { rehumanizeCount?: number } | undefined;
+    const detectionPayload: Record<string, unknown> = {};
+    if (resolvePayload?.rehumanizeCount) {
+        detectionPayload.rehumanizeCount = resolvePayload.rehumanizeCount;
+    }
 
-    await createRevision({
-        articleId: articleId,
-        title: article.title,
-        contentMarkdown: updatedMarkdown,
-        metaDescription: article.metaDescription,
-        changeType: 'ai_refined',
-        changeSummary: `External links resolved (${resolvedLinks.length}/${placeholders.length} placeholders)`,
-    });
+    // Transaction: article update + revision + citations + next-job enqueue + mark complete
+    // If any step fails, everything rolls back — no orphaned revisions or stuck pipeline.
+    await db.transaction(async (tx) => {
+        await tx.update(articles).set({
+            contentMarkdown: updatedMarkdown,
+            externalLinks: externalLinksPayload.length > 0 ? externalLinksPayload : null,
+        }).where(eq(articles.id, articleId));
 
-    if (resolvedLinks.length > 0) {
-        try {
-            await db.delete(citations).where(
+        await createRevision({
+            articleId: articleId,
+            title: article.title,
+            contentMarkdown: updatedMarkdown,
+            metaDescription: article.metaDescription,
+            changeType: 'ai_refined',
+            changeSummary: `External links resolved (${resolvedLinks.length}/${placeholders.length} placeholders)`,
+            tx,
+        });
+
+        if (resolvedLinks.length > 0) {
+            await tx.delete(citations).where(
                 and(
                     eq(citations.articleId, articleId),
                     ilike(citations.notes, 'Auto-resolved external link%'),
                 ),
             );
-            await db.insert(citations).values(
+            await tx.insert(citations).values(
                 resolvedLinks.map((l, i) => ({
                     articleId: articleId,
                     claimText: l.anchorText,
@@ -1328,33 +1378,24 @@ export async function processResolveExternalLinksJob(jobId: string): Promise<voi
                     position: i,
                 })),
             );
-        } catch (citErr) {
-            console.error(`[Pipeline] Citation insert failed for article ${article.id}:`, citErr);
         }
-    }
 
-    // Pass rehumanizeCount through for the detection stage
-    const resolvePayload = job.payload as { rehumanizeCount?: number } | undefined;
-    const detectionPayload: Record<string, unknown> = {};
-    if (resolvePayload?.rehumanizeCount) {
-        detectionPayload.rehumanizeCount = resolvePayload.rehumanizeCount;
-    }
+        await enqueueContentJob({
+            jobType: 'ai_detection_check',
+            domainId: job.domainId,
+            articleId: job.articleId,
+            priority: job.priority,
+            payload: detectionPayload,
+            status: 'pending',
+        }, tx);
 
-    await enqueueContentJob({
-        jobType: 'ai_detection_check',
-        domainId: job.domainId,
-        articleId: job.articleId,
-        priority: job.priority,
-        payload: detectionPayload,
-        status: 'pending',
+        await tx.update(contentQueue).set({
+            status: 'completed',
+            completedAt: new Date(),
+            apiTokensUsed: totalInputTokens + totalOutputTokens,
+            apiCost: totalCost.toFixed(2),
+        }).where(eq(contentQueue.id, jobId));
     });
-
-    await db.update(contentQueue).set({
-        status: 'completed',
-        completedAt: new Date(),
-        apiTokensUsed: totalInputTokens + totalOutputTokens,
-        apiCost: totalCost.toFixed(2),
-    }).where(eq(contentQueue.id, jobId));
 }
 
 // ===========================================
@@ -1446,20 +1487,14 @@ export async function processAiDetectionCheckJob(jobId: string): Promise<void> {
                 status: 'pending',
             });
         } else {
-            // Marginal (0.30-0.50) or exhausted rehumanize attempts: proceed but flag for review
-            // verdict is guaranteed non-pass here (narrowed by the if/else-if above)
+            // Marginal (0.30-0.50) or exhausted rehumanize attempts: flag for human review.
+            // Do NOT enqueue generate_meta — that stage can auto-approve via AI reviewer,
+            // which would override this review hold. Require explicit human approval.
             await db.update(articles).set({
                 status: 'review',
+                reviewRequestedAt: new Date(),
             }).where(eq(articles.id, article.id));
-            console.log(`[Pipeline] AI detection ${detectionResult.verdict} (score: ${detectionResult.averageGeneratedProb.toFixed(3)}), flagging article ${article.id} for human review`);
-            await enqueueContentJob({
-                jobType: 'generate_meta',
-                domainId: job.domainId,
-                articleId: job.articleId,
-                priority: job.priority,
-                payload: {},
-                status: 'pending',
-            });
+            console.log(`[Pipeline] AI detection ${detectionResult.verdict} (score: ${detectionResult.averageGeneratedProb.toFixed(3)}), halting pipeline for article ${article.id} — requires human review before meta generation`);
         }
 
         await db.update(contentQueue).set({
@@ -1569,8 +1604,13 @@ export async function processMetaJob(jobId: string): Promise<void> {
         }
     }
 
+    // Defense-in-depth: if the article was already flagged for review (e.g. by AI detection),
+    // never auto-approve — respect the upstream hold even if the AI reviewer says "approve".
+    const alreadyHeldForReview = article.status === 'review' && article.reviewRequestedAt !== null;
+
     const autoApprovedByAi = Boolean(
-        aiReview
+        !alreadyHeldForReview
+        && aiReview
         && aiReview.verdict === 'approve'
         && aiReview.requiresHumanReview === false
         && aiReview.failures.length === 0,

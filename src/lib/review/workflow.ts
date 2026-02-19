@@ -1,8 +1,9 @@
 import { db } from '@/lib/db';
-import { approvalPolicies, qaChecklistResults, reviewEvents, citations } from '@/lib/db/schema';
-import { eq, and, sql } from 'drizzle-orm';
+import { approvalPolicies, articles, qaChecklistResults, reviewEvents, citations } from '@/lib/db/schema';
+import { eq, and, sql, desc } from 'drizzle-orm';
 import type { YmylLevel } from './ymyl';
 import { getYmylCitationThreshold } from './policy-thresholds';
+import { getChecklistForArticle } from './qa';
 
 const ROLE_HIERARCHY: Record<string, number> = {
     editor: 1,
@@ -84,13 +85,37 @@ export async function canTransition(opts: {
 
     // Check QA checklist
     if (policy.requiresQaChecklist && opts.targetStatus === 'approved') {
-        const qaResults = await db.select()
+        const qaResults = await db
+            .select()
             .from(qaChecklistResults)
             .where(eq(qaChecklistResults.articleId, opts.articleId))
+            .orderBy(desc(qaChecklistResults.completedAt))
             .limit(1);
 
         const latestQa = qaResults[0];
-        if (!latestQa || !latestQa.allPassed) {
+        if (!latestQa) {
+            return {
+                allowed: false,
+                reason: 'QA checklist must be completed and all required items passed',
+            };
+        }
+
+        const [article] = await db
+            .select({ contentType: articles.contentType })
+            .from(articles)
+            .where(eq(articles.id, opts.articleId))
+            .limit(1);
+
+        const checklist = await getChecklistForArticle({
+            contentType: article?.contentType || undefined,
+            ymylLevel: opts.ymylLevel,
+        });
+
+        const latestChecks = (latestQa.results || {}) as Record<string, { checked?: boolean }>;
+        const requiredIds = checklist.items.filter((item) => item.required).map((item) => item.id);
+        const requiredPassed = requiredIds.every((id) => latestChecks[id]?.checked === true);
+
+        if (!requiredPassed) {
             return {
                 allowed: false,
                 reason: 'QA checklist must be completed and all required items passed',

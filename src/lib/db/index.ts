@@ -1,6 +1,13 @@
 import { drizzle, PostgresJsDatabase } from 'drizzle-orm/postgres-js';
+import type { PgTransaction } from 'drizzle-orm/pg-core';
 import postgres from 'postgres';
 import * as schema from './schema';
+
+/**
+ * Shared type covering both the top-level db and a transaction object.
+ * Use this for function params that accept either context.
+ */
+export type DbOrTx = PostgresJsDatabase<typeof schema> | PgTransaction<any, any, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 // ─── Pool configuration (env-driven with sensible defaults) ─────
 function parseEnvInt(value: string | undefined, defaultValue: number): number {

@@ -468,7 +468,7 @@ function contactPage(niche: string, siteName: string, domain: string): SubPageDe
 
 function privacyPage(_niche: string, siteName: string): SubPageDefinition {
     return {
-        route: '/privacy',
+        route: '/privacy-policy',
         title: `Privacy Policy — ${siteName}`,
         metaDescription: `${siteName} privacy policy. Learn how we collect, use, and protect your personal information.`,
         blocks: [

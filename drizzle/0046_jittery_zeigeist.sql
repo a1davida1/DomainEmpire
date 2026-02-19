@@ -1,0 +1,2 @@
+CREATE INDEX "content_queue_worker_poll_idx" ON "content_queue" USING btree ("status","locked_until","scheduled_for","priority","created_at");--> statement-breakpoint
+CREATE UNIQUE INDEX "content_queue_deploy_once_uidx" ON "content_queue" USING btree ("domain_id","job_type") WHERE job_type = 'deploy' AND status IN ('pending', 'processing');

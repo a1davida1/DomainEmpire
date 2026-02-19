@@ -224,26 +224,19 @@ export function getDefaultBlockContent(
         CostBreakdown: {
             content: {
                 title: `${capitalize(nicheLabel)} Cost Breakdown`,
-                ranges: [
-                    { label: 'Basic Package', low: 500, average: 1200, high: 2000 },
-                    { label: 'Standard Package', low: 1500, average: 3000, high: 5000 },
-                    { label: 'Premium Package', low: 3000, average: 6000, high: 12000 },
-                ],
+                ranges: [],
             },
         },
         AuthorBio: {
             content: {
-                name: 'Editorial Team',
-                title: `${siteName} Research Division`,
-                bio: `Our editorial team consists of experienced ${nicheLabel} professionals who research, test, and review every recommendation. We prioritize accuracy, independence, and reader value in everything we publish.`,
+                name: '',
+                title: '',
+                bio: '',
             },
         },
         CitationBlock: {
             content: {
-                sources: [
-                    { title: `${capitalize(nicheLabel)} Industry Report ${year}`, url: '#', publisher: 'Market Research Institute', retrievedAt: `${year}-01-15` },
-                    { title: 'Consumer Satisfaction Survey', url: '#', publisher: 'Independent Research Group', retrievedAt: `${year}-02-01` },
-                ],
+                sources: [],
             },
         },
         LastUpdated: {

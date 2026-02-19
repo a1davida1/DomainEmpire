@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Sparkles, Rocket, Zap, CheckCircle2, CircleDashed, Play, FileSearch } from 'lucide-react';
+import { Loader2, Sparkles, Rocket, Zap, CheckCircle2, CircleDashed, Play, FileSearch, Wand2 } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
 
@@ -61,6 +61,8 @@ export function DomainPipelineCard({ state }: { state: PipelineState }) {
     const [deploying, setDeploying] = useState(false);
     const [processing, setProcessing] = useState(false);
     const [reviewing, setReviewing] = useState(false);
+    const [preparing, setPreparing] = useState(false);
+    const [prepareStatus, setPrepareStatus] = useState<string | null>(null);
 
     const hasActiveWork = state.pendingJobs > 0 || state.processingJobs > 0;
     const criticalCount = Array.isArray(state.criticalIssues) ? state.criticalIssues.length : 0;
@@ -151,8 +153,10 @@ export function DomainPipelineCard({ state }: { state: PipelineState }) {
                 throw new Error((data as { error?: string }).error || 'Site review failed');
             }
 
-            const score = (data as { report?: { overallScore?: number } }).report?.overallScore;
-            toast.success(`Site reviewed${typeof score === 'number' ? `: ${Math.round(score)}` : ''}`);
+            const queued = Boolean((data as { queued?: unknown }).queued);
+            const jobId = (data as { jobId?: unknown }).jobId;
+            const suffix = typeof jobId === 'string' && jobId.length > 0 ? ` (job ${jobId.slice(0, 8)})` : '';
+            toast.success(`${queued ? 'Site review queued' : 'Site review already queued'}${suffix}`);
             router.refresh();
         } catch (err) {
             toast.error(err instanceof Error ? err.message : 'Site review failed');
@@ -177,6 +181,39 @@ export function DomainPipelineCard({ state }: { state: PipelineState }) {
             toast.error(err instanceof Error ? err.message : 'Queue processing failed');
         } finally {
             setProcessing(false);
+        }
+    }
+
+    async function handlePrepare() {
+        setPreparing(true);
+        setPrepareStatus('Running full pipeline...');
+        try {
+            const res = await fetch(`/api/domains/${state.domainId}/prepare`, {
+                method: 'POST',
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || 'Prepare failed');
+
+            const parts: string[] = [];
+            if (data.pagesSeeded) parts.push('pages seeded');
+            if (data.enrichment?.aiCalls > 0) parts.push(`${data.enrichment.aiCalls} AI enrichments`);
+            if (data.contentScan?.blocksRewritten > 0) parts.push(`${data.contentScan.blocksRewritten} blocks cleaned`);
+            if (data.contentScan?.totalViolations > 0) parts.push(`${data.contentScan.totalViolations} violations found`);
+
+            const ready = data.ready === true;
+            const scoreText = typeof data.validation?.errorCount === 'number'
+                ? (data.validation.errorCount === 0 ? 'Ready to deploy' : `${data.validation.errorCount} issues remaining`)
+                : '';
+
+            toast.success(`Pipeline complete: ${ready ? '✓ Ready' : '⚠ Needs attention'}. ${parts.join(', ')}`);
+            const totalCost = (data.enrichment?.cost ?? 0) + (data.contentScan?.cost ?? 0);
+            setPrepareStatus(`${data.pageCount ?? 0} pages | ${scoreText} | $${totalCost.toFixed(2)} cost`);
+            router.refresh();
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : 'Prepare failed');
+            setPrepareStatus(null);
+        } finally {
+            setPreparing(false);
         }
     }
 
@@ -284,6 +321,23 @@ export function DomainPipelineCard({ state }: { state: PipelineState }) {
                     <Tooltip>
                         <TooltipTrigger asChild>
                             <Button
+                                onClick={handlePrepare}
+                                disabled={preparing || !state.isClassified}
+                                size="sm"
+                                variant="default"
+                            >
+                                {preparing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                                {preparing ? 'Preparing...' : 'Prepare Site'}
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="max-w-xs">
+                            Full pipeline: seed pages → theme → fixes → AI enrich → content scan (banned words + burstiness) → Opus review → auto-remediate → validate. One button, everything.
+                        </TooltipContent>
+                    </Tooltip>
+
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
                                 onClick={() => handleSeed(5)}
                                 disabled={seeding || !state.isClassified}
                                 size="sm"
@@ -338,6 +392,10 @@ export function DomainPipelineCard({ state }: { state: PipelineState }) {
                         </Tooltip>
                     )}
                 </div>
+
+                {prepareStatus && !preparing && (
+                    <p className="text-xs text-muted-foreground bg-muted/50 rounded px-3 py-2">{prepareStatus}</p>
+                )}
             </CardContent>
         </Card>
     );

@@ -32,6 +32,7 @@ import { requeueContentJobIds } from '@/lib/queue/content-queue';
 import { revalidatePath } from 'next/cache';
 import { verifyAuth } from '@/lib/auth';
 import { getOperationsSettings, type OperationsSettings } from '@/lib/settings/operations';
+import { safeParseSiteReviewReport } from '@/lib/types/site-review';
 
 
 interface PageProps {
@@ -435,15 +436,13 @@ export default async function DomainDetailPage({ params }: PageProps) {
         + (contentTypeCounts.get('interactive_map') ?? 0)
     );
 
-    const storedReview = (domain.lastReviewResult || null) as null | {
-        verdict?: unknown;
-        criticalIssues?: unknown;
-        recommendations?: unknown;
-    };
-    const reviewVerdict = typeof storedReview?.verdict === 'string' ? storedReview.verdict : null;
-    const criticalIssues = Array.isArray(storedReview?.criticalIssues)
-        ? (storedReview?.criticalIssues as unknown[]).filter((v): v is string => typeof v === 'string' && v.trim().length > 0).slice(0, 25)
-        : [];
+    const storedReview = safeParseSiteReviewReport(domain.lastReviewResult);
+    const reviewVerdict = storedReview?.verdict ?? null;
+    const criticalIssues = (storedReview?.criticalIssues || [])
+        .map((issue) => issue.trim())
+        .filter((issue) => issue.length > 0)
+        .slice(0, 25);
+    const totalCriticalIssueCount = storedReview?.criticalIssues.length ?? 0;
     const reviewBadgeClass = reviewVerdict === 'approve'
         ? 'bg-emerald-100 text-emerald-800'
         : reviewVerdict === 'needs_work'
@@ -611,7 +610,7 @@ export default async function DomainDetailPage({ params }: PageProps) {
                                     <li key={i}>{issue}</li>
                                 ))}
                             </ul>
-                            {Array.isArray(storedReview?.criticalIssues) && (storedReview.criticalIssues as unknown[]).length > criticalIssues.length && (
+                            {totalCriticalIssueCount > criticalIssues.length && (
                                 <p className="text-xs text-muted-foreground">
                                     Showing first {criticalIssues.length} issues.
                                 </p>

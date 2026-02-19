@@ -47,6 +47,7 @@ import {
 import { eq, and, lte, gt, gte, isNull, or, sql, asc, desc, count, inArray } from 'drizzle-orm';
 import { processOutlineJob, processDraftJob, processHumanizeJob, processSeoOptimizeJob, processResolveExternalLinksJob, processAiDetectionCheckJob, processMetaJob, processKeywordResearchJob, processResearchJob } from './pipeline';
 import { processDeployJob } from '@/lib/deploy/processor';
+import { processDomainSiteReviewJob } from '@/lib/deploy/site-review-processor';
 import { checkContentSchedule } from './scheduler';
 import { evaluateDomain } from '@/lib/evaluation/evaluator';
 import { checkAndRefreshStaleContent } from '@/lib/content/refresh';
@@ -2309,6 +2310,9 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
             break;
         case 'deploy':
             await processDeployJob(job.id);
+            break;
+        case 'domain_site_review':
+            await processDomainSiteReviewJob(job.id);
             break;
         case 'evaluate': {
             const evalPayload = job.payload as { domain: string; acquisitionCost?: number; niche?: string } | undefined;

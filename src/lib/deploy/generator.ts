@@ -371,7 +371,7 @@ async function generateV2SiteFiles(
         { path: '_headers', content: generateHeaders() },
         {
             path: 'sitemap.xml',
-            content: generateV2Sitemap(domain.domain, pageDefs, trustPageSlugs, deployedImagePaths),
+            content: generateV2Sitemap(domain.domain, pageDefs, { trustPageSlugs, deployedImagePaths }),
         },
     );
 
@@ -744,8 +744,14 @@ function resolveImageExt(basePath: string, deployedPaths: Set<string>): string {
 }
 
 /** Generate sitemap for v2 block-based sites using actual page definition routes */
-function generateV2Sitemap(domain: string, pageDefs: PageDefinitionRow[], trustPageSlugs: string[] = [], deployedImagePaths: Set<string> = new Set()): string {
+function generateV2Sitemap(
+    domain: string,
+    pageDefs: PageDefinitionRow[],
+    opts: { trustPageSlugs?: string[]; deployedImagePaths?: Set<string> } = {},
+): string {
     const now = new Date().toISOString().split('T')[0];
+    const trustPageSlugs = opts.trustPageSlugs ?? [];
+    const deployedImagePaths = opts.deployedImagePaths ?? new Set<string>();
 
     function routePriority(route: string): string {
         if (route === '/') return '1.0';

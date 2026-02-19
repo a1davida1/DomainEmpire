@@ -1,5 +1,6 @@
 import { pgTable, pgEnum, text, integer, bigint, real, boolean, timestamp, jsonb, uuid, index, uniqueIndex, unique, check, numeric, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
+import type { SiteReviewReport } from '../types/site-review';
 export { sql };
 
 // ===========================================
@@ -109,7 +110,7 @@ export const domains = pgTable('domains', {
     }>().default({}),
 
     // Site Review (AI QA)
-    lastReviewResult: jsonb('last_review_result').$type<Record<string, unknown> | null>(),
+    lastReviewResult: jsonb('last_review_result').$type<SiteReviewReport | null>(),
     lastReviewScore: integer('last_review_score'),
     lastReviewedAt: timestamp('last_reviewed_at'),
 
@@ -631,6 +632,7 @@ export const contentQueue = pgTable('content_queue', {
         enum: [
             'generate_outline', 'generate_draft', 'humanize',
             'seo_optimize', 'resolve_external_links', 'generate_meta', 'deploy',
+            'domain_site_review',
             'fetch_analytics', 'keyword_research', 'bulk_seed',
             'research', 'evaluate', 'content_refresh',
             'fetch_gsc', 'check_backlinks', 'check_renewals',
@@ -690,6 +692,15 @@ export const contentQueue = pgTable('content_queue', {
     priorityIdx: index('content_queue_priority_idx').on(t.priority),
     lockedUntilIdx: index('content_queue_locked_until_idx').on(t.lockedUntil),
     jobTypeIdx: index('content_queue_job_type_idx').on(t.jobType),
+    // Composite index matching the worker's FOR UPDATE SKIP LOCKED query exactly:
+    // WHERE status='pending' AND (locked_until IS NULL OR ...) AND (scheduled_for IS NULL OR ...)
+    // ORDER BY priority DESC, created_at ASC
+    workerPollIdx: index('content_queue_worker_poll_idx').on(t.status, t.lockedUntil, t.scheduledFor, t.priority, t.createdAt),
+    // Partial unique index: only one active deploy job per domain at a time.
+    // Prevents TOCTOU race in the deploy API endpoint.
+    deployOnceIdx: uniqueIndex('content_queue_deploy_once_uidx')
+        .on(t.domainId, t.jobType)
+        .where(sql`job_type = 'deploy' AND status IN ('pending', 'processing')`),
 }));
 
 // ===========================================

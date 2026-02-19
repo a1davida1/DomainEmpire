@@ -1,12 +1,10 @@
 import { Redis } from '@upstash/redis';
-import { db, contentQueue } from '@/lib/db';
+import { db, contentQueue, type DbOrTx } from '@/lib/db';
 
 export type ContentQueueInsert = typeof contentQueue.$inferInsert;
 export type QueueBackendName = 'postgres' | 'redis';
 
-type QueueInsertExecutor = {
-    insert: typeof db.insert;
-};
+type QueueInsertExecutor = DbOrTx;
 
 export interface ContentQueueBackendHealth {
     mode: 'postgres' | 'redis_dispatch';

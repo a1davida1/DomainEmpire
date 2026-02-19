@@ -645,7 +645,7 @@ registerBlockRenderer('LeadForm', (block, ctx) => {
         placeholder?: string;
     }>) || [];
     const consentText = (content.consentText as string) || '';
-    const privacyUrl = (content.privacyUrl as string) || '/privacy';
+    const privacyUrl = (content.privacyUrl as string) || (content.privacyPolicyUrl as string) || '/privacy';
     const successMessage = (content.successMessage as string) || 'Thank you! We\'ll be in touch shortly.';
     const disclosureAboveFold = (content.disclosureAboveFold as string) || '';
     const heading = (content.heading as string) || '';

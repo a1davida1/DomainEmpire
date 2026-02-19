@@ -99,22 +99,36 @@ export async function POST(request: NextRequest, { params }: PageProps) {
             );
         }
 
+        // Enqueue deploy job.  The partial unique index
+        // (content_queue_deploy_once_uidx) ensures at most one pending/processing
+        // deploy per domain — this replaces the old racy SELECT-then-INSERT check.
         const jobId = randomUUID();
-        await enqueueContentJob({
-            id: jobId,
-            domainId: id,
-            jobType: 'deploy',
-            priority: 2,
-            payload: {
-                domain: domain.domain,
-                triggerBuild: options.triggerBuild,
-                addCustomDomain: options.addCustomDomain,
-                cloudflareAccount: domain.cloudflareAccount ?? null,
-            },
-            status: 'pending',
-            scheduledFor: new Date(),
-            maxAttempts: 3,
-        });
+        try {
+            await enqueueContentJob({
+                id: jobId,
+                domainId: id,
+                jobType: 'deploy',
+                priority: 2,
+                payload: {
+                    domain: domain.domain,
+                    triggerBuild: options.triggerBuild,
+                    addCustomDomain: options.addCustomDomain,
+                    cloudflareAccount: domain.cloudflareAccount ?? null,
+                },
+                status: 'pending',
+                scheduledFor: new Date(),
+                maxAttempts: 3,
+            });
+        } catch (enqueueErr: unknown) {
+            // Postgres error 23505 = unique_violation from the deploy_once partial index
+            if (enqueueErr instanceof Error && 'code' in enqueueErr && (enqueueErr as { code: string }).code === '23505') {
+                return NextResponse.json(
+                    { error: 'A deployment is already in progress for this domain' },
+                    { status: 409 },
+                );
+            }
+            throw enqueueErr;
+        }
 
         const response = NextResponse.json({
             success: true,

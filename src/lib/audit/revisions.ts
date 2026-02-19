@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { db } from '@/lib/db';
+import { db, type DbOrTx } from '@/lib/db';
 import { contentRevisions } from '@/lib/db/schema';
 import { eq, desc, and, sql } from 'drizzle-orm';
 export { lcsDiff } from '@/lib/diff';
@@ -14,7 +14,7 @@ export async function createRevision(opts: {
     changeType: ChangeType;
     changeSummary?: string;
     createdById?: string | null;
-    tx?: typeof db;
+    tx?: DbOrTx;
 }): Promise<string> {
     const dbClient = opts.tx || db;
     // Get next revision number

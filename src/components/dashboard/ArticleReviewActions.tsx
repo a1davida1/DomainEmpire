@@ -111,7 +111,7 @@ const PIPELINE_STAGES = [
     { jobType: 'ai_detection_check', label: 'AI Detection' },
 ] as const;
 
-export function ArticlePipelineActions({ articleId, domainId: _domainId }: { articleId: string; domainId: string }) {
+export function ArticlePipelineActions({ articleId }: { articleId: string }) {
     const router = useRouter();
     const [loading, setLoading] = useState<string | null>(null);
 

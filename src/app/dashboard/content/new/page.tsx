@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { apiFetch } from '@/lib/api-fetch';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import Link from 'next/link';
+import { toast } from '@/components/ui/use-toast';
 
 const CONTENT_TYPES = [
     { value: 'article', label: 'Article', description: 'Standard long-form blog post or informational article' },
@@ -99,12 +100,13 @@ export default function NewArticlePage() {
             const newId = result.article?.id;
 
             // Check worker health — warn if articles might sit in queue
+            let workerWarning = false;
             try {
                 const healthRes = await apiFetch('/api/queue/health');
                 if (healthRes.ok) {
                     const health = await healthRes.json();
                     if (!health.worker?.running) {
-                        setError('Article created but the worker is not running. Click "Process Now" on the Queue page to start processing, or the article will be picked up when the dashboard reloads.');
+                        workerWarning = true;
                     }
                 }
             } catch { /* non-fatal */ }
@@ -113,6 +115,16 @@ export default function NewArticlePage() {
                 router.push(`/dashboard/content/articles/${newId}`);
             } else {
                 router.push('/dashboard/content/articles');
+            }
+
+            // Fire toast *after* navigation so it renders on the destination page
+            // (toast uses a global store that survives route changes)
+            if (workerWarning) {
+                toast({
+                    title: 'Worker not running',
+                    description: 'Article created but the worker is not running. Visit the Queue page and click "Process Now", or it will be picked up when the dashboard reloads.',
+                    variant: 'destructive',
+                });
             }
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to create article');

@@ -69,11 +69,7 @@ img{image-rendering:auto;-webkit-font-smoothing:antialiased}
 /* Images */
 img{max-width:100%;height:auto;display:block}
 
-/* Selection */
-::selection{background:var(--color-accent,#2563eb);color:#fff}
-
-/* Focus visible */
-:focus-visible{outline:2px solid var(--color-accent,#2563eb);outline-offset:2px;border-radius:var(--radius-sm,.375rem)}
+/* (selection + focus-visible rules defined above with enhanced styling) */
 
 /* Utility: section spacing — premium feel */
 section{padding-top:var(--section-padding,3.5rem);padding-bottom:var(--section-padding,3.5rem)}

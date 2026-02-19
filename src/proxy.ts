@@ -6,8 +6,6 @@ const MUTATION_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 // Public API routes that don't require CSRF (e.g. webhooks, external callbacks)
 const CSRF_EXEMPT_PREFIXES = [
-    '/api/auth/login',
-    '/api/auth/logout',
     '/api/capture',          // public lead capture endpoint
     '/api/ab-tests/track',   // public tracking pixel
 ];

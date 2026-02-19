@@ -14,13 +14,14 @@ function envModel(key: string, fallback: string): string {
     return trimmed.length > 0 ? trimmed : fallback;
 }
 
-const FAST_MODEL = envModel('OPENROUTER_MODEL_FAST', 'x-ai/grok-4-1-fast');
-const SEO_MODEL = envModel('OPENROUTER_MODEL_SEO', 'x-ai/grok-4-1-fast');
-const QUALITY_MODEL = envModel('OPENROUTER_MODEL_QUALITY', 'anthropic/claude-sonnet-4-5-20250929');
-const REVIEW_MODEL = envModel('OPENROUTER_MODEL_REVIEW', 'anthropic/claude-opus-4-6');
-const RESEARCH_MODEL = envModel('OPENROUTER_MODEL_RESEARCH', 'x-ai/grok-4-1-fast');
+const FAST_MODEL = envModel('OPENROUTER_MODEL_FAST', 'x-ai/grok-4.1-fast');
+const SEO_MODEL = envModel('OPENROUTER_MODEL_SEO', 'x-ai/grok-4.1-fast');
+const QUALITY_MODEL = envModel('OPENROUTER_MODEL_QUALITY', 'anthropic/claude-sonnet-4.5');
+const REVIEW_MODEL = envModel('OPENROUTER_MODEL_REVIEW', 'anthropic/claude-opus-4.6');
+const RESEARCH_MODEL = envModel('OPENROUTER_MODEL_RESEARCH', 'x-ai/grok-4.1-fast');
 const VISION_MODEL = envModel('OPENROUTER_MODEL_VISION', 'google/gemini-2.0-flash-001');
 const IMAGE_GEN_FAST_MODEL = envModel('OPENROUTER_MODEL_IMAGE_GEN_FAST', 'google/gemini-2.5-flash-image');
+// Intentionally same as FAST — no higher-quality image model available on OpenRouter yet
 const IMAGE_GEN_QUALITY_MODEL = envModel('OPENROUTER_MODEL_IMAGE_GEN_QUALITY', 'google/gemini-2.5-flash-image');
 const EMERGENCY_FALLBACK_MODEL = envModel('OPENROUTER_MODEL_FALLBACK', 'openrouter/auto');
 
@@ -87,10 +88,10 @@ const MODEL_ROUTING_REGISTRY: Record<AIModelTask, RoutingProfile> = {
 
 // Pricing per 1K tokens (approximate, check OpenRouter for current)
 const MODEL_PRICING: Record<string, { input: number; output: number; perRequestFee?: number }> = {
-    'anthropic/claude-opus-4-6': { input: 0.015, output: 0.075 },
-    'x-ai/grok-4-1-fast': { input: 0.003, output: 0.015 },
+    'anthropic/claude-opus-4.6': { input: 0.015, output: 0.075 },
+    'anthropic/claude-sonnet-4.5': { input: 0.003, output: 0.015 },
+    'x-ai/grok-4.1-fast': { input: 0.003, output: 0.015 },
     'x-ai/grok-3-fast': { input: 0.005, output: 0.025 },
-    'anthropic/claude-sonnet-4-5-20250929': { input: 0.003, output: 0.015 },
     'anthropic/claude-3-5-haiku-20241022': { input: 0.0008, output: 0.004 },
     'perplexity/sonar-pro': { input: 0.003, output: 0.015, perRequestFee: 0.005 },
     'perplexity/sonar-reasoning': { input: 0.001, output: 0.005, perRequestFee: 0.01 },
@@ -616,8 +617,8 @@ export class OpenRouterClient {
      * Calculate cost for an API call
      */
     private calculateCost(model: string, inputTokens: number, outputTokens: number): number {
-        const pricing = MODEL_PRICING[model] || { input: 0.01, output: 0.03 }; // Default fallback
-        return (inputTokens * pricing.input / 1000) + (outputTokens * pricing.output / 1000);
+        const pricing = MODEL_PRICING[model] || { input: 0.01, output: 0.03 };
+        return (inputTokens * pricing.input / 1000) + (outputTokens * pricing.output / 1000) + (pricing.perRequestFee || 0);
     }
 
     private isRetryableError(error: unknown): boolean {

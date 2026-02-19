@@ -87,13 +87,16 @@ export async function submitChecklist(opts: {
     articleId: string;
     templateId: string | null;
     reviewerId: string;
+    checklistItems: ChecklistItem[];
     results: Record<string, { checked: boolean; notes?: string }>;
     unitTestPassId?: string | null;
     calculationConfigHash?: string | null;
     calculationHarnessVersion?: string | null;
 }) {
-    const items = Object.values(opts.results);
-    const allPassed = items.every(r => r.checked);
+    // "allPassed" means: all REQUIRED items are checked.
+    // Optional items may remain unchecked without blocking approval.
+    const requiredIds = opts.checklistItems.filter(i => i.required).map(i => i.id);
+    const allPassed = requiredIds.every((id) => opts.results[id]?.checked === true);
 
     const [result] = await db.insert(qaChecklistResults).values({
         articleId: opts.articleId,

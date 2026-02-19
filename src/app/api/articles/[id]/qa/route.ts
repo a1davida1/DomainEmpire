@@ -18,7 +18,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
 
     const article = await db.query.articles.findFirst({
         where: eq(articles.id, params.id),
-        columns: { ymylLevel: true, status: true },
+        columns: { ymylLevel: true, contentType: true, status: true },
     });
 
     if (!article) {
@@ -26,6 +26,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
     }
 
     const checklist = await getChecklistForArticle({
+        contentType: article.contentType || undefined,
         ymylLevel: (article.ymylLevel as 'none' | 'low' | 'medium' | 'high') || 'none',
     });
 
@@ -65,11 +66,28 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
             columns: {
                 id: true,
                 contentType: true,
+                ymylLevel: true,
                 calculatorConfig: true,
             },
         });
         if (!article) {
             return NextResponse.json({ error: 'Article not found' }, { status: 404 });
+        }
+
+        const checklist = await getChecklistForArticle({
+            contentType: article.contentType || undefined,
+            ymylLevel: (article.ymylLevel as 'none' | 'low' | 'medium' | 'high') || 'none',
+        });
+
+        // Prevent clients from spoofing a different template (looser required items).
+        if (typeof templateId === 'string' && templateId.length > 0 && checklist.id && templateId !== checklist.id) {
+            return NextResponse.json(
+                {
+                    error: 'QA checklist template changed. Reload the page and re-submit QA.',
+                    expectedTemplateId: checklist.id,
+                },
+                { status: 409 },
+            );
         }
 
         const normalizedUnitTestPassId = typeof unitTestPassId === 'string' ? unitTestPassId.trim() : '';
@@ -105,9 +123,10 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
 
         const { id, allPassed } = await submitChecklist({
             articleId: params.id,
-            templateId: templateId || null,
+            templateId: checklist.id || null,
             reviewerId: user.id,
             results: typedResults,
+            checklistItems: checklist.items,
             unitTestPassId: normalizedUnitTestPassId || null,
             calculationConfigHash,
             calculationHarnessVersion: normalizedUnitTestPassId.length > 0

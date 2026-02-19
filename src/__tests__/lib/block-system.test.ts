@@ -53,6 +53,18 @@ function makeBlock(type: BlockType, content?: Record<string, unknown>, config?: 
     return { id: 'test-1', type, content, config };
 }
 
+function extractJsonLd(html: string): Array<Record<string, unknown>> {
+    const out: Array<Record<string, unknown>> = [];
+    const re = /<script[^>]*type="application\/ld\+json"[^>]*>(.*?)<\/script>/gs;
+    for (const match of html.matchAll(re)) {
+        const raw = (match[1] || '').trim();
+        if (!raw) continue;
+        const parsed = JSON.parse(raw) as unknown;
+        if (parsed && typeof parsed === 'object') out.push(parsed as Record<string, unknown>);
+    }
+    return out;
+}
+
 // ============================================================
 // Schema Validation
 // ============================================================
@@ -143,6 +155,31 @@ describe('Block Schemas', () => {
             verdict: 'Product A wins',
         });
         expect(valid.success).toBe(true);
+    });
+
+    it('LeadForm schema accepts heading, placeholders, and privacyUrl', () => {
+        const result = validateBlock({
+            id: 'blk_lead',
+            type: 'LeadForm',
+            content: {
+                heading: 'Get Matched',
+                subheading: 'Answer 2 questions to get started.',
+                fields: [
+                    { name: 'email', label: 'Email', type: 'email', placeholder: 'you@example.com', required: true },
+                    { name: 'zip', label: 'ZIP', type: 'number', placeholder: '10001', required: true, half: true },
+                    { name: 'phone', label: 'Phone', type: 'tel', placeholder: '(555) 123-4567', required: true, half: true },
+                ],
+                consentText: 'By submitting you agree to our Privacy Policy.',
+                successMessage: 'Thanks!',
+                privacyUrl: '/privacy-policy',
+            },
+            config: {
+                endpoint: '#',
+                submitLabel: 'Send',
+                showDisclosure: true,
+            },
+        });
+        expect(result.success).toBe(true);
     });
 
     it('validateBlock returns success for valid block', () => {
@@ -245,6 +282,17 @@ describe('Block Renderers', () => {
         expect(html).toContain('<p>A test</p>');
         expect(html).toContain('FAQPage');
         expect(html).toContain('<details');
+    });
+
+    it('FAQ does not emit JSON-LD when emitJsonLd is false', () => {
+        const html = renderBlock(makeBlock('FAQ', {
+            items: [
+                { question: 'Q1', answer: '<p>A1</p>' },
+            ],
+        }, { emitJsonLd: false }), ctx);
+        expect(html).toContain('Frequently Asked Questions');
+        expect(html).not.toContain('FAQPage');
+        expect(html).not.toContain('application/ld+json');
     });
 
     it('FAQ returns empty for no items', () => {
@@ -541,6 +589,88 @@ describe('Page Assembly', () => {
         expect(html).toContain('Welcome');
         expect(html).toContain('<p>Content</p>');
         expect(html).toContain('<footer');
+    });
+
+    it('assemblePageFromBlocks emits SoftwareApplication JSON-LD for tool blocks', () => {
+        const blocks: BlockEnvelope[] = [
+            { id: 'h1', type: 'Header', content: { siteName: 'Test' } },
+            {
+                id: 'wiz',
+                type: 'Wizard',
+                content: {
+                    steps: [{
+                        id: 'step1',
+                        title: 'Choose',
+                        fields: [{
+                            id: 'choice',
+                            type: 'radio',
+                            label: 'Pick one',
+                            options: [
+                                { value: 'a', label: 'Option A' },
+                                { value: 'b', label: 'Option B' },
+                            ],
+                            required: true,
+                        }],
+                    }],
+                    resultRules: [
+                        { condition: "choice == 'a'", title: 'You chose A', body: 'Great choice!' },
+                    ],
+                    resultTemplate: 'recommendation',
+                },
+                config: { mode: 'quiz' },
+            },
+            { id: 'f1', type: 'Footer', content: { siteName: 'Test' } },
+        ];
+        const ctx = makeCtx({ route: '/tools/test', pageTitle: 'Test Tool', pageDescription: 'Tool desc' });
+        const html = assemblePageFromBlocks(blocks, ctx);
+        const jsonLd = extractJsonLd(html);
+
+        expect(jsonLd.some(o => o['@type'] === 'SoftwareApplication')).toBe(true);
+    });
+
+    it('assemblePageFromBlocks emits Product JSON-LD for ComparisonTable blocks', () => {
+        const blocks: BlockEnvelope[] = [
+            { id: 'h1', type: 'Header', content: { siteName: 'Test' } },
+            {
+                id: 'cmp',
+                type: 'ComparisonTable',
+                content: {
+                    options: [{
+                        name: 'Product A',
+                        scores: { price: 4, quality: 5 },
+                    }],
+                    columns: [
+                        { key: 'price', label: 'Price', type: 'rating' },
+                        { key: 'quality', label: 'Quality', type: 'rating' },
+                    ],
+                    verdict: 'Product A wins',
+                },
+            },
+            { id: 'f1', type: 'Footer', content: { siteName: 'Test' } },
+        ];
+        const ctx = makeCtx({ route: '/compare', pageTitle: 'Compare', pageDescription: 'Compare desc' });
+        const html = assemblePageFromBlocks(blocks, ctx);
+        const jsonLd = extractJsonLd(html);
+
+        const product = jsonLd.find(o => o['@type'] === 'Product' && o.name === 'Product A') as Record<string, unknown> | undefined;
+        expect(product).toBeDefined();
+        const aggregate = (product?.aggregateRating || null) as Record<string, unknown> | null;
+        expect(aggregate).toBeTruthy();
+        expect(aggregate?.['ratingValue']).toBe(4.5);
+        expect(aggregate?.['ratingCount']).toBe(2);
+    });
+
+    it('assemblePageFromBlocks uses Article schema on non-home pages with ArticleBody', () => {
+        const blocks: BlockEnvelope[] = [
+            { id: 'h1', type: 'Header', content: { siteName: 'Test' } },
+            { id: 'body', type: 'ArticleBody', content: { markdown: '<p>Content</p>', title: 'Guide' } },
+            { id: 'f1', type: 'Footer', content: { siteName: 'Test' } },
+        ];
+        const ctx = makeCtx({ route: '/guides/test', pageTitle: 'Guide', pageDescription: 'Guide desc' });
+        const html = assemblePageFromBlocks(blocks, ctx);
+        const jsonLd = extractJsonLd(html);
+
+        expect(jsonLd.some(o => o['@type'] === 'Article')).toBe(true);
     });
 
     it('header and footer are placed outside main', () => {

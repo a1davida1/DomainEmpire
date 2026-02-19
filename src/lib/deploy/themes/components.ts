@@ -85,6 +85,7 @@ export const componentStyles = `
 .calc-gate-email:focus{border-color:var(--color-accent);outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--color-accent) 15%,transparent)}
 .calc-gate-btn{padding:0.6rem 1.25rem;background:var(--color-accent);color:#fff;border:none;border-radius:var(--radius-md);font-weight:600;font-size:0.9rem;cursor:pointer;white-space:nowrap;transition:background .15s}
 .calc-gate-btn:hover{background:var(--color-accent-hover,var(--color-accent))}
+.calc-gate-btn:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
 .calc-gate-success{padding:0.75rem;text-align:center;font-weight:600;color:var(--color-success)}
 .calc-gate-error{padding:0.75rem;text-align:center;font-weight:600;color:var(--color-danger,#c0392b)}
 @media(max-width:600px){.calc-gate-form{flex-direction:column}.calc-gate-btn{width:100%}}

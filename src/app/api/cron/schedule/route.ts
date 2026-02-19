@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
     }
 
     const auth = request.headers.get('authorization');
-    const token = auth?.startsWith('Bearer ') ? auth.slice(7) : request.nextUrl.searchParams.get('token');
+    const token = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
 
     if (token !== secret) {
         return NextResponse.json({ error: 'Invalid cron secret' }, { status: 401 });
