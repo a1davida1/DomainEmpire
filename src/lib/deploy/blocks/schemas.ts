@@ -105,14 +105,23 @@ export const FooterContentSchema = z.object({
       href: z.string(),
     })),
   })).optional(),
+  legalLinks: z.array(z.object({
+    label: z.string(),
+    href: z.string(),
+  })).optional(),
   disclaimerText: z.string().optional(),
   newsletterEndpoint: z.string().optional(),
   newsletterHeadline: z.string().optional(),
+  socialLinks: z.array(z.object({
+    platform: z.string(),
+    url: z.string(),
+  })).optional(),
 });
 
 export const FooterConfigSchema = z.object({
   variant: FooterVariant.default('minimal'),
   showDisclaimer: z.boolean().default(true),
+  showCookieConsent: z.boolean().default(true),
 });
 
 export type FooterContent = z.infer<typeof FooterContentSchema>;

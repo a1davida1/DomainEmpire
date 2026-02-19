@@ -35,6 +35,7 @@ import {
     footerStructureToVariant,
     heroStructureToVariant,
     ctaStyleToConfig,
+    buildBlueprintFooterColumns,
 } from './structural-blueprint';
 
 export interface DomainStrategy {
@@ -266,6 +267,15 @@ export async function prepareDomain(
     }
 
     // ── Step 4: Programmatic fixes ──
+    // Build the set of routes that actually exist for footer link filtering
+    const liveRoutes = new Set(
+        (await db.select({ route: pageDefinitions.route }).from(pageDefinitions).where(eq(pageDefinitions.domainId, domain.id)))
+            .map(p => p.route),
+    );
+    const blueprintFooterColumns = buildBlueprintFooterColumns(blueprint, liveRoutes, humanName, nicheForContent);
+    const blueprintFooterVariant = footerStructureToVariant(blueprint.footerStructure);
+    const allowedFooterVariants = new Set(['minimal', 'multi-column', 'newsletter', 'legal']);
+
     const allPages = await db.select().from(pageDefinitions).where(eq(pageDefinitions.domainId, domain.id));
 
     for (const page of allPages) {
@@ -279,6 +289,18 @@ export async function prepareDomain(
                 c.siteName = humanName;
                 result.programmaticFixes.namesFixed++;
                 changed = true;
+            }
+
+            // Fix footer: inject blueprint-aware columns with only valid links
+            if (b.type === 'Footer') {
+                c.columns = blueprintFooterColumns;
+                c.siteName = humanName;
+                changed = true;
+                const currentVariant = typeof b.variant === 'string' ? b.variant : null;
+                if (currentVariant && !allowedFooterVariants.has(currentVariant)) {
+                    return { ...b, variant: blueprintFooterVariant, content: c, config: cfg };
+                }
+                return { ...b, content: c, config: cfg };
             }
 
             if (b.type === 'LeadForm' && (cfg.endpoint === '#')) {

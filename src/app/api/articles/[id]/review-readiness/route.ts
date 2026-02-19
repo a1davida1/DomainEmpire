@@ -120,9 +120,15 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
     const requiredPassed = requiredIds.filter((id) => latestChecks[id]?.checked === true).length;
     const qaOk = policy.requiresQaChecklist ? requiredPassed === requiredIds.length : true;
 
-    const completedAtIso = latestQa?.completedAt instanceof Date
-        ? latestQa.completedAt.toISOString()
-        : (latestQa?.completedAt ? new Date(latestQa.completedAt).toISOString() : null);
+    let completedAtIso: string | null = null;
+    if (latestQa?.completedAt instanceof Date) {
+        completedAtIso = latestQa.completedAt.toISOString();
+    } else if (latestQa?.completedAt) {
+        const parsed = new Date(latestQa.completedAt);
+        if (!Number.isNaN(parsed.getTime())) {
+            completedAtIso = parsed.toISOString();
+        }
+    }
 
     const taskRows = await db.select({
         id: reviewTasks.id,

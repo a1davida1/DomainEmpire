@@ -347,7 +347,9 @@ export function footerStructureToVariant(structure: FooterStructure): string {
         case 'columns-4': return 'multi-column';
         case 'columns-3': return 'multi-column';
         case 'columns-2': return 'newsletter';
-        case 'centered': return 'centered';
+        // We don't currently support a distinct "centered" footer variant in the block system.
+        // Use "minimal" styling with a single curated link column.
+        case 'centered': return 'minimal';
         case 'minimal-links': return 'minimal';
         case 'stacked': return 'legal';
     }
@@ -375,4 +377,95 @@ export function ctaStyleToConfig(style: CtaStyle): Record<string, unknown> | nul
         case 'side-panel': return { style: 'card', trigger: 'scroll' };
         case 'none': return null;
     }
+}
+
+// ── Footer Column Builder ────────────────────────────────────────────────────
+
+interface FooterColumn {
+    title: string;
+    links: Array<{ label: string; href: string }>;
+}
+
+const COLUMN_TITLE_VARIANTS: Record<string, string[]> = {
+    tools: ['Tools', 'Calculators', 'Free Tools', 'Explore Tools'],
+    learn: ['Learn', 'Guides', 'Resources', 'Read More', 'Knowledge Base'],
+    company: ['Company', 'About', 'Info', 'Legal'],
+};
+
+/**
+ * Build footer columns that only include links to pages that actually exist.
+ * Different domains get different column structures based on their blueprint.
+ */
+export function buildBlueprintFooterColumns(
+    blueprint: StructuralBlueprint,
+    liveRoutes: Set<string>,
+    siteName: string,
+    niche: string,
+): FooterColumn[] {
+    const hash = domainHash(blueprint.domain);
+
+    function exists(route: string): boolean { return liveRoutes.has(route); }
+    function pickLabel(offset: number, category: string): string {
+        const options = COLUMN_TITLE_VARIANTS[category] || [category];
+        return options[pickFromHash(hash, offset, options.length)];
+    }
+
+    // Tool/calculator links
+    const toolLinks: Array<{ label: string; href: string }> = [];
+    if (exists('/calculator')) toolLinks.push({ label: 'Cost Calculator', href: '/calculator' });
+    if (exists('/compare')) toolLinks.push({ label: 'Comparison Guide', href: '/compare' });
+    if (exists('/pricing')) toolLinks.push({ label: 'Pricing Guide', href: '/pricing' });
+    if (exists('/checklist')) toolLinks.push({ label: 'Checklist', href: '/checklist' });
+
+    // Learning/content links
+    const learnLinks: Array<{ label: string; href: string }> = [];
+    if (exists('/guides')) learnLinks.push({ label: 'How-To Guides', href: '/guides' });
+    if (exists('/guides/complete-guide')) learnLinks.push({ label: 'Complete Guide', href: '/guides/complete-guide' });
+    if (exists('/guides/save-money')) learnLinks.push({ label: 'Save Money', href: '/guides/save-money' });
+    if (exists('/blog')) learnLinks.push({ label: 'Blog', href: '/blog' });
+    if (exists('/faq')) learnLinks.push({ label: 'FAQ', href: '/faq' });
+    if (exists('/resources')) learnLinks.push({ label: `${niche.charAt(0).toUpperCase() + niche.slice(1)} Resources`, href: '/resources' });
+    if (exists('/how-it-works')) learnLinks.push({ label: 'How It Works', href: '/how-it-works' });
+    if (exists('/glossary')) learnLinks.push({ label: 'Glossary', href: '/glossary' });
+    if (exists('/case-studies')) learnLinks.push({ label: 'Case Studies', href: '/case-studies' });
+    if (exists('/reviews')) learnLinks.push({ label: 'Reviews', href: '/reviews' });
+
+    // Company/legal links
+    const companyLinks: Array<{ label: string; href: string }> = [];
+    if (exists('/about')) companyLinks.push({ label: 'About Us', href: '/about' });
+    if (exists('/contact')) companyLinks.push({ label: 'Contact', href: '/contact' });
+    if (exists('/privacy-policy')) companyLinks.push({ label: 'Privacy Policy', href: '/privacy-policy' });
+    if (exists('/terms')) companyLinks.push({ label: 'Terms of Service', href: '/terms' });
+    if (exists('/disclosure')) companyLinks.push({ label: 'Disclosure', href: '/disclosure' });
+
+    const columns: FooterColumn[] = [];
+
+    // Different structures based on blueprint footer style
+    switch (blueprint.footerStructure) {
+        case 'columns-4':
+        case 'columns-3':
+            if (toolLinks.length > 0) columns.push({ title: pickLabel(30, 'tools'), links: toolLinks });
+            if (learnLinks.length > 0) columns.push({ title: pickLabel(31, 'learn'), links: learnLinks.slice(0, 5) });
+            columns.push({ title: pickLabel(32, 'company'), links: companyLinks });
+            break;
+        case 'columns-2':
+            // Merge tools + learn into one column
+            columns.push({ title: pickLabel(30, 'tools'), links: [...toolLinks, ...learnLinks].slice(0, 6) });
+            columns.push({ title: pickLabel(32, 'company'), links: companyLinks });
+            break;
+        case 'centered':
+        case 'minimal-links':
+            // Single flat row of the most important links
+            columns.push({
+                title: siteName,
+                links: [...toolLinks.slice(0, 2), ...learnLinks.slice(0, 2), ...companyLinks.slice(0, 3)],
+            });
+            break;
+        case 'stacked':
+            columns.push({ title: pickLabel(31, 'learn'), links: [...toolLinks, ...learnLinks].slice(0, 8) });
+            columns.push({ title: pickLabel(32, 'company'), links: companyLinks });
+            break;
+    }
+
+    return columns;
 }

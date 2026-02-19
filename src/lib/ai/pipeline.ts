@@ -34,6 +34,7 @@ import { buildDomainDifferentiationInstructions, buildIntentCoverageGuidance } f
 import { isInternalLinkingEnabled } from '@/lib/content/link-policy';
 import { redactPromptBody } from '../privacy/prompt-redaction';
 import { scanForBannedPatterns, formatViolationsForPrompt, measureBurstiness, generateContentFingerprint, extractNgramHashes, checkCrossDomainDuplication } from './content-scanner';
+import { ensureContentPublishTask } from '@/lib/review/content-review-tasks';
 
 // Helper to slugify string
 function slugify(text: string) {
@@ -1490,10 +1491,18 @@ export async function processAiDetectionCheckJob(jobId: string): Promise<void> {
             // Marginal (0.30-0.50) or exhausted rehumanize attempts: flag for human review.
             // Do NOT enqueue generate_meta — that stage can auto-approve via AI reviewer,
             // which would override this review hold. Require explicit human approval.
-            await db.update(articles).set({
-                status: 'review',
-                reviewRequestedAt: new Date(),
-            }).where(eq(articles.id, article.id));
+            await db.transaction(async (tx) => {
+                await tx.update(articles).set({
+                    status: 'review',
+                    reviewRequestedAt: new Date(),
+                }).where(eq(articles.id, article.id));
+
+                await ensureContentPublishTask(tx, {
+                    articleId: article.id,
+                    domainId: article.domainId,
+                    createdBy: null,
+                });
+            });
             console.log(`[Pipeline] AI detection ${detectionResult.verdict} (score: ${detectionResult.averageGeneratedProb.toFixed(3)}), halting pipeline for article ${article.id} — requires human review before meta generation`);
         }
 

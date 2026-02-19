@@ -1001,6 +1001,9 @@ export function generateSubPagesFromBlueprint(
                     (result.content as Record<string, unknown>).navLinks = blueprint.nav.items;
                 }
             }
+            if (b.type === 'Footer') {
+                result.variant = footerVariant;
+            }
             return result;
         });
         results.push({ route: def.route, title: def.title, metaDescription: def.metaDescription, blocks });

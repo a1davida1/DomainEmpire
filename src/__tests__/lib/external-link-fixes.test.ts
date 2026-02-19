@@ -26,6 +26,7 @@ vi.mock('@/lib/queue/content-queue', () => ({ enqueueContentJob: vi.fn() }));
 vi.mock('@/lib/ai/research-cache', () => ({ generateResearchWithCache: vi.fn() }));
 vi.mock('drizzle-orm', () => ({
     eq: vi.fn(), and: vi.fn(), sql: vi.fn(), ilike: vi.fn(),
+    relations: vi.fn(() => ({})),
 }));
 vi.mock('marked', () => ({ marked: { parse: vi.fn() } }));
 vi.mock('sanitize-html', () => {

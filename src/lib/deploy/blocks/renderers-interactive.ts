@@ -218,11 +218,10 @@ registerBlockRenderer('QuoteCalculator', (block, _ctx) => {
     const headingHtml = heading ? `<h2>${escapeHtml(heading)}</h2>` : '';
 
     // SECURITY: Sanitize formula for use in new Function() evaluation.
-    // Only allow identifiers, numbers, basic math operators, parens, commas, dots, and colons.
-    // Braces/brackets are stripped to prevent object/array injection vectors.
-    // Residual risk: crafted identifier names could shadow globals; formulas come from
-    // trusted admin content (default-content.ts or AI pipeline), not user input.
-    const safeFormula = formula.replace(/[^a-zA-Z0-9_\s+\-*/%().,:\s]/g, '');
+    // Allow identifiers, numbers, basic math ops, parens, braces (for object literals),
+    // commas, dots, colons. Brackets stripped. Formulas come from trusted admin content
+    // (default-content.ts or AI pipeline), not user input.
+    const safeFormula = formula.replace(/[^a-zA-Z0-9_\s+\-*/%(){}.,:\s]/g, '');
 
     const calcScript = safeFormula ? `<script>
 (function(){
