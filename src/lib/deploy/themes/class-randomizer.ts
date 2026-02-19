@@ -146,6 +146,8 @@ const FINGERPRINT_CLASSES = [
     'calc-result-label', 'calc-result-value',
     'calc-breakdown', 'calc-breakdown-row', 'calc-breakdown-total',
     'calc-methodology', 'calc-input-group',
+    'calc-download-gate', 'calc-download-cta', 'calc-download-icon',
+    'calc-gate-form', 'calc-gate-email', 'calc-gate-btn', 'calc-gate-success',
     // Checklist / StepByStep
     'checklist-section', 'checklist-list', 'checklist-item',
     'checklist-number', 'checklist-checkbox', 'checklist-content', 'checklist-progress',

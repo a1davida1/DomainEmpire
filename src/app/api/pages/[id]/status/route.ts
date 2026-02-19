@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthUser } from '@/lib/auth';
 import { db, pageDefinitions } from '@/lib/db';
 import { eq } from 'drizzle-orm';
-import { reviewEvents, PAGE_STATUSES, type PageStatus } from '@/lib/db/schema';
+import { reviewEvents, PAGE_STATUSES } from '@/lib/db/schema';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

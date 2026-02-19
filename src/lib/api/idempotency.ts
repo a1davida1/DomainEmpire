@@ -121,10 +121,10 @@ export async function storeIdempotencyResult(
  * Usage:
  *   export const POST = withIdempotency(async (request) => { ... });
  */
-export function withIdempotency(
-    handler: (request: NextRequest, ...args: unknown[]) => Promise<NextResponse>
+export function withIdempotency<TArgs extends unknown[]>(
+    handler: (request: NextRequest, ...args: TArgs) => Promise<NextResponse>
 ) {
-    return async (request: NextRequest, ...args: unknown[]): Promise<NextResponse> => {
+    return async (request: NextRequest, ...args: TArgs): Promise<NextResponse> => {
         const key = request.headers.get('Idempotency-Key');
 
         // Check for cached response

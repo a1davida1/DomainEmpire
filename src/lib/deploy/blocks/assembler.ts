@@ -6,6 +6,7 @@
  * and wraps the result in a complete HTML document.
  */
 
+import { createHash } from 'node:crypto';
 import type { BlockEnvelope, BlockType } from './schemas';
 import {
     escapeHtml,
@@ -13,6 +14,15 @@ import {
     sanitizeArticleHtml,
 } from '../templates/shared';
 import { marked } from 'marked';
+
+/**
+ * Deterministic probability check based on a seed string.
+ * Returns a stable value in [0, 1) for the same seed.
+ */
+function hashProbability(seed: string): number {
+    const hash = createHash('sha256').update(seed).digest();
+    return hash.readUInt32BE(0) / 0x100000000;
+}
 import {
     registerBlockRenderer as _registerBlockRenderer,
     getBlockRenderer,
@@ -33,6 +43,10 @@ const THEME_FONT_URLS: Record<string, string> = {
     editorial: 'https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,400;0,700;0,900;1,400&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap',
     bold: 'https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&family=Inter:wght@400;500;600;700&display=swap',
     minimal: '',
+    magazine: 'https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;0,800;0,900;1,400&family=Source+Serif+4:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap',
+    brutalist: 'https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap',
+    glass: 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap',
+    retro: 'https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&family=Nunito:wght@400;500;600;700;800&display=swap',
 };
 
 // ============================================================
@@ -54,6 +68,10 @@ export interface RenderContext {
     bodyScripts: string;
     /** Dashboard /api/collect URL for form submission data collection */
     collectUrl?: string;
+    /** Word count threshold below which non-essential pages get noindex (default 300) */
+    thinPageWordThreshold?: number;
+    /** Domain niche for contextual copy (e.g. newsletter popup heading) */
+    niche?: string;
 }
 
 // ============================================================
@@ -145,10 +163,124 @@ export function getConfiguratorBridgeScript(allowedParentOrigin: string): string
 }
 
 // ============================================================
+// Shared Route Constants
+// ============================================================
+
+/** Compliance pages that get noindex and are excluded from popups */
+const COMPLIANCE_ROUTES = new Set([
+    '/privacy-policy', '/privacy', '/terms', '/disclosure',
+    '/medical-disclaimer', '/legal-disclaimer',
+]);
+
+/** Routes excluded from newsletter popup (compliance + contact) */
+const POPUP_EXCLUDED_ROUTES = new Set([
+    ...COMPLIANCE_ROUTES,
+    '/contact',
+]);
+
+// ============================================================
+// Newsletter Popup Script (returning visitors only)
+// ============================================================
+
+function getNewsletterPopupScript(collectUrl: string, niche: string): string {
+    const safeCollectUrl = JSON.stringify(collectUrl);
+    // Fix 3: JSON.stringify escapes all special chars (quotes, backslashes, unicode)
+    // then slice off the wrapping quotes to get a safe JS string literal body.
+    const safeNiche = JSON.stringify(niche).slice(1, -1);
+    return `
+  /* Newsletter popup for returning visitors */
+  (function(){
+    var path=location.pathname.replace(/\\/$/,'')||'/';
+    var excluded=${JSON.stringify([...POPUP_EXCLUDED_ROUTES])};
+    if(excluded.indexOf(path)>=0)return;
+    if(localStorage.getItem('newsletter_submitted'))return;
+    if(localStorage.getItem('newsletter_dismissed'))return;
+    /* Fix 2: Increment visit_count only once per session using sessionStorage guard */
+    if(!sessionStorage.getItem('nl_session_counted')){
+      var vc=parseInt(localStorage.getItem('visit_count')||'0',10)+1;
+      localStorage.setItem('visit_count',String(vc));
+      sessionStorage.setItem('nl_session_counted','1');
+    }
+    if(parseInt(localStorage.getItem('visit_count')||'0',10)<2)return;
+    setTimeout(function(){
+      if(document.querySelector('.nl-popup-overlay'))return;
+      var overlay=document.createElement('div');
+      overlay.className='nl-popup-overlay';
+      overlay.setAttribute('role','dialog');
+      overlay.setAttribute('aria-modal','true');
+      overlay.setAttribute('aria-label','Newsletter signup');
+      overlay.innerHTML='<div class="nl-popup">'
+        +'<button class="nl-popup-close" aria-label="Close" type="button">&times;</button>'
+        +'<h3>Get ${safeNiche} updates</h3>'
+        +'<p>Join our newsletter for the latest guides and insights.</p>'
+        +'<form class="nl-popup-form">'
+        +'<input type="email" name="email" placeholder="your@email.com" required autocomplete="email" aria-label="Email address">'
+        +'<button type="submit">Subscribe</button>'
+        +'</form>'
+        +'<p class="nl-popup-msg" style="display:none"></p>'
+        +'</div>';
+      var style=document.createElement('style');
+      style.textContent='.nl-popup-overlay{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;animation:nlFadeIn .3s ease}'
+        +'.nl-popup{background:var(--color-bg,#fff);color:var(--color-text,#1a1a1a);border-radius:12px;padding:2rem;max-width:400px;width:90%;position:relative;box-shadow:0 20px 60px rgba(0,0,0,.3)}'
+        +'.nl-popup h3{margin:0 0 .5rem;font-size:1.25rem;color:var(--color-heading,inherit)}'
+        +'.nl-popup p{margin:0 0 1rem;font-size:.9rem;opacity:.8}'
+        +'.nl-popup-close{position:absolute;top:.5rem;right:.75rem;background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--color-text,#333);line-height:1}'
+        +'.nl-popup-form{display:flex;gap:.5rem;flex-wrap:wrap}'
+        +'.nl-popup-form input{flex:1 1 180px;padding:.5rem .75rem;border:1px solid var(--color-border,#ddd);border-radius:6px;font-size:.9rem;background:var(--color-bg,#fff);color:var(--color-text,#1a1a1a)}'
+        +'.nl-popup-form button{padding:.5rem 1rem;background:var(--color-accent,#2563eb);color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;font-size:.9rem;flex-shrink:0}'
+        +'.nl-popup-msg{font-size:.85rem;margin-top:.5rem;width:100%}'
+        +'@keyframes nlFadeIn{from{opacity:0}to{opacity:1}}';
+      document.head.appendChild(style);
+      document.body.appendChild(overlay);
+      /* Fix 6: Basic focus trap — cycle between close, email, submit */
+      var focusEls=overlay.querySelectorAll('button,input');
+      var firstFocus=focusEls[0];var lastFocus=focusEls[focusEls.length-1];
+      overlay.querySelector('input[name=email]').focus();
+      overlay.addEventListener('keydown',function(e){
+        if(e.key==='Escape'){overlay.remove();localStorage.setItem('newsletter_dismissed','1');return}
+        if(e.key!=='Tab')return;
+        if(e.shiftKey){if(document.activeElement===firstFocus){e.preventDefault();lastFocus.focus()}}
+        else{if(document.activeElement===lastFocus){e.preventDefault();firstFocus.focus()}}
+      });
+      function dismiss(){overlay.remove();localStorage.setItem('newsletter_dismissed','1')}
+      overlay.querySelector('.nl-popup-close').addEventListener('click',dismiss);
+      overlay.addEventListener('click',function(e){if(e.target===overlay)dismiss()});
+      overlay.querySelector('.nl-popup-form').addEventListener('submit',function(e){
+        e.preventDefault();
+        var email=overlay.querySelector('input[name=email]').value;
+        if(!email)return;
+        var btn=overlay.querySelector('.nl-popup-form button');
+        btn.disabled=true;btn.textContent='Sending...';
+        var payload=JSON.stringify({formType:'newsletter',route:location.pathname,domain:location.hostname,email:email,data:{}});
+        fetch(${safeCollectUrl},{method:'POST',headers:{'Content-Type':'application/json'},body:payload,keepalive:true})
+          .then(function(r){
+            var msg=overlay.querySelector('.nl-popup-msg');
+            if(r.ok){
+              localStorage.setItem('newsletter_submitted','1');
+              msg.textContent='Thanks! You are subscribed.';
+              msg.style.display='';msg.style.color='#16a34a';
+              setTimeout(function(){overlay.remove()},2000);
+            }else{
+              msg.textContent='Something went wrong. Please try again.';
+              msg.style.display='';msg.style.color='#dc2626';
+              btn.disabled=false;btn.textContent='Subscribe';
+            }
+          }).catch(function(){
+            var msg=overlay.querySelector('.nl-popup-msg');
+            msg.textContent='Something went wrong. Please try again.';
+            msg.style.display='';msg.style.color='#dc2626';
+            btn.disabled=false;btn.textContent='Subscribe';
+          });
+      });
+    },30000);
+  })();`;
+}
+
+// ============================================================
 // Enhancement Script (scroll animations, reading progress, back-to-top)
 // ============================================================
 
-function getEnhancementScript(): string {
+function getEnhancementScript(ctx?: { collectUrl?: string; route?: string; niche?: string }): string {
     return `<script>
 (function(){
   /* Scroll-triggered fade-in via IntersectionObserver */
@@ -284,6 +416,8 @@ function getEnhancementScript(): string {
     });
   }
 
+
+${ctx?.collectUrl ? getNewsletterPopupScript(ctx.collectUrl, ctx.niche || 'industry') : ''}
 })();
 </script>`;
 }
@@ -291,6 +425,28 @@ function getEnhancementScript(): string {
 // ============================================================
 // SEO Helpers
 // ============================================================
+
+function buildAuthorSchema(blocks: BlockEnvelope[], ctx: RenderContext): Record<string, unknown> {
+    const authorBlock = blocks.find(b => b.type === 'AuthorBio');
+    if (authorBlock?.content) {
+        const c = authorBlock.content as Record<string, unknown>;
+        const name = (c.name as string) || ctx.siteTitle;
+        const title = (c.title as string) || '';
+        const bio = (c.bio as string) || '';
+        return {
+            '@type': 'Person',
+            name,
+            ...(title ? { jobTitle: title } : {}),
+            ...(bio ? { description: bio.slice(0, 200) } : {}),
+            url: `https://${ctx.domain}/about`,
+        };
+    }
+    return {
+        '@type': 'Person',
+        name: `${ctx.siteTitle} Editorial Team`,
+        url: `https://${ctx.domain}/about`,
+    };
+}
 
 function buildOpenGraphMeta(ctx: RenderContext, pageUrl: string): string {
     const title = escapeAttr(ctx.pageTitle || ctx.siteTitle);
@@ -316,7 +472,10 @@ function buildOpenGraphMeta(ctx: RenderContext, pageUrl: string): string {
         tags.push(`<meta property="og:image" content="${escapeAttr(ogImageUrl)}">`);
         tags.push(`<meta property="og:image:width" content="1200">`);
         tags.push(`<meta property="og:image:height" content="630">`);
+        tags.push(`<meta property="og:image:type" content="image/svg+xml">`);
+        tags.push(`<meta property="og:image:alt" content="${title}">`);
         tags.push(`<meta name="twitter:image" content="${escapeAttr(ogImageUrl)}">`);
+        tags.push(`<meta name="twitter:image:alt" content="${title}">`);
     }
 
     if (ctx.publishedAt) {
@@ -333,18 +492,28 @@ function buildStructuredData(ctx: RenderContext, canonicalUrl: string, blocks: B
     const scripts: string[] = [];
     const isHomepage = ctx.route === '/';
 
-    // WebPage or Article schema
+    // Deterministic seed for schema emission probability
+    const schemaSeed = `${ctx.route}:${ctx.domain}`;
+
+    // WebPage or Article schema — 70% WebPage, 30% Article (for non-homepage)
+    let pageType: string;
+    if (isHomepage) {
+        pageType = 'WebPage';
+    } else {
+        pageType = hashProbability(`${schemaSeed}:pageType`) < 0.7 ? 'WebPage' : 'Article';
+    }
+
     const pageSchema: Record<string, unknown> = {
         '@context': 'https://schema.org',
-        '@type': isHomepage ? 'WebPage' : 'Article',
+        '@type': pageType,
         name: ctx.pageTitle || ctx.siteTitle,
         headline: ctx.pageTitle || ctx.siteTitle,
         description: ctx.pageDescription || '',
         url: canonicalUrl,
         mainEntityOfPage: { '@type': 'WebPage', '@id': canonicalUrl },
         inLanguage: 'en',
-        author: { '@type': 'Organization', name: ctx.domain },
-        publisher: { '@type': 'Organization', name: ctx.domain },
+        author: buildAuthorSchema(blocks, ctx),
+        publisher: { '@type': 'Organization', name: ctx.siteTitle, url: `https://${ctx.domain}` },
     };
     if (ctx.publishedAt) pageSchema.datePublished = ctx.publishedAt;
     if (ctx.updatedAt) pageSchema.dateModified = ctx.updatedAt;
@@ -397,9 +566,10 @@ function buildStructuredData(ctx: RenderContext, canonicalUrl: string, blocks: B
     // NOTE: FAQPage JSON-LD is emitted by the FAQ block renderer itself
     // (when emitJsonLd !== false), so we don't duplicate it here.
 
-    // HowTo schema — extract from StepByStep/Checklist blocks
+    // HowTo schema — extract from StepByStep/Checklist blocks (80% emission rate)
     const howToBlocks = blocks.filter(b => b.type === 'StepByStep' || b.type === 'Checklist');
-    for (const hb of howToBlocks) {
+    const emitHowTo = hashProbability(`${schemaSeed}:howTo`) < 0.8;
+    for (const hb of emitHowTo ? howToBlocks : []) {
         const c = (hb.content || {}) as Record<string, unknown>;
         const heading = (c.heading as string) || (c.title as string) || '';
         const steps = (c.steps as Array<{ title?: string; text?: string; label?: string }>) || [];
@@ -466,9 +636,9 @@ function buildStructuredData(ctx: RenderContext, canonicalUrl: string, blocks: B
         }
     }
 
-    // SoftwareApplication schema for Calculator/Wizard blocks
+    // SoftwareApplication schema for Calculator/Wizard blocks (60% emission rate)
     const toolBlocks = blocks.filter(b => b.type === 'QuoteCalculator' || b.type === 'CostBreakdown' || b.type === 'Wizard');
-    if (toolBlocks.length > 0) {
+    if (toolBlocks.length > 0 && hashProbability(`${schemaSeed}:softwareApp`) < 0.6) {
         const toolSchema = {
             '@context': 'https://schema.org',
             '@type': 'SoftwareApplication',
@@ -481,8 +651,9 @@ function buildStructuredData(ctx: RenderContext, canonicalUrl: string, blocks: B
         scripts.push(`<script type="application/ld+json">${JSON.stringify(toolSchema)}</script>`);
     }
 
-    // Review/AggregateRating for ProsConsCard blocks
-    const reviewBlocks = blocks.filter(b => b.type === 'ProsConsCard');
+    // Review/AggregateRating for ProsConsCard blocks (75% emission rate)
+    const emitReview = hashProbability(`${schemaSeed}:review`) < 0.75;
+    const reviewBlocks = emitReview ? blocks.filter(b => b.type === 'ProsConsCard') : [];
     for (const rb of reviewBlocks) {
         const c = (rb.content || {}) as Record<string, unknown>;
         const name = (c.name as string) || '';
@@ -498,9 +669,37 @@ function buildStructuredData(ctx: RenderContext, canonicalUrl: string, blocks: B
                     bestRating: 10,
                     worstRating: 1,
                 },
-                author: { '@type': 'Organization', name: ctx.domain },
+                author: buildAuthorSchema(blocks, ctx),
             };
             scripts.push(`<script type="application/ld+json">${JSON.stringify(reviewSchema)}</script>`);
+        }
+    }
+
+    // Product schema for ComparisonTable blocks (70% emission rate)
+    const emitProduct = hashProbability(`${schemaSeed}:product`) < 0.7;
+    const compBlocks = emitProduct ? blocks.filter(b => b.type === 'ComparisonTable') : [];
+    for (const cb of compBlocks) {
+        const c = (cb.content || {}) as Record<string, unknown>;
+        const options = (c.options as Array<{ name: string; badge?: string; scores?: Record<string, unknown> }>) || [];
+        for (const opt of options.slice(0, 5)) {
+            if (!opt.name) continue;
+            const ratingValues = Object.values(opt.scores || {}).filter(v => typeof v === 'number') as number[];
+            const avgRating = ratingValues.length > 0 ? ratingValues.reduce((a, b) => a + b, 0) / ratingValues.length : null;
+            const productSchema: Record<string, unknown> = {
+                '@context': 'https://schema.org',
+                '@type': 'Product',
+                name: opt.name,
+            };
+            if (avgRating !== null && avgRating > 0) {
+                productSchema.aggregateRating = {
+                    '@type': 'AggregateRating',
+                    ratingValue: Math.round(avgRating * 10) / 10,
+                    bestRating: 5,
+                    ratingCount: ratingValues.length,
+                };
+            }
+            if (opt.badge) productSchema.award = opt.badge;
+            scripts.push(`<script type="application/ld+json">${JSON.stringify(productSchema)}</script>`);
         }
     }
 
@@ -634,10 +833,42 @@ export function assemblePageFromBlocks(
     const featuredSlug = ctx.route.replace(/^\//, '').replace(/\/$/, '').replace(/\//g, '-');
     const preloadFeatured = hasArticleBody && isNonHomePage;
 
+    // Word count from ArticleBody blocks for thin-page detection
+    // Fix 10: Strip markdown syntax before counting to get accurate content word count
+    const articleBodyBlocks = blocks.filter(b => b.type === 'ArticleBody');
+    let articleWordCount = 0;
+    for (const ab of articleBodyBlocks) {
+        const c = (ab.content || {}) as Record<string, unknown>;
+        const md = (c.markdown as string) || (c.body as string) || '';
+        const plainText = md
+            .replace(/^#{1,6}\s+/gm, '')        // headings
+            .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1') // links → text only
+            .replace(/!\[[^\]]*\]\([^)]*\)/g, '') // images
+            .replace(/[*_~`>]/g, '')              // emphasis, code, blockquote markers
+            .replace(/\|/g, ' ')                  // table pipes
+            .replace(/-{3,}/g, '')                // horizontal rules
+            .replace(/^\s*[-*+]\s/gm, '');        // list markers
+        articleWordCount += plainText.split(/\s+/).filter(Boolean).length;
+    }
+
+    // Fix 8: Routes that should always be indexed — prefix match for /guides/*
+    const ALWAYS_INDEX_EXACT = new Set(['/', '/calculator', '/compare', '/guides']);
+    const ALWAYS_INDEX_PREFIXES = ['/guides/'];
+    const isAlwaysIndexed = ALWAYS_INDEX_EXACT.has(ctx.route)
+        || ALWAYS_INDEX_PREFIXES.some(prefix => ctx.route.startsWith(prefix));
+    // Fix 9: Use shared COMPLIANCE_ROUTES constant (defined at module level)
+    const THIN_PAGE_WORD_THRESHOLD = ctx.thinPageWordThreshold ?? 300;
+    const isCompliancePage = COMPLIANCE_ROUTES.has(ctx.route);
+    const isThinPage = !isAlwaysIndexed && !isCompliancePage && articleWordCount < THIN_PAGE_WORD_THRESHOLD;
+    const robotsContent = (isCompliancePage || isThinPage)
+        ? 'noindex, follow'
+        : 'index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1';
+
     const title = ctx.pageTitle || ctx.siteTitle;
     const description = ctx.pageDescription || '';
-    const fullTitle = ctx.pageTitle && ctx.pageTitle !== ctx.siteTitle
-        ? `${escapeHtml(title)} | ${escapeHtml(ctx.siteTitle)}`
+    const titleWithSuffix = `${escapeHtml(title)} | ${escapeHtml(ctx.siteTitle)}`;
+    const fullTitle = ctx.pageTitle && ctx.pageTitle !== ctx.siteTitle && titleWithSuffix.length <= 60
+        ? titleWithSuffix
         : escapeHtml(title);
 
     const typoPreset = resolveTypographyPreset(ctx.domain);
@@ -694,8 +925,7 @@ ${relatedHtml}`;
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="${escapeAttr(description)}">
-  <meta name="robots" content="index, follow">
-  <meta name="generator" content="DomainEmpire v2">
+  <meta name="robots" content="${robotsContent}">
   <meta name="theme-color" content="${(skins[ctx.skin] || skins.slate).accent}">
   <title>${fullTitle}</title>
   <link rel="canonical" href="${escapeAttr(canonicalUrl)}">
@@ -725,7 +955,7 @@ ${mainContent}
 ${footerHtml}
 <div class="reading-progress" aria-hidden="true"></div>
 <button class="back-to-top" aria-label="Back to top">&uarr;</button>
-${getEnhancementScript()}
+${getEnhancementScript({ collectUrl: ctx.collectUrl, route: ctx.route, niche: ctx.niche })}
 ${ctx.bodyScripts}
 </body>
 </html>`;
@@ -862,14 +1092,15 @@ registerBlockRenderer('Footer', (block, ctx) => {
 
     // Cookie consent bar — hidden by default, shown by enhancement script if not dismissed
     const cookieHtml = showCookieConsent ? `<div class="cookie-consent" id="cookie-consent" role="dialog" aria-label="Cookie consent" style="display:none">
-  <p>We use cookies to improve your experience. By continuing to browse, you agree to our <a href="/privacy">privacy policy</a>. <button class="cookie-ok" type="button">Accept</button></p>
+  <p>We use cookies to improve your experience. By continuing to browse, you agree to our <a href="/privacy-policy">privacy policy</a>. <button class="cookie-ok" type="button">Accept</button></p>
 </div>` : '';
 
     // Bottom bar with copyright + configurable legal links
     const legalLinks = (content.legalLinks as Array<{ label: string; href: string }>) || [];
     const defaultLegalLinks = [
-        { label: 'Privacy Policy', href: '/privacy' },
+        { label: 'Privacy Policy', href: '/privacy-policy' },
         { label: 'Terms of Service', href: '/terms' },
+        { label: 'Disclosure', href: '/disclosure' },
     ];
     const activeLegalLinks = legalLinks.length > 0 ? legalLinks : defaultLegalLinks;
     const legalLinksHtml = activeLegalLinks
@@ -1008,7 +1239,7 @@ registerBlockRenderer('ArticleBody', (block, ctx) => {
 });
 
 // --- FAQ ---
-registerBlockRenderer('FAQ', (block, _ctx) => {
+registerBlockRenderer('FAQ', (block, ctx) => {
     const content = (block.content || {}) as Record<string, unknown>;
     const config = (block.config || {}) as Record<string, unknown>;
     const items = (content.items as Array<{ question: string; answer: string }>) || [];
@@ -1016,7 +1247,8 @@ registerBlockRenderer('FAQ', (block, _ctx) => {
     if (items.length === 0) return '';
 
     const openFirst = config.openFirst === true;
-    const emitJsonLd = config.emitJsonLd !== false;
+    // 90% emission rate for FAQ JSON-LD, gated by deterministic hash
+    const emitJsonLd = config.emitJsonLd !== false && hashProbability(`${ctx.route}:${ctx.domain}:faq`) < 0.9;
 
     const faqHtml = items.map((item, i) => {
         const open = i === 0 && openFirst ? ' open' : '';

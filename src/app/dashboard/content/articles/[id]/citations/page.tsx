@@ -40,7 +40,6 @@ export default function CitationsPage() {
         setLoading(false);
     }, [articleId]);
 
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     useEffect(() => { loadCitations(); }, [loadCitations]);
 
     async function handleAdd(e: React.FormEvent) {

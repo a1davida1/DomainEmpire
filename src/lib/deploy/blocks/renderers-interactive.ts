@@ -484,6 +484,55 @@ registerBlockRenderer('QuoteCalculator', (block, _ctx) => {
 })();
 </script>` : '';
 
+    const collectUrl = _ctx.collectUrl || '';
+    const downloadGateHtml = `<div class="calc-download-gate" id="calc-download-gate">
+  <div class="calc-download-cta">
+    <span class="calc-download-icon">📊</span>
+    <div>
+      <strong>Download Your Results</strong>
+      <p>Get a PDF summary of your calculation emailed to you.</p>
+    </div>
+  </div>
+  <form class="calc-gate-form" id="calc-gate-form">
+    <input type="email" name="email" placeholder="Enter your email" required class="calc-gate-email">
+    <button type="submit" class="calc-gate-btn">Download Results</button>
+  </form>
+  <div class="calc-gate-success" id="calc-gate-success" style="display:none">
+    <span class="success-icon">✓</span> Check your inbox! Your results summary is on the way.
+  </div>
+  <div class="calc-gate-error" id="calc-gate-error" style="display:none">
+    Something went wrong. Please try again.
+  </div>
+</div>`;
+
+    const downloadGateScript = `<script>
+(function(){
+  var form=document.getElementById('calc-gate-form');
+  if(!form)return;
+  form.addEventListener('submit',function(e){
+    e.preventDefault();
+    var email=form.querySelector('input[name="email"]').value;
+    var results={};
+    document.querySelectorAll('.calc-result-value').forEach(function(el){results[el.id]=el.textContent});
+    var btn=form.querySelector('button');
+    btn.disabled=true;btn.textContent='Sending...';
+    var errEl=document.getElementById('calc-gate-error');if(errEl)errEl.style.display='none';
+    var collectUrl=${JSON.stringify(collectUrl)};
+    var payload={formType:'calculator',route:location.pathname,domain:location.hostname,email:email,data:{results:results,url:location.href}};
+    var target=collectUrl||'/api/collect';
+    fetch(target,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(function(r){
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      form.style.display='none';
+      document.getElementById('calc-gate-success').style.display='';
+    }).catch(function(){
+      btn.disabled=false;btn.textContent='Send Results';
+      var err=document.getElementById('calc-gate-error');
+      if(err)err.style.display='';
+    });
+  });
+})();
+</script>`;
+
     return `<section class="calculator-section">
   ${headingHtml}
   <div class="calc-split">
@@ -496,11 +545,13 @@ registerBlockRenderer('QuoteCalculator', (block, _ctx) => {
       ${breakdownHtml}
     </div>
   </div>
+  ${downloadGateHtml}
   ${assumptionsHtml}
   ${methodologyHtml}
   ${scheduleHtml}
   ${calcScript}
   ${amortScript}
+  ${downloadGateScript}
 </section>`;
 });
 

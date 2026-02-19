@@ -429,7 +429,7 @@ function aboutPage(niche: string, siteName: string): SubPageDefinition {
 }
 
 function contactPage(niche: string, siteName: string, domain: string): SubPageDefinition {
-    const _n = capitalize(niche);
+    const n = capitalize(niche);
     return {
         route: '/contact',
         title: `Contact ${siteName}`,
@@ -437,36 +437,29 @@ function contactPage(niche: string, siteName: string, domain: string): SubPageDe
         blocks: [
             { type: 'Header', variant: 'topbar', config: { sticky: true } },
             { type: 'Hero', variant: 'minimal', content: {
-                heading: `Contact Us`,
-                subheading: `Have a question or need personalized ${niche} advice? Our team is here to help.`,
+                heading: `Get ${n} Help`,
+                subheading: `Have a question? Drop your email and we'll send you personalized recommendations.`,
             }},
             { type: 'LeadForm', content: {
-                heading: `Send Us a Message`,
-                subheading: `Fill out the form below and we'll get back to you within 24 hours.`,
-                privacyUrl: '/privacy',
-                successMessage: 'Thank you for reaching out! We\'ll respond within 24 hours.',
-            }},
+                heading: `Get Personalized ${n} Advice`,
+                subheading: `Enter your email and we'll send you tailored recommendations based on your needs.`,
+                fields: [
+                    { name: 'email', label: 'Email Address', type: 'email', required: true, placeholder: 'you@email.com' },
+                    { name: 'question', label: 'What can we help with?', type: 'text', required: false, placeholder: 'Brief description of your question (optional)' },
+                ],
+                consentText: `I agree to receive email communications. You can unsubscribe at any time. Privacy Policy.`,
+                privacyUrl: '/privacy-policy',
+                successMessage: 'Thanks! Check your inbox for our recommendations.',
+            }, config: { endpoint: '', submitLabel: 'SEND ME RECOMMENDATIONS' }},
             { type: 'ArticleBody', content: {
                 title: 'Other Ways to Reach Us',
-                markdown: `## Additional Contact Methods\n\n` +
-                    `- **Email** — info@${domain}\n` +
-                    `- **Response Time** — We typically respond within 24 business hours\n\n` +
-                    `## What We Can Help With\n\n` +
-                    `- Personalized ${niche} recommendations\n` +
-                    `- Questions about our guides and reviews\n` +
-                    `- Corrections or feedback on our content\n` +
-                    `- Partnership and collaboration inquiries\n` +
-                    `- Press and media requests\n\n` +
-                    `## Quick Resources\n\nBefore reaching out, you might find your answer in these resources:\n` +
-                    `- [FAQ](/faq) — Answers to common questions\n` +
+                markdown: `## Quick Resources\n\nYou might find your answer faster here:\n\n` +
+                    `- [FAQ](/faq) — Answers to common ${niche} questions\n` +
                     `- [Guides](/guides) — In-depth articles and how-tos\n` +
-                    `- [Calculator](/calculator) — Get instant cost estimates`,
-            }},
-            { type: 'StatGrid', content: {
-                items: [
-                    { id: 'response', title: 'Response Time', metricLabel: 'Hours', metricValue: 95, summary: 'We respond to most inquiries within 24 hours.', group: 'Service' },
-                    { id: 'satisfaction', title: 'Satisfaction', metricLabel: 'Happy', metricValue: 98, summary: '98% of readers rate our support as helpful.', group: 'Quality' },
-                ],
+                    `- [Calculator](/calculator) — Get instant estimates\n` +
+                    `- [Compare Options](/compare) — Side-by-side analysis\n\n` +
+                    `## Email\n\nFor press, partnerships, or corrections: **info@${domain}**\n\n` +
+                    `We typically respond within 24 business hours.`,
             }},
             { type: 'Footer', variant: 'multi-column' },
         ],
@@ -693,6 +686,33 @@ export function generateSubPages(domain: string, niche?: string): SubPageResult[
                 config: { ...(merged.config || {}), ...(b.config || {}) },
             };
         });
+        // Inject LastUpdated after Hero and AuthorBio before Footer on content pages
+        const skipRoutes = new Set(['/privacy', '/terms', '/contact']);
+        if (!skipRoutes.has(def.route)) {
+            const hasLastUpdated = blocks.some(b => b.type === 'LastUpdated');
+            const hasAuthorBio = blocks.some(b => b.type === 'AuthorBio');
+
+            if (!hasLastUpdated) {
+                const heroIdx = blocks.findIndex(b => b.type === 'Hero');
+                const insertIdx = heroIdx >= 0 ? heroIdx + 1 : 1;
+                const luDefaults = mergeBlockDefaults({ type: 'LastUpdated' as BlockType }, domain, niche);
+                blocks.splice(insertIdx, 0, {
+                    type: 'LastUpdated' as BlockType, id: blkId(),
+                    content: luDefaults.content || {}, config: luDefaults.config || {},
+                });
+            }
+
+            if (!hasAuthorBio) {
+                const footerIdx = blocks.findIndex(b => b.type === 'Footer');
+                const insertIdx = footerIdx >= 0 ? footerIdx : blocks.length;
+                const abDefaults = mergeBlockDefaults({ type: 'AuthorBio' as BlockType }, domain, niche);
+                blocks.splice(insertIdx, 0, {
+                    type: 'AuthorBio' as BlockType, id: blkId(),
+                    content: abDefaults.content || {}, config: abDefaults.config || {},
+                });
+            }
+        }
+
         return {
             route: def.route,
             title: def.title,

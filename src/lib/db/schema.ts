@@ -108,6 +108,11 @@ export const domains = pgTable('domains', {
         quickDeploySeed?: number;
     }>().default({}),
 
+    // Site Review (AI QA)
+    lastReviewResult: jsonb('last_review_result').$type<Record<string, unknown> | null>(),
+    lastReviewScore: integer('last_review_score'),
+    lastReviewedAt: timestamp('last_reviewed_at'),
+
     // Timestamps
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow(),
@@ -409,6 +414,8 @@ export const articles = pgTable('articles', {
 
     // Content fingerprint for duplicate detection
     contentFingerprint: text('content_fingerprint'),
+    // Pre-computed ngram hashes (top-100 3-gram SHA-256 hashes) for Jaccard similarity
+    contentNgramHashes: jsonb('content_ngram_hashes').$type<string[]>(),
 
     // Monetization
     monetizationElements: jsonb('monetization_elements'),

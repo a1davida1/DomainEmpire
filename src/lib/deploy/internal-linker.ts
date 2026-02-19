@@ -18,7 +18,7 @@ interface GeneratedFile {
     isBase64?: boolean;
 }
 
-const MAX_LINKS_PER_PAGE = 5;
+const MAX_LINKS_PER_PAGE = 8;
 
 function routeToFilePath(route: string): string {
     return route === '/' ? 'index.html' : `${route.replace(/^\//, '').replace(/\/$/, '')}/index.html`;

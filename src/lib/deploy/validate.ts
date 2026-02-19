@@ -15,7 +15,6 @@
 
 import { db, domains, pageDefinitions } from '@/lib/db';
 import { eq } from 'drizzle-orm';
-import { extractSiteTitle } from './templates/shared';
 import type { BlockEnvelope } from './blocks/schemas';
 
 export interface ValidationIssue {
@@ -43,7 +42,6 @@ export async function validateDomain(domainId: string): Promise<ValidationReport
 
     const pages = await db.select().from(pageDefinitions).where(eq(pageDefinitions.domainId, domainId));
     const allRoutes = new Set(pages.map(p => p.route));
-    const siteName = extractSiteTitle(domain.domain);
     const rawDomainSlug = domain.domain.replace(/\.[a-z]+$/i, '');
     const niche = domain.niche || 'general';
     const issues: ValidationIssue[] = [];

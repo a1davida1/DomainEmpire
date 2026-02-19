@@ -435,6 +435,23 @@ export default async function DomainDetailPage({ params }: PageProps) {
         + (contentTypeCounts.get('interactive_map') ?? 0)
     );
 
+    const storedReview = (domain.lastReviewResult || null) as null | {
+        verdict?: unknown;
+        criticalIssues?: unknown;
+        recommendations?: unknown;
+    };
+    const reviewVerdict = typeof storedReview?.verdict === 'string' ? storedReview.verdict : null;
+    const criticalIssues = Array.isArray(storedReview?.criticalIssues)
+        ? (storedReview?.criticalIssues as unknown[]).filter((v): v is string => typeof v === 'string' && v.trim().length > 0).slice(0, 25)
+        : [];
+    const reviewBadgeClass = reviewVerdict === 'approve'
+        ? 'bg-emerald-100 text-emerald-800'
+        : reviewVerdict === 'needs_work'
+            ? 'bg-amber-100 text-amber-900'
+            : reviewVerdict === 'reject'
+                ? 'bg-red-100 text-red-900'
+                : 'bg-slate-100 text-slate-700';
+
     return (
         <div className="space-y-6">
             {/* Header */}
@@ -454,6 +471,11 @@ export default async function DomainDetailPage({ params }: PageProps) {
                             {domain.isDeployed && (
                                 <Badge variant="secondary" className="bg-green-100 text-green-800">
                                     Live
+                                </Badge>
+                            )}
+                            {domain.lastReviewScore != null && (
+                                <Badge variant="secondary" className={reviewBadgeClass}>
+                                    Review {domain.lastReviewScore}
                                 </Badge>
                             )}
                         </div>
@@ -546,8 +568,58 @@ export default async function DomainDetailPage({ params }: PageProps) {
                     isDeployed: !!domain.isDeployed,
                     pendingJobs: queueSnapshot.byStatus.pending,
                     processingJobs: queueSnapshot.byStatus.processing,
+                    reviewScore: domain.lastReviewScore ?? null,
+                    reviewVerdict: (reviewVerdict === 'approve' || reviewVerdict === 'needs_work' || reviewVerdict === 'reject') ? reviewVerdict : null,
+                    criticalIssues,
                 }}
             />
+
+            <Card className={reviewVerdict === 'reject' || criticalIssues.length > 0 ? 'border-red-200 bg-red-50/30' : 'border-emerald-200 bg-emerald-50/30'}>
+                <CardHeader className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                        <CardTitle>Site Review</CardTitle>
+                        <CardDescription>
+                            AI rubric score and blocking issues for deploy readiness.
+                        </CardDescription>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <Badge variant="secondary" className={reviewBadgeClass}>
+                            {domain.lastReviewScore != null ? `Score ${domain.lastReviewScore}` : 'Not reviewed'}
+                        </Badge>
+                        {reviewVerdict && (
+                            <Badge variant="outline" className="capitalize">
+                                {reviewVerdict.replaceAll('_', ' ')}
+                            </Badge>
+                        )}
+                        {domain.lastReviewedAt && (
+                            <span className="text-muted-foreground">
+                                {new Date(domain.lastReviewedAt).toLocaleString('en-US', { timeZone: 'UTC' })}
+                            </span>
+                        )}
+                    </div>
+                </CardHeader>
+                <CardContent>
+                    {criticalIssues.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">
+                            {domain.lastReviewScore == null ? 'No review run yet. Click “Review Site” in the pipeline card above.' : 'No critical issues flagged.'}
+                        </p>
+                    ) : (
+                        <div className="space-y-2">
+                            <p className="text-sm font-medium text-red-900">Critical issues</p>
+                            <ul className="list-disc pl-5 space-y-1 text-sm text-red-900">
+                                {criticalIssues.map((issue, i) => (
+                                    <li key={i}>{issue}</li>
+                                ))}
+                            </ul>
+                            {Array.isArray(storedReview?.criticalIssues) && (storedReview.criticalIssues as unknown[]).length > criticalIssues.length && (
+                                <p className="text-xs text-muted-foreground">
+                                    Showing first {criticalIssues.length} issues.
+                                </p>
+                            )}
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
 
             <Card className="border-sky-200 bg-sky-50/40">
                 <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">

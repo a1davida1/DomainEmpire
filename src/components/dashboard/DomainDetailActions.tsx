@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Loader2, Sparkles, Trash2 } from 'lucide-react';
+import { Loader2, Sparkles, Trash2, Palette, FileStack, Rocket } from 'lucide-react';
 import { toast } from 'sonner';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import {
@@ -186,5 +186,88 @@ export function DeleteDomainButton({ domainId, domainName }: { domainId: string;
             </TooltipTrigger>
             <TooltipContent className="max-w-xs">Permanently remove this domain and all its articles, keywords, queue jobs, and deployment data. This cannot be undone.</TooltipContent>
         </Tooltip>
+    );
+}
+
+export function SeedPagesButton({ domainId }: { domainId: string }) {
+    const router = useRouter();
+    const [loading, setLoading] = useState(false);
+
+    return (
+        <Button size="sm" variant="outline" disabled={loading} onClick={async () => {
+            setLoading(true);
+            try {
+                const res = await fetch('/api/pages/seed', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ domainId }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (res.ok) {
+                    toast.success(`Seeded ${data.created || 0} page(s)`);
+                    router.refresh();
+                } else {
+                    toast.error(data.error || 'Failed to seed pages');
+                }
+            } catch { toast.error('Failed to seed pages'); }
+            finally { setLoading(false); }
+        }}>
+            {loading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <FileStack className="mr-1.5 h-3.5 w-3.5" />}
+            Seed Pages
+        </Button>
+    );
+}
+
+export function AssignThemeButton({ domainId }: { domainId: string }) {
+    const router = useRouter();
+    const [loading, setLoading] = useState(false);
+
+    return (
+        <Button size="sm" variant="outline" disabled={loading} onClick={async () => {
+            setLoading(true);
+            try {
+                const res = await fetch(`/api/domains/${domainId}/assign-theme`, { method: 'POST' });
+                const data = await res.json().catch(() => ({}));
+                if (res.ok) {
+                    toast.success(`Theme: ${data.theme} / ${data.skin}`);
+                    router.refresh();
+                } else {
+                    toast.error(data.error || 'Failed to assign theme');
+                }
+            } catch { toast.error('Failed to assign theme'); }
+            finally { setLoading(false); }
+        }}>
+            {loading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Palette className="mr-1.5 h-3.5 w-3.5" />}
+            Assign Theme
+        </Button>
+    );
+}
+
+export function DeployDomainButton({ domainId, isDeployed }: { domainId: string; isDeployed: boolean }) {
+    const router = useRouter();
+    const [loading, setLoading] = useState(false);
+
+    return (
+        <Button size="sm" disabled={loading} onClick={async () => {
+            setLoading(true);
+            try {
+                const res = await fetch(`/api/domains/${domainId}/deploy`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ triggerBuild: true, addCustomDomain: true }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (res.ok) {
+                    toast.success(`Deploy queued: ${data.jobId || 'OK'}`);
+                    router.refresh();
+                } else {
+                    toast.error(data.error || 'Deploy failed');
+                }
+            } catch { toast.error('Deploy failed'); }
+            finally { setLoading(false); }
+        }}>
+            {loading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Rocket className="mr-1.5 h-3.5 w-3.5" />}
+            {isDeployed ? 'Redeploy' : 'Deploy'}
+        </Button>
     );
 }

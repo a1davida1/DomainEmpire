@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 
 const c = {
   bg: "#06080d",
@@ -908,8 +908,6 @@ export default function TemplateSystemV2() {
 
   return (
     <div style={{ background: c.bg, minHeight: "100vh", color: c.text, fontFamily: sans, padding: "24px 16px" }}>
-      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
-
       <div style={{ maxWidth: 1000, margin: "0 auto" }}>
         {/* Header */}
         <div style={{ marginBottom: 28 }}>

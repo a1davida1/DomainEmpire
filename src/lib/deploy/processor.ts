@@ -410,6 +410,48 @@ async function stepVerifyDns(ctx: DeployContext): Promise<boolean> {
 }
 
 /**
+ * Step 7: Notify search engines about the sitemap.
+ * Non-fatal — deploy succeeds even if pings fail.
+ *
+ * - Bing: uses the classic sitemap ping endpoint
+ * - IndexNow: submits the homepage URL via Bing's IndexNow API (shared with Google, Yandex, etc.)
+ *   Google deprecated their /ping endpoint in June 2023 and now relies on
+ *   sitemap discovery via robots.txt and Search Console.
+ */
+async function stepPingSearchEngines(ctx: DeployContext): Promise<void> {
+    await startStep(ctx, 6);
+
+    const domainName = ctx.payload.domain;
+    const sitemapUrl = `https://${domainName}/sitemap.xml`;
+    const results: string[] = [];
+
+    // Bing sitemap ping (still supported)
+    try {
+        const bingUrl = `https://www.bing.com/ping?sitemap=${encodeURIComponent(sitemapUrl)}`;
+        const response = await fetch(bingUrl, { signal: AbortSignal.timeout(10_000) });
+        results.push(`Bing ping: ${response.status}`);
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        results.push(`Bing ping: failed (${msg})`);
+        console.warn(`[Deploy] Bing sitemap ping failed for ${domainName}:`, msg);
+    }
+
+    // IndexNow — notify Bing (which shares with Google, Yandex, Seznam, Naver)
+    // Uses the domain as a simple key; no key file needed for basic submission
+    try {
+        const indexNowUrl = `https://api.indexnow.org/indexnow?url=${encodeURIComponent(`https://${domainName}/`)}&key=${encodeURIComponent(domainName)}`;
+        const response = await fetch(indexNowUrl, { signal: AbortSignal.timeout(10_000) });
+        results.push(`IndexNow: ${response.status}`);
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        results.push(`IndexNow: failed (${msg})`);
+        console.warn(`[Deploy] IndexNow ping failed for ${domainName}:`, msg);
+    }
+
+    await doneStep(ctx, 6, results.join(', '));
+}
+
+/**
  * Validate the job and its associated data before processing
  */
 async function validateJob(jobId: string) {
@@ -489,6 +531,7 @@ export async function processDeployJob(jobId: string): Promise<void> {
             { step: 'Configure DNS Record', status: 'pending' },
             { step: 'Update Nameservers', status: 'pending' },
             { step: 'Verify DNS', status: 'pending' },
+            { step: 'Ping Search Engines', status: 'pending' },
         ];
 
     const ctx: DeployContext = {
@@ -533,6 +576,13 @@ export async function processDeployJob(jobId: string): Promise<void> {
         // - Step 5 (Update Nameservers) pushed NS to registrar → trust it, propagation will complete.
         // - Step 6 (Verify DNS) is the live check — used when step 5 was skipped/failed.
         const shouldMarkDeployed = dnsUpdateResult === 'updated' || dnsVerified;
+
+        // Fix 5: Only ping search engines if the site is actually reachable
+        if (shouldMarkDeployed) {
+            await stepPingSearchEngines(ctx);
+        } else {
+            await doneStep(ctx, 6, 'Skipped (DNS not yet pointing to Cloudflare)');
+        }
 
         // Mark complete
         await db.update(contentQueue).set({

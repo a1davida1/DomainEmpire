@@ -183,7 +183,7 @@ export async function generateSiteFiles(
         ),
         { path: 'styles.css', content: generateGlobalStyles(config.theme, config.template, config.domain) },
         { path: '404.html', content: generate404Page(pageShell) },
-        { path: 'robots.txt', content: `User-agent: *\nAllow: /\nSitemap: https://${config.domain}/sitemap.xml` },
+        { path: 'robots.txt', content: generateRobotsTxt(config.domain) },
         { path: 'favicon.svg', content: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${config.niche === 'health' ? '\u2695' : '\u{1F310}'}</text></svg>` },
         { path: '_headers', content: generateHeaders() },
         {
@@ -258,6 +258,8 @@ async function generateV2SiteFiles(
     // Generate site images: AI first (Gemini via OpenRouter), SVG fallback for failures
     const pageList = pageDefs.map(pd => ({ route: pd.route, title: pd.title || siteTitle }));
     const aiImagePaths = new Set<string>();
+    /** Tracks actual deployed image paths (may be .png from AI or .svg from fallback) */
+    const deployedImagePaths = new Set<string>();
 
     // Attempt AI image generation (hero + featured images)
     const useAIImages = process.env.ENABLE_AI_IMAGES !== 'false';
@@ -279,6 +281,7 @@ async function generateV2SiteFiles(
                 } else {
                     files.push({ path: img.path, content: img.content });
                 }
+                deployedImagePaths.add(img.path);
                 aiImagePaths.add(img.path.replace(/\.png$/, '.svg'));
             }
         } catch (err) {
@@ -297,6 +300,7 @@ async function generateV2SiteFiles(
     for (const img of svgImages) {
         if (!aiImagePaths.has(img.path)) {
             files.push({ path: img.path, content: img.content });
+            deployedImagePaths.add(img.path);
         }
     }
 
@@ -318,6 +322,7 @@ async function generateV2SiteFiles(
             collectUrl: process.env.NEXT_PUBLIC_APP_URL
                 ? `${process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, '')}/api/collect`
                 : undefined,
+            niche: niche !== 'general' ? niche : undefined,
         };
 
         const blocks = (pageDef.blocks || []) as BlockEnvelope[];
@@ -361,12 +366,12 @@ async function generateV2SiteFiles(
     // Static files (same as v1)
     files.push(
         { path: '404.html', content: generateV2ErrorPage(siteTitle, themeName, skinName) },
-        { path: 'robots.txt', content: `User-agent: *\nAllow: /\nSitemap: https://${domain.domain}/sitemap.xml` },
+        { path: 'robots.txt', content: generateV2RobotsTxt(domain.domain, pageDefs) },
         { path: 'favicon.svg', content: generateFavicon({ domain: domain.domain, skin: skinName, niche }) },
         { path: '_headers', content: generateHeaders() },
         {
             path: 'sitemap.xml',
-            content: generateV2Sitemap(domain.domain, pageDefs, trustPageSlugs),
+            content: generateV2Sitemap(domain.domain, pageDefs, trustPageSlugs, deployedImagePaths),
         },
     );
 
@@ -374,34 +379,6 @@ async function generateV2SiteFiles(
     applyInternalLinking(files, pageList, domain.domain);
 
     return files;
-}
-
-/** Generate niche-aware SVG favicon */
-function generateNicheFavicon(niche: string): string {
-    const nicheEmojis: Record<string, string> = {
-        health: '\u2695\uFE0F',
-        medical: '\u2695\uFE0F',
-        finance: '\uD83D\uDCB0',
-        insurance: '\uD83D\uDEE1\uFE0F',
-        home: '\uD83C\uDFE0',
-        real_estate: '\uD83C\uDFE0',
-        technology: '\uD83D\uDCBB',
-        tech: '\uD83D\uDCBB',
-        education: '\uD83C\uDF93',
-        travel: '\u2708\uFE0F',
-        food: '\uD83C\uDF7D\uFE0F',
-        fitness: '\uD83C\uDFCB\uFE0F',
-        pets: '\uD83D\uDC3E',
-        automotive: '\uD83D\uDE97',
-        legal: '\u2696\uFE0F',
-        beauty: '\u2728',
-        gaming: '\uD83C\uDFAE',
-        sports: '\u26BD',
-        gardening: '\uD83C\uDF31',
-        diy: '\uD83D\uDD27',
-    };
-    const emoji = nicheEmojis[niche.toLowerCase()] || '\uD83C\uDF10';
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${emoji}</text></svg>`;
 }
 
 /** Simple 404 page for v2 block-based sites */
@@ -687,6 +664,42 @@ function generate404Page(pageShell: PageShell): string {
   </section>`, pageShell, '<meta name="robots" content="noindex">');
 }
 
+/** Generate robots.txt for v1 sites */
+function generateRobotsTxt(domain: string): string {
+    return [
+        'User-agent: *',
+        'Allow: /',
+        'Disallow: /contact',
+        '',
+        `Sitemap: https://${domain}/sitemap.xml`,
+        `Host: https://${domain}`,
+    ].join('\n');
+}
+
+/** Generate robots.txt for v2 block-based sites with per-route awareness */
+function generateV2RobotsTxt(domain: string, pageDefs: PageDefinitionRow[]): string {
+    const lines: string[] = [
+        'User-agent: *',
+        'Allow: /',
+    ];
+
+    // Explicitly allow all content page routes
+    for (const pd of pageDefs) {
+        if (pd.route !== '/') {
+            lines.push(`Allow: ${pd.route}`);
+        }
+    }
+
+    // Disallow thin/no-ranking-value pages
+    lines.push('Disallow: /contact');
+
+    lines.push('');
+    lines.push(`Sitemap: https://${domain}/sitemap.xml`);
+    lines.push(`Host: https://${domain}`);
+
+    return lines.join('\n');
+}
+
 function generateHeaders(): string {
     return `/*
   X-Content-Type-Options: nosniff
@@ -714,8 +727,24 @@ function generateHeaders(): string {
 `;
 }
 
+/** Escape special XML characters for sitemap content */
+function escapeXml(str: string): string {
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
+}
+
+/** Resolve the actual deployed extension for an image path (.png if AI-generated, else .svg) */
+function resolveImageExt(basePath: string, deployedPaths: Set<string>): string {
+    const pngPath = basePath.replace(/\.svg$/, '.png');
+    return deployedPaths.has(pngPath) ? pngPath : basePath;
+}
+
 /** Generate sitemap for v2 block-based sites using actual page definition routes */
-function generateV2Sitemap(domain: string, pageDefs: PageDefinitionRow[], trustPageSlugs: string[] = []): string {
+function generateV2Sitemap(domain: string, pageDefs: PageDefinitionRow[], trustPageSlugs: string[] = [], deployedImagePaths: Set<string> = new Set()): string {
     const now = new Date().toISOString().split('T')[0];
 
     function routePriority(route: string): string {
@@ -737,8 +766,22 @@ function generateV2Sitemap(domain: string, pageDefs: PageDefinitionRow[], trustP
         const loc = route ? `https://${domain}/${route}` : `https://${domain}/`;
         const lastmod = pd.updatedAt ? new Date(pd.updatedAt).toISOString().split('T')[0] : now;
         const slug = pd.route === '/' ? 'home' : pd.route.replace(/^\//, '').replace(/\/$/, '').replace(/\//g, '-');
-        const ogImage = `https://${domain}/images/og/${slug}.svg`;
-        return `<url><loc>${loc}</loc><lastmod>${lastmod}</lastmod><changefreq>${routeChangeFreq(pd.route)}</changefreq><priority>${routePriority(pd.route)}</priority><image:image><image:loc>${ogImage}</image:loc></image:image></url>`;
+        const pageTitle = escapeXml(pd.title || slug.replace(/-/g, ' '));
+        const pageDesc = escapeXml(pd.metaDescription || '');
+        const ogPath = resolveImageExt(`images/og/${slug}.svg`, deployedImagePaths);
+        const ogImage = `https://${domain}/${ogPath}`;
+
+        const images: string[] = [];
+        // OG image with title and caption
+        images.push(`<image:image><image:loc>${ogImage}</image:loc><image:title>${pageTitle}</image:title>${pageDesc ? `<image:caption>${pageDesc}</image:caption>` : ''}</image:image>`);
+        // Featured image for non-homepage pages
+        if (pd.route !== '/') {
+            const featPath = resolveImageExt(`images/featured/${slug}.svg`, deployedImagePaths);
+            const featuredImage = `https://${domain}/${featPath}`;
+            images.push(`<image:image><image:loc>${featuredImage}</image:loc><image:title>${pageTitle}</image:title></image:image>`);
+        }
+
+        return `<url><loc>${loc}</loc><lastmod>${lastmod}</lastmod><changefreq>${routeChangeFreq(pd.route)}</changefreq><priority>${routePriority(pd.route)}</priority>${images.join('')}</url>`;
     });
     for (const slug of trustPageSlugs) {
         urls.push(`<url><loc>https://${domain}/${slug}</loc><lastmod>${now}</lastmod><changefreq>yearly</changefreq><priority>0.4</priority></url>`);

@@ -34,33 +34,34 @@ export const PROMPTS = {
   /**
    * Deep Research Prompt (for Online Models)
    */
-  research: (keyword: string, domainName: string) => `
-You are an elite investigative researcher. Your goal is to find specific, high-value data points that generic AI would miss.
-Use your online capabilities to find RECENT (last 12 months preferred) and ACCURATE information.
+  research: (keyword: string, _domainName: string) => `
+You are a research assistant gathering factual data about a topic. Find specific, verifiable data points from authoritative sources.
 
-TOPIC: ${keyword}
-CONTEXT: A high-quality authority site (${domainName})
+RESEARCH TOPIC: ${keyword}
 
-RESEARCH REQUIREMENTS:
-1. STATISTICS: Find 3-5 concrete numbers/stats with dates and sources. NOT "many people say," but "BLS.gov reports median cost of $X in 2025." PRIORITIZE .gov and .edu sources: CDC, BLS, IRS, HUD, CFPB, FDA, NIH, university studies. Then use established industry sources (Bankrate, NerdWallet, KFF, Realtor.com).
-2. LATEST NEWS: What happened in this niche in the last 6 months? New laws? New product releases? Scandals?
-3. EXPERT QUOTES: Find 2 quotes from industry leaders or verified reviews.
-4. UNCOMMON ANGLES: What is everyone else missing? What's the "secret" or counter-intuitive truth?
-5. CITABLE SOURCES: For every statistic, include the FULL URL where this data can be verified. Use specific page URLs, not just domain homepages.
+Find the following:
 
-Respond with a JSON object ONLY:
+1. STATISTICS: 3-5 concrete numbers with dates and sources. Prioritize government (.gov) and academic (.edu) sources: BLS, CDC, IRS, HUD, CFPB, FDA, NIH, Federal Reserve. Then established sources like Bankrate, NerdWallet, KFF, Realtor.com. Every stat needs a source name and date.
+
+2. RECENT DEVELOPMENTS: What changed in the last 6-12 months? New laws, regulations, product launches, price changes, study results.
+
+3. EXPERT PERSPECTIVES: 2 direct quotes from named professionals, researchers, or industry figures with their title and the publication where the quote appeared.
+
+4. UNDER-REPORTED FACTS: What do most articles about this topic get wrong or leave out? What's the counter-intuitive finding?
+
+Return a JSON object with this exact structure (no other text):
 {
   "statistics": [
-    { "stat": "43% of users prefer X", "source": "Bureau of Labor Statistics", "date": "2025-03-01", "url": "https://bls.gov/specific/page" }
+    { "stat": "The median cost is $X", "source": "Bureau of Labor Statistics", "date": "2025-06", "url": "https://bls.gov/specific-page" }
   ],
   "quotes": [
-    { "quote": "The biggest mistake is...", "author": "John Doe, CEO of X", "source": "TechCrunch Interview" }
+    { "quote": "Direct quote here", "author": "Jane Smith, Director of Research at XYZ Institute", "source": "Publication Name, Month Year" }
   ],
   "competitorHooks": [
-    "Most guides fail to mention [Specific Detail]"
+    "Specific under-reported fact or angle"
   ],
   "recentDevelopments": [
-    "New regulation passed in Q3 2025 affecting..."
+    "In Q3 2025, the Federal Reserve reported that..."
   ]
 }
 `,
@@ -97,57 +98,53 @@ Return as JSON:
    * Standard Article Generator with Anti-AI Rules
    */
   article: (outline: object, keyword: string, domainName: string, researchData: Record<string, unknown> | null | undefined, voiceSeed?: VoiceSeed) => `
-You are a veteran freelance writer who has written for major publications. You write the way real humans write: imperfectly, with personality, with occasional tangents that add color.
+You are a freelance writer with 15 years of experience and strong opinions. You've been burned by bad advice in this space and you want to save people from the same mistakes. You write like someone who actually cares, not like a content mill.
 
-ABSOLUTE RULE: NEVER use em dashes, en dashes, or any long dash character in the output. Use commas, colons, parentheses, or periods instead. This is non-negotiable.
+ABSOLUTE RULE: NEVER use em dashes or en dashes. Use commas, colons, parentheses, or periods instead.
 
-CRITICAL WRITING RULES (VIOLATION OF ANY MARKS THE CONTENT AS AI):
+=== BEATING AI DETECTION (YOUR TOP PRIORITY) ===
 
-SENTENCE STRUCTURE:
-- Vary sentence length dramatically. Follow a 22-word sentence with a 4-word one. Then a 15. Then 8. Then 31. AI writes in a metronomic 12-18 word range. Humans don't.
-- Start sentences with "And" or "But" occasionally. Start one with "Look," or "Here's the thing" per article.
-- Use fragments strategically. Not often. Just enough.
-- Never use three parallel structures in a row. AI loves triads. "It's fast, efficient, and reliable." Humans don't naturally write in threes.
-- Avoid starting more than 2 sentences in any paragraph with the same word.
+GPTZero flags AI writing for these specific patterns. You MUST avoid ALL of them:
 
-WORD CHOICE:
-- Never use: "delve," "landscape," "leverage," "navigate," "robust," "streamline," "utilize," "facilitate," "comprehensive," "moreover," "furthermore," "in terms of," "it's important to note," "it's worth noting," "key takeaways," "at the end of the day," "game-changer," "paradigm."
-- Use contractions naturally. "Don't" not "do not." "It's" not "it is." Except occasionally for emphasis where the formal version hits harder.
-- Use slightly imprecise language where a human would. "About $500" not "approximately $500." "A few weeks" not "several weeks." "Most people" not "the majority of individuals."
-- Include 1-2 mildly colloquial phrases per article. "Not gonna lie," "kind of a pain," "honestly," "the short answer is."
-- Refer to yourself with "I" naturally. "I've seen this happen." "When I looked into this." Not constantly, but enough to feel authored.
+1. RIGID GUIDANCE — Don't just give advice. Question the advice. "The conventional wisdom says X, but I've seen enough cases where that falls apart." Include moments of genuine uncertainty. "I'm honestly not sure this works for everyone."
 
-STRUCTURE:
-- Do NOT use a predictable H2 > paragraph > H2 > paragraph cadence. Mix it up. Some sections get two paragraphs. Some get a brief one-liner before diving in. 
-- Not every section needs a header. Sometimes you just... keep talking.
-- Vary paragraph length. One paragraph might be 6 sentences. The next might be 2. The one after that, 4.
-- Include at least one aside or parenthetical per article (like this one, humans do this constantly, AI rarely does).
-- Do NOT include a "conclusion" or "final thoughts" section with a neat bow. End on a specific actionable point or a slightly informal signoff.
-- Never start the article with a question. AI does this constantly. Start with a statement, a fact, a personal observation, or an anecdote.
-- Never start the article with "If you're looking for..." or "When it comes to..." or "In today's..."
+2. COMPLEXITY — Don't write linearly. Nest ideas inside other ideas. Start explaining one thing, digress into a related story or counterpoint, then come back. Human brains don't process topics in a straight line and neither should your writing. A section about costs should mention an emotional factor. A section about timelines should acknowledge the thing nobody wants to talk about.
 
-FACTUAL INTEGRATION (CRITICAL):
-- Use the provided RESEARCH DATA below. AI hallucinates; you verify.
-- If stats/quotes are provided, WEAVE THEM IN NATURALLY. Don't dump them. "A 2024 study showed X" is better than "According to statistics..."
-- Maintain the persona while being factual.
-- Mention real brands, real prices, real examples from the research.
+3. CREATIVITY — Use at least 2 unexpected metaphors or analogies per article. Not cliché ones. "Refinancing is like defragging your financial hard drive" not "refinancing is like getting a fresh start." Reference something from pop culture, history, or an unrelated field that illuminates the point.
 
-TONE:
-- Write as if explaining to a smart friend. Not dumbing down. Not lecturing. Just talking through it.
-- Have a mild opinion. Take a small stance. "Honestly, I think most people overthink this" or "This one surprised me." AI is relentlessly neutral. Humans aren't.
-- Don't over-qualify everything. Not every claim needs "however" or "that said." Sometimes the answer is just the answer.
+4. TRANSITIONS — NEVER use: "Additionally," "Furthermore," "Moreover," "It's worth noting," "That said," "However," "In addition," "On the other hand." Instead: jump cut between ideas. Use a one-word sentence. Circle back to something you said three paragraphs ago. Start a paragraph with "So" or "Anyway" or "The weird part is." Humans don't signpost every transition.
+
+5. MECHANICAL PRECISION — Be deliberately imprecise sometimes. "Somewhere around $3,000, give or take" not "$3,000." Use hedging that sounds human: "I think," "from what I've seen," "if memory serves." Throw in a "look" or "here's what bugs me about this."
+
+6. CREATIVE GRAMMAR — Use at least 3 sentence fragments per article. Use one run-on sentence where the thought just keeps going because that's how people actually think when they're trying to work through a complicated idea and don't want to lose the thread. Start 2-3 sentences with "And" or "But." End a sentence with a preposition if it sounds more natural.
+
+7. DEPTH OVER BREADTH — Don't cover every subtopic at the same shallow depth. Go deep on 2-3 points (4+ sentences each) and skim over others. Humans have favorites. Show yours.
+
+=== WORD BANS ===
+Never use: "delve," "landscape," "leverage," "navigate," "robust," "streamline," "utilize," "facilitate," "comprehensive," "paradigm," "game-changer," "crucial," "pivotal," "realm," "tapestry," "multifaceted," "holistic," "synergy," "foster," "encompasses," "underscores."
+
+=== STRUCTURE ===
+- Start with a statement, observation, or brief anecdote. Never a question. Never "If you're looking for..." or "In today's..."
+- Vary paragraph length wildly. 1 sentence. Then 6. Then 3. Then 1 again.
+- Some sections get no header. Just flow into the next thought.
+- No "Conclusion" or "Final Thoughts" section. End mid-thought, on an actionable point, or with a wry observation.
+- Use "I" naturally. You have experience. Show it.
+- Include 2-3 parenthetical asides (these feel very human and AI almost never does them).
+
+=== FACTS ===
+- Cite the research data below by weaving it into sentences. "The Fed reported $1.1 trillion in credit card debt last quarter" not "According to recent statistics..."
+- Use real brands, real prices, real names from the data.
 
 ${getVoicePersonaInstructions(voiceSeed)}
 
-INPUT DATA:
-Keyword: ${keyword}
-Domain: ${domainName}
-Outline: ${JSON.stringify(outline)}
+ARTICLE TOPIC: ${keyword}
+ARTICLE OUTLINE:
+${JSON.stringify(outline)}
 
-RESEARCH DATA (Use these facts):
+VERIFIED FACTS AND DATA:
 ${JSON.stringify(researchData || {})}
 
-Write the complete article in Markdown.
+Write the complete article in Markdown. No preamble. No meta-commentary. Just the article.
 `,
 
   /**
@@ -184,7 +181,7 @@ COMPARISON STRUCTURE:
 
 INPUT DATA:
 Keyword: ${keyword}
-Domain: ${domainName}
+Topic context: ${domainName.replace(/\.[a-z]+$/i, '').replace(/[-_]/g, ' ')}
 Outline: ${JSON.stringify(outline)}
 
 RESEARCH DATA (Use for specs/pricing):
@@ -277,7 +274,7 @@ STRUCTURE:
 
 INPUT DATA:
 Keyword: ${keyword}
-Domain: ${domainName}
+Topic context: ${domainName.replace(/\.[a-z]+$/i, '').replace(/[-_]/g, ' ')}
 Outline: ${JSON.stringify(outline)}
 
 RESEARCH DATA (Use these Real Costs):
@@ -313,7 +310,7 @@ STRUCTURE:
 
 INPUT DATA:
 Keyword: ${keyword}
-Domain: ${domainName}
+Topic context: ${domainName.replace(/\.[a-z]+$/i, '').replace(/[-_]/g, ' ')}
 Outline: ${JSON.stringify(outline)}
 
 RESEARCH DATA (Use for context/stats):
@@ -354,7 +351,7 @@ STRUCTURE:
 
 INPUT DATA:
 Keyword: ${keyword}
-Domain: ${domainName}
+Topic context: ${domainName.replace(/\.[a-z]+$/i, '').replace(/[-_]/g, ' ')}
 Outline: ${JSON.stringify(outline)}
 
 RESEARCH DATA (Use these Studies/Stats):
@@ -369,33 +366,36 @@ Write the complete article in Markdown.
    * Standard Utility Prompts (Humanize, SEO, Meta)
    */
   humanize: (draft: string, voiceSeed?: VoiceSeed) => `
-You are an expert editor who makes AI-generated content sound more natural and human.
-Review and refine this article to make it sound like it was written by a knowledgeable human expert${voiceSeed ? `, specifically adopting the persona of "${voiceSeed.name}"` : ''}.
+You are a ruthless editor whose job is to make this article UNDETECTABLE by AI detection tools like GPTZero, Originality.ai, and ZeroGPT.
+
+The article below was flagged for these specific AI patterns. Fix ALL of them:
+
+FLAGGED PATTERNS TO ELIMINATE:
+1. FORMULAIC TRANSITIONS — Find every "Additionally," "Furthermore," "Moreover," "However," "That said," "It's worth noting" and REPLACE with human transitions: abrupt topic changes, callbacks to earlier points, "So here's where it gets interesting," or just... nothing. Jump cut.
+2. MECHANICAL PRECISION — Find overly precise language and make it messy. "$4,500" → "somewhere around four and a half grand." "approximately 3 weeks" → "a few weeks, maybe three."
+3. UNIFORM PARAGRAPH LENGTH — Break up any section where 3+ paragraphs are roughly the same length. Add a one-sentence paragraph. Merge two short ones into a rambling one.
+4. MISSING PERSONALITY — Add at least 3 first-person interjections: "I've seen this backfire," "this is the part nobody tells you," "honestly, I was skeptical about this too."
+5. PARALLEL STRUCTURE — Find any list or series of 3 parallel items ("X is fast, reliable, and affordable") and break the pattern. Make the third item longer, or rephrase as a sentence.
+6. PREDICTABLE CADENCE — Read each section aloud mentally. If it has a rhythm (statement, evidence, conclusion, statement, evidence, conclusion), disrupt it. Add a tangent. Drop the conclusion. Start the next section mid-thought.
+7. LACK OF CREATIVE GRAMMAR — Add 3+ sentence fragments. One run-on. Two sentences starting with "And" or "But." One sentence ending with a preposition.
+8. MISSING DEPTH — Find the shallowest section and add 2-3 sentences that go deeper: a personal anecdote, a counterargument, an unexpected comparison.
 
 ${voiceSeed ? `
-CRITICAL PERSONA RETENTION:
-You must RETAIN the following specific traits. Do not sanitize them.
+PERSONA TO AMPLIFY (make these traits MORE visible, not less):
 - Writing Quirk: ${voiceSeed.quirk}
-- Key Phrase: "${voiceSeed.petPhrase}"
-- Tone Dial: ${voiceSeed.toneDial}/10 (Maintain this level of informality)
-- Tangents: Keep the ${voiceSeed.tangents} style deviations.
+- Catchphrase: "${voiceSeed.petPhrase}" (use it at least once)
+- Tone: ${voiceSeed.toneDial}/10 informality
+- Tangent style: ${voiceSeed.tangents} (ADD one tangent if none exist)
 ` : ''}
 
-DRAFT CONTENT:
+RULES:
+- Never use em dashes. Commas, parentheses, or colons only.
+- Keep ALL factual content and data intact. Don't remove stats or citations.
+- Keep the H2/H3 heading structure.
+- The output must be the full article in Markdown.
+
+DRAFT TO REWRITE:
 ${draft}
-
-REFINEMENT TASKS:
-1. Vary sentence structure and length naturally
-2. Add personality through word choice (without being unprofessional)
-3. Include subtle imperfections that humans would write (parenthetical asides, rhetorical questions)
-4. Replace any remaining robotic phrases
-5. Ensure the article flows naturally when read aloud
-6. Add authentic-sounding personal touches or opinions where appropriate
-7. Make sure transitions between sections feel natural
-8. Never use the em dash character. Replace em dashes with commas, parentheses, or colons.
-
-Keep all the factual content, structure, and SEO elements intact.
-Return the refined article in Markdown format.
 `,
 
   seoOptimize: (article: string, keyword: string, secondaryKeywords: string[], availableLinks: Array<{ title: string; url: string }> = []) => `

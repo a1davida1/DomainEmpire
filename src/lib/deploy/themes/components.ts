@@ -47,7 +47,8 @@ export const componentStyles = `
 .calc-range::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:50%;background:var(--color-accent);cursor:pointer;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.15)}
 
 /* Results panel */
-.calc-results-heading{font-size:1rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--color-text-muted);margin-bottom:1rem}
+.calc-results{background:var(--color-bg-surface);border:var(--border-width,1px) solid var(--color-border);border-radius:var(--radius-lg);padding:1.5rem;position:sticky;top:5rem}
+.calc-results-heading{font-size:0.85rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--color-text-muted);margin-bottom:1rem}
 
 /* Result cards — BusyBusy style with colored left border */
 .calc-result-card{
@@ -72,6 +73,21 @@ export const componentStyles = `
 .calc-methodology{margin-top:1.5rem;border:var(--border-width) solid var(--color-border);border-radius:var(--radius-md);overflow:hidden}
 .calc-methodology summary{padding:0.75rem 1rem;cursor:pointer;font-weight:600;background:var(--color-bg-surface);font-size:0.9rem}
 .calc-methodology ul,.calc-methodology p{padding:1rem;font-size:0.9rem;color:var(--color-text-muted)}
+
+/* Calculator download gate — email capture for results */
+.calc-download-gate{margin-top:1.5rem;padding:1.25rem;border:2px solid var(--color-accent);border-radius:var(--radius-lg);background:color-mix(in srgb,var(--color-accent) 5%,var(--color-bg))}
+.calc-download-cta{display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem}
+.calc-download-icon{font-size:1.5rem}
+.calc-download-cta strong{display:block;font-size:1rem;color:var(--color-text)}
+.calc-download-cta p{font-size:0.85rem;color:var(--color-text-muted);margin:0.15rem 0 0}
+.calc-gate-form{display:flex;gap:0.5rem}
+.calc-gate-email{flex:1;padding:0.6rem 0.75rem;border:var(--border-width) solid var(--color-border);border-radius:var(--radius-md);font-size:0.9rem;background:var(--color-bg);color:var(--color-text)}
+.calc-gate-email:focus{border-color:var(--color-accent);outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--color-accent) 15%,transparent)}
+.calc-gate-btn{padding:0.6rem 1.25rem;background:var(--color-accent);color:#fff;border:none;border-radius:var(--radius-md);font-weight:600;font-size:0.9rem;cursor:pointer;white-space:nowrap;transition:background .15s}
+.calc-gate-btn:hover{background:var(--color-accent-hover,var(--color-accent))}
+.calc-gate-success{padding:0.75rem;text-align:center;font-weight:600;color:var(--color-success)}
+.calc-gate-error{padding:0.75rem;text-align:center;font-weight:600;color:var(--color-danger,#c0392b)}
+@media(max-width:600px){.calc-gate-form{flex-direction:column}.calc-gate-btn{width:100%}}
 
 /* Amortization schedule table — BusyBusy style */
 .amort-section{margin-top:3rem}

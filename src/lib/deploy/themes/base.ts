@@ -54,8 +54,17 @@ article a:hover{text-decoration-color:var(--color-link,#2563eb)}
 /* Container */
 .site-container{max-width:var(--container-max,1100px);margin:0 auto;padding:0 2rem}
 
-/* Main content area — generous breathing room */
-main{padding:var(--sp-4,2rem) 0;min-height:60vh}
+/* Main content area */
+main{padding:var(--sp-5,2.5rem) 0;min-height:60vh}
+
+/* Selection color */
+::selection{background:color-mix(in srgb,var(--color-accent) 20%,transparent)}
+
+/* Smooth focus rings */
+:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;border-radius:var(--radius-sm)}
+
+/* Better image rendering */
+img{image-rendering:auto;-webkit-font-smoothing:antialiased}
 
 /* Images */
 img{max-width:100%;height:auto;display:block}

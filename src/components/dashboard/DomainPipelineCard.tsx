@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Sparkles, Rocket, Zap, CheckCircle2, CircleDashed, Play } from 'lucide-react';
+import { Loader2, Sparkles, Rocket, Zap, CheckCircle2, CircleDashed, Play, FileSearch } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
 
@@ -20,6 +20,9 @@ interface PipelineState {
     isDeployed: boolean;
     pendingJobs: number;
     processingJobs: number;
+    reviewScore?: number | null;
+    reviewVerdict?: 'approve' | 'needs_work' | 'reject' | null;
+    criticalIssues?: string[] | null;
 }
 
 const STAGES = [
@@ -57,8 +60,17 @@ export function DomainPipelineCard({ state }: { state: PipelineState }) {
     const [seeding, setSeeding] = useState(false);
     const [deploying, setDeploying] = useState(false);
     const [processing, setProcessing] = useState(false);
+    const [reviewing, setReviewing] = useState(false);
 
     const hasActiveWork = state.pendingJobs > 0 || state.processingJobs > 0;
+    const criticalCount = Array.isArray(state.criticalIssues) ? state.criticalIssues.length : 0;
+
+    function reviewBadgeClass(): string {
+        if (state.reviewVerdict === 'approve') return 'border-emerald-200 text-emerald-700';
+        if (state.reviewVerdict === 'needs_work') return 'border-amber-200 text-amber-800';
+        if (state.reviewVerdict === 'reject') return 'border-red-200 text-red-700';
+        return 'border-muted text-muted-foreground';
+    }
 
     async function handleClassify() {
         setClassifying(true);
@@ -120,6 +132,32 @@ export function DomainPipelineCard({ state }: { state: PipelineState }) {
             toast.error(err instanceof Error ? err.message : 'Deploy failed');
         } finally {
             setDeploying(false);
+        }
+    }
+
+    async function handleReviewSite() {
+        setReviewing(true);
+        try {
+            const idempotencyKey = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+                ? crypto.randomUUID()
+                : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+            const res = await fetch(`/api/domains/${state.domainId}/review`, {
+                method: 'POST',
+                headers: { 'Idempotency-Key': idempotencyKey },
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                throw new Error((data as { error?: string }).error || 'Site review failed');
+            }
+
+            const score = (data as { report?: { overallScore?: number } }).report?.overallScore;
+            toast.success(`Site reviewed${typeof score === 'number' ? `: ${Math.round(score)}` : ''}`);
+            router.refresh();
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : 'Site review failed');
+        } finally {
+            setReviewing(false);
         }
     }
 
@@ -188,6 +226,14 @@ export function DomainPipelineCard({ state }: { state: PipelineState }) {
                     {state.isClassified && (
                         <Badge variant="outline" className="border-emerald-200 text-emerald-700">
                             {state.niche}
+                        </Badge>
+                    )}
+                    <Badge variant="outline" className={reviewBadgeClass()}>
+                        {state.reviewScore != null ? `Review ${state.reviewScore}` : 'Not reviewed'}
+                    </Badge>
+                    {criticalCount > 0 && (
+                        <Badge variant="outline" className="border-red-200 text-red-700">
+                            {criticalCount} critical
                         </Badge>
                     )}
                     {state.keywordCount > 0 && (
@@ -265,6 +311,18 @@ export function DomainPipelineCard({ state }: { state: PipelineState }) {
                             </TooltipContent>
                         </Tooltip>
                     )}
+
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button onClick={handleReviewSite} disabled={reviewing || !state.isClassified} size="sm" variant="outline">
+                                {reviewing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSearch className="mr-2 h-4 w-4" />}
+                                Review Site
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="max-w-xs">
+                            Runs an AI QA review of the homepage, a tool page, and a guide page. Stores the score + critical issues on the domain.
+                        </TooltipContent>
+                    </Tooltip>
 
                     {hasActiveWork && (
                         <Tooltip>

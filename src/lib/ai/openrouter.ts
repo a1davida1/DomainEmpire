@@ -14,14 +14,14 @@ function envModel(key: string, fallback: string): string {
     return trimmed.length > 0 ? trimmed : fallback;
 }
 
-const FAST_MODEL = envModel('OPENROUTER_MODEL_FAST', 'openrouter/auto');
-const SEO_MODEL = envModel('OPENROUTER_MODEL_SEO', 'openrouter/auto');
-const QUALITY_MODEL = envModel('OPENROUTER_MODEL_QUALITY', 'openrouter/auto');
-const REVIEW_MODEL = envModel('OPENROUTER_MODEL_REVIEW', 'anthropic/claude-opus-4.1');
-const RESEARCH_MODEL = envModel('OPENROUTER_MODEL_RESEARCH', 'openrouter/auto');
+const FAST_MODEL = envModel('OPENROUTER_MODEL_FAST', 'x-ai/grok-4-1-fast');
+const SEO_MODEL = envModel('OPENROUTER_MODEL_SEO', 'x-ai/grok-4-1-fast');
+const QUALITY_MODEL = envModel('OPENROUTER_MODEL_QUALITY', 'anthropic/claude-sonnet-4-5-20250929');
+const REVIEW_MODEL = envModel('OPENROUTER_MODEL_REVIEW', 'anthropic/claude-opus-4-6');
+const RESEARCH_MODEL = envModel('OPENROUTER_MODEL_RESEARCH', 'x-ai/grok-4-1-fast');
 const VISION_MODEL = envModel('OPENROUTER_MODEL_VISION', 'google/gemini-2.0-flash-001');
-const IMAGE_GEN_FAST_MODEL = envModel('OPENROUTER_MODEL_IMAGE_GEN_FAST', 'google/gemini-2.0-flash-exp:free');
-const IMAGE_GEN_QUALITY_MODEL = envModel('OPENROUTER_MODEL_IMAGE_GEN_QUALITY', 'google/gemini-2.5-pro-preview');
+const IMAGE_GEN_FAST_MODEL = envModel('OPENROUTER_MODEL_IMAGE_GEN_FAST', 'google/gemini-2.5-flash-image');
+const IMAGE_GEN_QUALITY_MODEL = envModel('OPENROUTER_MODEL_IMAGE_GEN_QUALITY', 'google/gemini-2.5-flash-image');
 const EMERGENCY_FALLBACK_MODEL = envModel('OPENROUTER_MODEL_FALLBACK', 'openrouter/auto');
 
 export const MODEL_CONFIG = {
@@ -78,7 +78,7 @@ const MODEL_ROUTING_REGISTRY: Record<AIModelTask, RoutingProfile> = {
     bulkOperations: { fallbackTasks: ['keywordResearch', 'seoOptimize'], promptVersion: 'bulk.v1' },
     voiceSeedGeneration: { fallbackTasks: ['draftGeneration', 'seoOptimize'], promptVersion: 'voice-seed.v1' },
     aiReview: { fallbackTasks: ['humanization', 'seoOptimize'], promptVersion: 'ai-review.v1' },
-    research: { fallbackTasks: ['seoOptimize'], promptVersion: 'research.v1' },
+    research: { fallbackTasks: ['draftGeneration', 'seoOptimize'], promptVersion: 'research.v1' },
     blockContent: { fallbackTasks: ['draftGeneration', 'humanization'], promptVersion: 'block-content.v1' },
     vision: { fallbackTasks: [], promptVersion: 'vision.v1' },
     imageGenFast: { fallbackTasks: ['imageGenQuality'], promptVersion: 'image-gen.v1' },
@@ -87,10 +87,14 @@ const MODEL_ROUTING_REGISTRY: Record<AIModelTask, RoutingProfile> = {
 
 // Pricing per 1K tokens (approximate, check OpenRouter for current)
 const MODEL_PRICING: Record<string, { input: number; output: number; perRequestFee?: number }> = {
+    'anthropic/claude-opus-4-6': { input: 0.015, output: 0.075 },
+    'x-ai/grok-4-1-fast': { input: 0.003, output: 0.015 },
     'x-ai/grok-3-fast': { input: 0.005, output: 0.025 },
     'anthropic/claude-sonnet-4-5-20250929': { input: 0.003, output: 0.015 },
     'anthropic/claude-3-5-haiku-20241022': { input: 0.0008, output: 0.004 },
+    'perplexity/sonar-pro': { input: 0.003, output: 0.015, perRequestFee: 0.005 },
     'perplexity/sonar-reasoning': { input: 0.001, output: 0.005, perRequestFee: 0.01 },
+    'google/gemini-2.5-flash-image': { input: 0.0001, output: 0.0004 },
     'google/gemini-2.0-flash-001': { input: 0.0001, output: 0.0004 },
     'google/gemini-2.0-flash-exp:free': { input: 0, output: 0 },
     'google/gemini-2.5-pro-preview': { input: 0.00125, output: 0.01 },
@@ -189,6 +193,21 @@ class OpenRouterHttpError extends Error {
         this.status = status;
     }
 }
+
+/** Thrown when a model returns HTTP 200 but the content is a refusal. Not retryable. */
+class ModelRefusalError extends Error {
+    constructor(model: string, snippet: string) {
+        super(`Model ${model} refused the request: ${snippet}`);
+        this.name = 'ModelRefusalError';
+    }
+}
+
+const REFUSAL_PATTERNS = [
+    'I appreciate you', 'I need to clarify', 'I cannot fulfill',
+    'falls outside my', 'I\'m Perplexity', 'I can\'t generate',
+    'contradicts my commitment', 'outside my core function',
+    'I\'m unable to', 'I must decline',
+];
 
 export class OpenRouterClient {
     private static readonly FETCH_TIMEOUT_MS = 120_000;
@@ -302,6 +321,15 @@ export class OpenRouterClient {
                         const data: OpenRouterResponse = await response.json();
                         const durationMs = Date.now() - startTime;
                         const resolvedModel = data.model || model;
+                        const content = data.choices[0]?.message?.content || '';
+
+                        // Detect refusals — models that return 200 but refuse the task.
+                        // Throws non-retryable error so generate() falls back to next model.
+                        const contentHead = content.slice(0, 300);
+                        if (REFUSAL_PATTERNS.some(p => contentHead.includes(p))) {
+                            throw new ModelRefusalError(resolvedModel, content.slice(0, 200));
+                        }
+
                         const cost = this.calculateCost(
                             resolvedModel,
                             data.usage.prompt_tokens,
@@ -309,7 +337,7 @@ export class OpenRouterClient {
                         );
 
                         return {
-                            content: data.choices[0]?.message?.content || '',
+                            content,
                             model: resolvedModel,
                             inputTokens: data.usage.prompt_tokens,
                             outputTokens: data.usage.completion_tokens,
@@ -342,12 +370,16 @@ export class OpenRouterClient {
         });
 
         try {
-            // Try to extract JSON from the response
             let jsonStr = response.content.trim();
-
             // Remove markdown code blocks if present
             if (jsonStr.startsWith('```')) {
                 jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+            }
+
+            // Strip leading text before first brace
+            const firstBrace = jsonStr.indexOf('{');
+            if (firstBrace > 0 && firstBrace < 200) {
+                jsonStr = jsonStr.slice(firstBrace);
             }
 
             const data = JSON.parse(jsonStr) as T;
@@ -366,7 +398,7 @@ export class OpenRouterClient {
                 durationMs: response.durationMs,
             };
         } catch (parseError) {
-            throw new Error(`Failed to parse JSON response: ${parseError}. Raw content: ${response.content.slice(0, 500)}`);
+            throw new Error(`Failed to parse JSON response from ${response.resolvedModel}: ${parseError}. Raw content: ${response.content.slice(0, 500)}`);
         }
     }
 

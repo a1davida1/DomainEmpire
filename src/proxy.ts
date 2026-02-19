@@ -16,7 +16,7 @@ function isCsrfExempt(pathname: string): boolean {
     return CSRF_EXEMPT_PREFIXES.some(prefix => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
     const { pathname, method } = { pathname: request.nextUrl.pathname, method: request.method };
 
     // ── CSRF protection for mutating API requests ──
@@ -43,3 +43,4 @@ export const config = {
         '/api/:path*',
     ],
 };
+

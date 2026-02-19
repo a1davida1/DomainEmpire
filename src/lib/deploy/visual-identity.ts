@@ -6,7 +6,7 @@
  * domain name for deterministic, reproducible assignment.
  *
  * This ensures:
- * - Every domain gets a unique-looking site from 24 curated combos
+ * - Every domain gets a unique-looking site from 48 curated combos
  * - The assignment is stable (same domain always gets same combo)
  * - Anti-detection: no two nearby domains share the same fingerprint
  */
@@ -22,7 +22,7 @@ export interface VisualCombo {
 }
 
 /**
- * 24 hand-curated visual combos — each theme+skin+variant set is designed
+ * 48 hand-curated visual combos — each theme+skin+variant set is designed
  * to look cohesive and professional together.
  */
 export const VISUAL_COMBOS: VisualCombo[] = [
@@ -57,6 +57,38 @@ export const VISUAL_COMBOS: VisualCombo[] = [
     { theme: 'minimal', skin: 'midnight', heroVariant: 'gradient', headerVariant: 'minimal', footerVariant: 'multi-column' },
     { theme: 'minimal', skin: 'ember', heroVariant: 'glass', headerVariant: 'topbar', footerVariant: 'newsletter' },
     { theme: 'minimal', skin: 'coral', heroVariant: 'image', headerVariant: 'centered', footerVariant: 'legal' },
+
+    // Magazine theme — editorial luxury, Playfair Display + Source Serif 4
+    { theme: 'magazine', skin: 'slate', heroVariant: 'centered', headerVariant: 'centered', footerVariant: 'multi-column' },
+    { theme: 'magazine', skin: 'ocean', heroVariant: 'image', headerVariant: 'minimal', footerVariant: 'newsletter' },
+    { theme: 'magazine', skin: 'forest', heroVariant: 'minimal', headerVariant: 'centered', footerVariant: 'legal' },
+    { theme: 'magazine', skin: 'ember', heroVariant: 'split', headerVariant: 'topbar', footerVariant: 'minimal' },
+    { theme: 'magazine', skin: 'midnight', heroVariant: 'gradient', headerVariant: 'centered', footerVariant: 'multi-column' },
+    { theme: 'magazine', skin: 'coral', heroVariant: 'centered', headerVariant: 'minimal', footerVariant: 'newsletter' },
+
+    // Brutalist theme — anti-design, Space Mono + IBM Plex Sans
+    { theme: 'brutalist', skin: 'slate', heroVariant: 'minimal', headerVariant: 'topbar', footerVariant: 'minimal' },
+    { theme: 'brutalist', skin: 'ocean', heroVariant: 'centered', headerVariant: 'minimal', footerVariant: 'multi-column' },
+    { theme: 'brutalist', skin: 'forest', heroVariant: 'split', headerVariant: 'topbar', footerVariant: 'legal' },
+    { theme: 'brutalist', skin: 'ember', heroVariant: 'gradient', headerVariant: 'split', footerVariant: 'minimal' },
+    { theme: 'brutalist', skin: 'midnight', heroVariant: 'centered', headerVariant: 'topbar', footerVariant: 'multi-column' },
+    { theme: 'brutalist', skin: 'coral', heroVariant: 'split', headerVariant: 'minimal', footerVariant: 'legal' },
+
+    // Glass theme — modern SaaS, frosted glass, Inter
+    { theme: 'glass', skin: 'slate', heroVariant: 'glass', headerVariant: 'minimal', footerVariant: 'newsletter' },
+    { theme: 'glass', skin: 'ocean', heroVariant: 'gradient', headerVariant: 'topbar', footerVariant: 'multi-column' },
+    { theme: 'glass', skin: 'forest', heroVariant: 'glass', headerVariant: 'centered', footerVariant: 'minimal' },
+    { theme: 'glass', skin: 'ember', heroVariant: 'centered', headerVariant: 'minimal', footerVariant: 'legal' },
+    { theme: 'glass', skin: 'midnight', heroVariant: 'glass', headerVariant: 'topbar', footerVariant: 'multi-column' },
+    { theme: 'glass', skin: 'coral', heroVariant: 'gradient', headerVariant: 'centered', footerVariant: 'newsletter' },
+
+    // Retro theme — warm, playful, Quicksand + Nunito
+    { theme: 'retro', skin: 'slate', heroVariant: 'centered', headerVariant: 'split', footerVariant: 'multi-column' },
+    { theme: 'retro', skin: 'ocean', heroVariant: 'split', headerVariant: 'topbar', footerVariant: 'newsletter' },
+    { theme: 'retro', skin: 'forest', heroVariant: 'gradient', headerVariant: 'centered', footerVariant: 'legal' },
+    { theme: 'retro', skin: 'ember', heroVariant: 'image', headerVariant: 'split', footerVariant: 'minimal' },
+    { theme: 'retro', skin: 'midnight', heroVariant: 'glass', headerVariant: 'topbar', footerVariant: 'multi-column' },
+    { theme: 'retro', skin: 'coral', heroVariant: 'centered', headerVariant: 'centered', footerVariant: 'newsletter' },
 ];
 
 /**

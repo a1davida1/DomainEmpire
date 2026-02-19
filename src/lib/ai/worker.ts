@@ -3162,6 +3162,27 @@ async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> 
             }
             break;
         }
+        case 'campaign_launch_recovery': {
+            if (!isFeatureEnabled('growth_channels_v1')) {
+                await markJobComplete(job.id, 'Skipped: growth_channels_v1 disabled');
+                break;
+            }
+            try {
+                const {
+                    runCampaignLaunchReviewEscalationSweep,
+                } = await import('@/lib/review/campaign-launch-sla');
+                const swept = await runCampaignLaunchReviewEscalationSweep();
+                const {
+                    syncGrowthLaunchFreezeAuditState,
+                } = await import('@/lib/growth/launch-freeze');
+                await syncGrowthLaunchFreezeAuditState();
+                await markJobComplete(job.id, `Recovery sweep complete: ${JSON.stringify(swept)}`);
+            } catch (err) {
+                await markJobFailed(job.id, err instanceof Error ? err.message : String(err));
+            }
+            break;
+        }
+
         default:
             throw new Error(`Unknown job type: ${job.jobType}`);
     }

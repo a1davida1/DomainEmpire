@@ -97,6 +97,18 @@ export default function NewArticlePage() {
             }
 
             const newId = result.article?.id;
+
+            // Check worker health — warn if articles might sit in queue
+            try {
+                const healthRes = await apiFetch('/api/queue/health');
+                if (healthRes.ok) {
+                    const health = await healthRes.json();
+                    if (!health.worker?.running) {
+                        setError('Article created but the worker is not running. Click "Process Now" on the Queue page to start processing, or the article will be picked up when the dashboard reloads.');
+                    }
+                }
+            } catch { /* non-fatal */ }
+
             if (newId) {
                 router.push(`/dashboard/content/articles/${newId}`);
             } else {

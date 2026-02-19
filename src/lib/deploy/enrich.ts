@@ -48,7 +48,7 @@ const NICHE_CITATIONS: Record<string, Array<{ title: string; url: string; publis
     ],
 };
 
-function getCitations(niche: string): Array<{ title: string; url: string; publisher: string; retrievedAt: string; usage: string }> {
+export function getCitations(niche: string): Array<{ title: string; url: string; publisher: string; retrievedAt: string; usage: string }> {
     const lower = niche.toLowerCase();
     for (const [key, sources] of Object.entries(NICHE_CITATIONS)) {
         if (lower.includes(key) || key.includes(lower)) return sources;
@@ -77,6 +77,8 @@ async function aiCall(prompt: string): Promise<{ content: string; cost: number }
         const resp = await ai.generate('blockContent', prompt);
         return { content: resp.content, cost: resp.cost };
     } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error('[enrichDomain] AI call failed:', message);
         return null;
     }
 }
@@ -93,7 +95,18 @@ function parseJson(raw: string): Record<string, unknown> | null {
     }
 }
 
-export async function enrichDomain(domainId: string): Promise<EnrichResult> {
+export interface EnrichOptions {
+    /** Limit enrichment to specific routes (e.g. ["/", "/calculator"]). */
+    routes?: string[];
+    /** Regenerate Hero even if already present. */
+    forceHeroes?: boolean;
+    /** Regenerate FAQ even if already present. */
+    forceFaqs?: boolean;
+    /** Regenerate meta descriptions even if already present. */
+    forceMeta?: boolean;
+}
+
+export async function enrichDomain(domainId: string, options: EnrichOptions = {}): Promise<EnrichResult> {
     const [domain] = await db.select().from(domains).where(eq(domains.id, domainId)).limit(1);
     if (!domain) throw new Error('Domain not found');
 
@@ -109,9 +122,11 @@ export async function enrichDomain(domainId: string): Promise<EnrichResult> {
     };
 
     const skipRoutes = new Set(['/privacy-policy', '/privacy', '/terms', '/disclosure', '/medical-disclaimer', '/legal-disclaimer']);
+    const routeAllow = options.routes && options.routes.length > 0 ? new Set(options.routes) : null;
 
     for (const page of pages) {
         if (skipRoutes.has(page.route)) continue;
+        if (routeAllow && !routeAllow.has(page.route)) continue;
         const blocks = (page.blocks || []) as BlockEnvelope[];
         let changed = false;
         const updated = [...blocks];
@@ -123,10 +138,19 @@ export async function enrichDomain(domainId: string): Promise<EnrichResult> {
             if (block.type === 'Hero') {
                 const content = (block.content || {}) as Record<string, unknown>;
                 const heading = content.heading as string || '';
-                if (!heading || heading.includes('Home Services') || heading.length < 10) {
+                const isGeneric = heading.startsWith('Your Trusted ') || heading.endsWith(' Resource');
+                if (options.forceHeroes || !heading || heading.includes('Home Services') || heading.length < 10 || isGeneric) {
                     const pageContext = page.title || page.route.replace(/\//g, ' ').trim();
-                    const resp = await aiCall(`Generate a hero headline for a ${niche} website (${domain.domain}) page about "${pageContext}".
-Return ONLY a JSON object: { "heading": "Compelling H1 (50-70 chars)", "subheading": "Value proposition (80-120 chars)", "badge": "Updated 2026" }`);
+                    const resp = await aiCall(`Generate a hero headline for a ${niche} website.
+
+Site:
+- Domain: ${domain.domain}
+- Site name: ${siteName}
+- Page context: ${pageContext}
+- Voice seed (for style/voice, not for factual claims): ${JSON.stringify(voiceSeed)}
+
+Return ONLY a JSON object:
+{ "heading": "Compelling H1 (50-70 chars)", "subheading": "Value proposition (80-120 chars)", "badge": "Updated 2026" }`);
                     result.totalAiCalls++;
                     if (resp) {
                         result.totalCost += resp.cost;
@@ -135,7 +159,11 @@ Return ONLY a JSON object: { "heading": "Compelling H1 (50-70 chars)", "subheadi
                             updated[i] = { ...block, content: { ...content, ...parsed } };
                             result.heroesFixed++;
                             changed = true;
+                        } else {
+                            result.errors.push(`[hero:${page.route}] Failed to parse JSON`);
                         }
+                    } else {
+                        result.errors.push(`[hero:${page.route}] AI call failed`);
                     }
                 }
             }
@@ -172,8 +200,13 @@ Use realistic values for this specific niche. Return ONLY valid JSON: ${schema}`
             if (block.type === 'FAQ') {
                 const content = (block.content || {}) as Record<string, unknown>;
                 const items = content.items as unknown[];
-                if (!items || items.length === 0) {
-                    const resp = await aiCall(`Generate 5-7 FAQ items for a ${niche} page about "${page.title || niche}" on ${domain.domain}.
+                if (options.forceFaqs || !items || items.length === 0) {
+                    const resp = await aiCall(`Generate 5-7 FAQ items for a ${niche} page on ${domain.domain}.
+
+Site name: ${siteName}
+Page context: ${page.title || page.route}
+Voice seed: ${JSON.stringify(voiceSeed)}
+
 Questions should be what real people search for. Answers: 2-3 sentences, factual.
 Return ONLY valid JSON: { "items": [{ "question": "...", "answer": "..." }] }`);
                     result.totalAiCalls++;
@@ -184,12 +217,41 @@ Return ONLY valid JSON: { "items": [{ "question": "...", "answer": "..." }] }`);
                             updated[i] = { ...block, content: { ...content, ...parsed } };
                             result.faqsFixed++;
                             changed = true;
+                        } else {
+                            result.errors.push(`[faq:${page.route}] Failed to parse JSON`);
+                        }
+                    } else {
+                        result.errors.push(`[faq:${page.route}] AI call failed`);
+                    }
+                }
+            }
+
+            // 4. Thin ArticleBody — expand if under 300 words
+            if (block.type === 'ArticleBody') {
+                const content = (block.content || {}) as Record<string, unknown>;
+                const md = (content.markdown as string) || '';
+                const wordCount = md.split(/\s+/).filter(Boolean).length;
+                if (wordCount < 300 && wordCount > 20) {
+                    const pageContext = page.title || niche;
+                    const resp = await aiCall(`Expand this article about "${pageContext}" to at least 500 words. Keep the existing content and add more depth, examples, and actionable advice. Write naturally with personality.
+
+EXISTING CONTENT:
+${md}
+
+Return ONLY a JSON object: { "markdown": "Full expanded article in markdown" }`);
+                    result.totalAiCalls++;
+                    if (resp) {
+                        result.totalCost += resp.cost;
+                        const parsed = parseJson(resp.content);
+                        if (parsed?.markdown && (parsed.markdown as string).length > md.length) {
+                            updated[i] = { ...block, content: { ...content, markdown: parsed.markdown } };
+                            changed = true;
                         }
                     }
                 }
             }
 
-            // 4. Citations — use fallback system, zero AI calls
+            // 5. Citations — use fallback system, zero AI calls
             if (block.type === 'CitationBlock') {
                 const content = (block.content || {}) as Record<string, unknown>;
                 const sources = content.sources as unknown[];
@@ -202,8 +264,18 @@ Return ONLY valid JSON: { "items": [{ "question": "...", "answer": "..." }] }`);
         }
 
         // 5. Meta description — if empty, generate one
-        if (!page.metaDescription || page.metaDescription.includes('Expert guides about')) {
-            const resp = await aiCall(`Write a 150-character SEO meta description for a ${niche} page titled "${page.title}" on ${domain.domain}. Return ONLY JSON: { "metaDescription": "..." }`);
+        if (options.forceMeta || !page.metaDescription || page.metaDescription.includes('Expert guides about')) {
+            const resp = await aiCall(`Write a specific ~150-character SEO meta description.
+
+Site:
+- Domain: ${domain.domain}
+- Site name: ${siteName}
+- Niche: ${niche}
+- Page title: ${page.title || page.route}
+
+Avoid generic filler like "Expert guides about...". Make it feel uniquely relevant.
+
+Return ONLY JSON: { "metaDescription": "..." }`);
             result.totalAiCalls++;
             if (resp) {
                 result.totalCost += resp.cost;
@@ -214,7 +286,11 @@ Return ONLY valid JSON: { "items": [{ "question": "...", "answer": "..." }] }`);
                         updatedAt: new Date(),
                     }).where(eq(pageDefinitions.id, page.id));
                     result.metaFixed++;
+                } else {
+                    result.errors.push(`[meta:${page.route}] Failed to parse JSON`);
                 }
+            } else {
+                result.errors.push(`[meta:${page.route}] AI call failed`);
             }
         }
 

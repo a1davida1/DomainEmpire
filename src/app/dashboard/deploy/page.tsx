@@ -517,13 +517,13 @@ export default function DeployPage() {
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
-                        <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
+                        <div className="space-y-2 max-h-[500px] overflow-y-auto pr-2">
                             {domains.map(domain => (
                                 <div key={domain.id} className="flex justify-between items-center p-2 hover:bg-muted/50 rounded transition-colors">
-                                    <div className="flex items-center gap-2">
+                                    <a href={`/dashboard/domains/${domain.id}`} className="flex items-center gap-2 hover:underline">
                                         <Globe className="h-4 w-4 text-muted-foreground" />
                                         <span className="text-sm font-medium">{domain.domain}</span>
-                                    </div>
+                                    </a>
                                     <div className="flex items-center gap-2">
                                         {domain.isDeployed ? (
                                             <Badge variant="secondary" className="bg-green-500/10 text-green-500 hover:bg-green-500/20">Live</Badge>
@@ -532,6 +532,32 @@ export default function DeployPage() {
                                         ) : (
                                             <Badge variant="outline" className="text-muted-foreground">Not Deployed</Badge>
                                         )}
+                                        <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            className="h-7 px-2 text-xs"
+                                            onClick={async () => {
+                                                try {
+                                                    const res = await fetch(`/api/domains/${domain.id}/deploy`, {
+                                                        method: 'POST',
+                                                        headers: { 'Content-Type': 'application/json' },
+                                                        body: JSON.stringify({ triggerBuild: true, addCustomDomain: true }),
+                                                    });
+                                                    if (res.ok) {
+                                                        toast({ title: `Deploy queued for ${domain.domain}` });
+                                                        fetchData();
+                                                    } else {
+                                                        const err = await res.json().catch(() => ({}));
+                                                        toast({ title: 'Deploy failed', description: err.error || res.statusText, variant: 'destructive' });
+                                                    }
+                                                } catch {
+                                                    toast({ title: 'Deploy failed', variant: 'destructive' });
+                                                }
+                                            }}
+                                        >
+                                            <Rocket className="h-3 w-3 mr-1" />
+                                            {domain.isDeployed ? 'Redeploy' : 'Deploy'}
+                                        </Button>
                                     </div>
                                 </div>
                             ))}

@@ -33,6 +33,7 @@ import { generateResearchWithCache } from '@/lib/ai/research-cache';
 import { buildDomainDifferentiationInstructions, buildIntentCoverageGuidance } from '@/lib/ai/differentiation';
 import { isInternalLinkingEnabled } from '@/lib/content/link-policy';
 import { redactPromptBody } from '../privacy/prompt-redaction';
+import { scanForBannedPatterns, formatViolationsForPrompt, measureBurstiness, generateContentFingerprint, extractNgramHashes, checkCrossDomainDuplication } from './content-scanner';
 
 // Helper to slugify string
 function slugify(text: string) {
@@ -330,7 +331,7 @@ export async function processOutlineJob(jobId: string): Promise<void> {
         throw new Error(`Job ${job.id} (outline) requires articleId but it is null`);
     }
     const articleId = job.articleId;
-    const payload = job.payload as { targetKeyword: string; secondaryKeywords: string[]; domainName: string; contentType?: string };
+    const payload = job.payload as { targetKeyword: string; secondaryKeywords: string[]; domainName: string; contentType?: string; targetWordCount?: number };
 
     // Fetch article to get research data
     const articleRecord = await db.select().from(articles).where(eq(articles.id, articleId)).limit(1);
@@ -495,27 +496,43 @@ This is an INTERACTIVE MAP page:
         }
     }
 
-    // Generate outline
-    const outlinePrompt = `
-You are an expert SEO content strategist. Create a detailed outline for:
-KEYWORD: ${payload.targetKeyword}
-CONTEXT: ${payload.domainName}
+    // Determine target word count — varied per keyword/domain for natural diversity
+    const targetWordCount = payload.targetWordCount || 2500;
+    // Adapt outline depth to word count target
+    let outlineDepth: string;
+    if (targetWordCount <= 600) {
+        outlineDepth = '3-4 H2 sections with 1-2 H3 subsections each. Keep it tight and focused.';
+    } else if (targetWordCount <= 1500) {
+        outlineDepth = '5-6 H2 sections with 2-3 H3 subsections per H2.';
+    } else if (targetWordCount <= 2500) {
+        outlineDepth = '5-8 H2 sections covering the topic comprehensively, 2-4 H3 subsections per H2.';
+    } else {
+        outlineDepth = '8-12 H2 sections for deep coverage, 3-5 H3 subsections per H2. Go deep on the most important sections.';
+    }
 
-RESEARCH DATA (Use these facts):
+    // Generate outline — framed as content planning, not SEO optimization
+    const outlinePrompt = `
+You are a content planner creating a detailed article outline. The article should be comprehensive, factual, and genuinely helpful to readers.
+
+TOPIC: ${payload.targetKeyword}
+AUDIENCE: People researching this topic to make an informed decision
+CONTENT TYPE: ${payload.contentType || 'article'}
+TARGET LENGTH: ~${targetWordCount} words
+
+FACTUAL DATA TO INCORPORATE:
 ${JSON.stringify(researchData || {})}
 ${domainKnowledgePrompt}${typeSpecificInstructions}
 
 ${differentiationInstructions}
 
-Requirements:
-1. Compelling H1 (with keyword)
-2. 5-8 H2 sections (comprehensive)
-3. 2-4 H3 subsections per H2
-4. Intro & Conclusion
-5. 3-5 FAQs (People Also Ask style)
-6. Notes on where to add stats/examples from the research data
+Create an outline with:
+1. A clear, specific H1 title (include the topic naturally)
+2. ${outlineDepth}
+3. Brief intro and actionable conclusion
+4. 3-5 FAQ questions real people would ask about this topic
+5. Notes on where to weave in the factual data above
 
-Respond with JSON:
+Respond with JSON only:
 {
   "title": "H1 title",
   "metaDescription": "155 char description",
@@ -523,7 +540,7 @@ Respond with JSON:
     { "heading": "H2", "level": 2, "subheadings": [{ "heading": "H3", "level": 3 }], "notes": "Notes" }
   ],
   "faqs": [{ "question": "Q", "answerHint": "A" }],
-  "estimatedWordCount": 2500${typeSpecificJsonFields}
+  "estimatedWordCount": ${targetWordCount}${typeSpecificJsonFields}
 }`;
 
     const response = await ai.generateJSON<{
@@ -673,6 +690,7 @@ Respond with JSON:
         payload: {
             targetKeyword: payload.targetKeyword,
             domainName: payload.domainName,
+            ...(payload.targetWordCount ? { targetWordCount: payload.targetWordCount } : {}),
         },
         status: 'pending',
     });
@@ -699,7 +717,7 @@ export async function processDraftJob(jobId: string): Promise<void> {
         throw new Error(`Job ${job.id} (draft) requires articleId but it is null`);
     }
     const articleId = job.articleId;
-    const payload = job.payload as { targetKeyword: string; domainName: string };
+    const payload = job.payload as { targetKeyword: string; domainName: string; targetWordCount?: number };
 
     const articleRecord = await db.select().from(articles).where(eq(articles.id, articleId)).limit(1);
     const article = articleRecord[0];
@@ -763,7 +781,22 @@ export async function processDraftJob(jobId: string): Promise<void> {
         }
     }
 
-    const promptWithDifferentiation = `${differentiationInstructions}\n${draftKnowledgePrompt}\n${prompt}`;
+    // Inject word count target if available from the pipeline
+    let wordCountGuidance = '';
+    if (payload.targetWordCount) {
+        const wc = payload.targetWordCount;
+        if (wc <= 600) {
+            wordCountGuidance = `\nTARGET LENGTH: ~${wc} words. This should be a focused, concise piece. Cut fluff ruthlessly. Every paragraph must earn its place.\n`;
+        } else if (wc <= 1500) {
+            wordCountGuidance = `\nTARGET LENGTH: ~${wc} words. Standard depth — cover the topic well without padding.\n`;
+        } else if (wc <= 2500) {
+            wordCountGuidance = `\nTARGET LENGTH: ~${wc} words. Go deep on the most important sections. Add real examples and data.\n`;
+        } else {
+            wordCountGuidance = `\nTARGET LENGTH: ~${wc} words. Comprehensive coverage — this is a pillar piece. Go deep with examples, data, case studies, and nuanced analysis.\n`;
+        }
+    }
+
+    const promptWithDifferentiation = `${differentiationInstructions}\n${wordCountGuidance}${draftKnowledgePrompt}\n${prompt}`;
 
     const response = await ai.generate(
         'draftGeneration',
@@ -794,11 +827,17 @@ export async function processDraftJob(jobId: string): Promise<void> {
         throw new Error(`AI generated suspiciously short content (${wordCount} words). This usually indicates an error or refusal.`);
     }
 
+    // Generate content fingerprint and ngram hashes for cross-domain duplication detection
+    const contentNgramHashes = extractNgramHashes(sanitizedDraft);
+    const contentFingerprint = generateContentFingerprint(sanitizedDraft);
+
     // Update article
     await db.update(articles).set({
         contentMarkdown: sanitizedDraft,
         wordCount,
         generationPasses: 1,
+        contentFingerprint,
+        contentNgramHashes,
     }).where(eq(articles.id, articleId));
 
     await createRevision({
@@ -808,6 +847,11 @@ export async function processDraftJob(jobId: string): Promise<void> {
         metaDescription: article.metaDescription,
         changeType: 'ai_generated',
         changeSummary: `Draft generated (${wordCount} words)`,
+    });
+
+    // Cross-domain duplication check (log-only, non-blocking) — uses pre-computed ngram hashes
+    checkCrossDomainDuplication(articleId, domainId, contentNgramHashes).catch(err => {
+        console.error(`[Pipeline] Cross-domain duplication check failed for article ${articleId}:`, err);
     });
 
     // Queue next step BEFORE marking current complete — prevents article orphan
@@ -867,9 +911,15 @@ export async function processHumanizeJob(jobId: string): Promise<void> {
         stage: 'humanize',
     });
 
-    // Check for rehumanize flag from AI detection feedback loop
-    const payload = job.payload as { rehumanize?: boolean; aiDetectionScore?: number; rehumanizeCount?: number } | undefined;
+    // Check for rehumanize flag from AI detection or banned pattern feedback loops
+    const payload = job.payload as { rehumanize?: boolean; aiDetectionScore?: number; rehumanizeCount?: number; bannedPatternViolations?: string } | undefined;
     let rehumanizeInstructions = '';
+
+    // Inject banned-pattern feedback if present
+    if (payload?.bannedPatternViolations) {
+        rehumanizeInstructions += `\nCRITICAL REWRITE REQUIRED:\n${payload.bannedPatternViolations}\n\nReplace every flagged word/phrase with a natural, human alternative. Do NOT simply remove them — substitute with varied, conversational language.\n`;
+    }
+
     if (payload?.rehumanize && typeof payload.aiDetectionScore === 'number') {
         rehumanizeInstructions = `
 CRITICAL: This content was flagged as AI-generated by detection tools (score: ${payload.aiDetectionScore.toFixed(3)}).
@@ -916,21 +966,61 @@ You MUST aggressively rewrite to evade AI detection. Apply ALL of these techniqu
         changeSummary: `Humanized (${wordCount} words)`,
     });
 
-    // Queue next step BEFORE marking current complete — prevents article orphan
-    // Pass rehumanizeCount forward so the detection stage knows how many attempts have been made
-    const nextPayload: Record<string, unknown> = {};
-    if (payload?.rehumanizeCount) {
-        nextPayload.rehumanizeCount = payload.rehumanizeCount;
+    // ── Banned pattern scan ────────────────────────────────────────────────
+    const violations = scanForBannedPatterns(sanitizedHumanized);
+    const humanizePass = (payload?.rehumanizeCount as number | undefined) || 0;
+    const MAX_HUMANIZE_PASSES = 2;
+
+    if (violations.length > 0 && humanizePass < MAX_HUMANIZE_PASSES) {
+        console.log(
+            `[Pipeline] Banned patterns found (${violations.length} violations, pass ${humanizePass + 1}/${MAX_HUMANIZE_PASSES}). Re-queuing humanize for article ${articleId}.`,
+        );
+
+        await enqueueContentJob({
+            jobType: 'humanize',
+            domainId: job.domainId,
+            articleId: job.articleId,
+            priority: job.priority,
+            payload: {
+                rehumanize: true,
+                rehumanizeCount: humanizePass + 1,
+                bannedPatternViolations: formatViolationsForPrompt(violations),
+            },
+            status: 'pending',
+        });
+    } else {
+        if (violations.length > 0) {
+            console.warn(
+                `[Pipeline] ${violations.length} banned patterns remain after ${MAX_HUMANIZE_PASSES} passes for article ${articleId}. Proceeding anyway.`,
+            );
+        }
+
+        // Queue next step BEFORE marking current complete — prevents article orphan
+        // Pass rehumanizeCount forward so the detection stage knows how many attempts have been made
+        const nextPayload: Record<string, unknown> = {};
+        if (payload?.rehumanizeCount) {
+            nextPayload.rehumanizeCount = payload.rehumanizeCount;
+        }
+
+        await enqueueContentJob({
+            jobType: 'seo_optimize',
+            domainId: job.domainId,
+            articleId: job.articleId,
+            priority: job.priority,
+            payload: nextPayload,
+            status: 'pending',
+        });
     }
 
-    await enqueueContentJob({
-        jobType: 'seo_optimize',
-        domainId: job.domainId,
-        articleId: job.articleId,
-        priority: job.priority,
-        payload: nextPayload,
-        status: 'pending',
-    });
+    // ── Burstiness check (warn-only) ────────────────────────────────────
+    const burstiness = measureBurstiness(sanitizedHumanized);
+    if (!burstiness.pass) {
+        console.warn(
+            `[Pipeline] Low burstiness score for article ${articleId}: ${burstiness.score.toFixed(3)} `
+            + `(threshold: 0.35, avg sentence: ${burstiness.avgLength.toFixed(1)} words, `
+            + `stdDev: ${burstiness.stdDev.toFixed(1)}, sentences: ${burstiness.sentenceCount})`,
+        );
+    }
 
     await db.update(contentQueue).set({
         status: 'completed',
@@ -1566,6 +1656,7 @@ export async function processResearchJob(jobId: string): Promise<void> {
         targetKeyword: string;
         domainName: string;
         domainPriority?: number;
+        targetWordCount?: number;
     };
 
     const emptyResearch = {
@@ -1619,7 +1710,8 @@ export async function processResearchJob(jobId: string): Promise<void> {
         priority: job.priority,
         payload: {
             targetKeyword: payload.targetKeyword,
-            domainName: payload.domainName
+            domainName: payload.domainName,
+            ...(payload.targetWordCount ? { targetWordCount: payload.targetWordCount } : {}),
         },
         status: 'pending',
     });
@@ -1814,6 +1906,25 @@ export async function processKeywordResearchJob(jobId: string): Promise<void> {
             throw new Error(`Unable to create unique draft article slug for domain ${job.domainId}`);
         }
 
+        // Determine varied word count target based on keyword + domain hash
+        // Distribution: 20% short (400-600), 50% standard (800-1500), 20% deep (1500-2500), 10% comprehensive (2500-4000)
+        const wcHash = createHash('md5').update(`${bestKeyword.keyword}:${payload.domain}:wordcount`).digest();
+        const wcBucket = (wcHash.readUInt32BE(0) % 100);
+        let targetWordCount: number;
+        if (wcBucket < 20) {
+            // Short: 400-600
+            targetWordCount = 400 + (wcHash.readUInt32BE(4) % 201);
+        } else if (wcBucket < 70) {
+            // Standard: 800-1500
+            targetWordCount = 800 + (wcHash.readUInt32BE(4) % 701);
+        } else if (wcBucket < 90) {
+            // Deep: 1500-2500
+            targetWordCount = 1500 + (wcHash.readUInt32BE(4) % 1001);
+        } else {
+            // Comprehensive: 2500-4000
+            targetWordCount = 2500 + (wcHash.readUInt32BE(4) % 1501);
+        }
+
         await enqueueContentJob({
             jobType: 'research', // Now using proper Research stage
             domainId: domainId,
@@ -1821,6 +1932,7 @@ export async function processKeywordResearchJob(jobId: string): Promise<void> {
             payload: {
                 targetKeyword: bestKeyword.keyword,
                 domainName: payload.domain,
+                targetWordCount,
             },
             status: 'pending',
             priority: 1,
