@@ -238,7 +238,7 @@ async function generateV2SiteFiles(
     scripts: { head: string; body: string },
     _datasetsByArticle: Map<string, ArticleDatasetInfo[]>,
 ): Promise<GeneratedFile[]> {
-    const siteTitle = extractSiteTitle(domain.domain);
+    const siteTitle = (domain as Record<string, unknown>).siteNameOverride as string || extractSiteTitle(domain.domain);
 
     // Resolve v2 theme + skin with policy-based fallback for vertical/niche
     const homeDef = pageDefs.find(p => p.route === '/') || pageDefs[0];

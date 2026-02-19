@@ -19,6 +19,7 @@ import { getAIClient } from '@/lib/ai/openrouter';
 import { getOrCreateVoiceSeed } from '@/lib/ai/voice-seed';
 import { extractSiteTitle } from './templates/shared';
 import type { BlockEnvelope } from './blocks/schemas';
+import { inferSitePurpose } from './niche-registry';
 
 const PARALLEL_PAGES = 4;
 const PARALLEL_AI_CALLS_PER_PAGE = 5;
@@ -69,6 +70,7 @@ export interface EnrichResult {
     calculatorsFixed: number;
     faqsFixed: number;
     articlesExpanded: number;
+    templatesRewritten: number;
     comparisonsFixed: number;
     rankingsFixed: number;
     prosconsFixed: number;
@@ -125,6 +127,63 @@ const GENERIC_FAQ_PHRASES = [
 
 const GENERIC_FAQ_MATCH_THRESHOLD = 3;
 
+// ── Template article boilerplate detection ───────────────────────────────────
+
+const TEMPLATE_ARTICLE_FINGERPRINTS = [
+    'encompasses a range of products, services, and solutions',
+    'understanding the fundamentals will help you make better decisions',
+    'studies show that consumers typically overpay by 15-30%',
+    'getting quotes from at least 3-5 providers',
+    'the single biggest mistake is choosing the first option you find',
+    'research shows that comparing at least 3 providers saves an average of 20%',
+    'don\'t accept the first price you\'re quoted',
+    'off-peak periods typically see lower prices',
+    'not all ${niche} options are created equal',
+    'rushing into a decision without understanding your options',
+    'free resources like our',
+    'good decisions take time',
+];
+const TEMPLATE_MATCH_THRESHOLD = 2;
+
+function isTemplateBoilerplate(markdown: string, niche: string): boolean {
+    const normalized = markdown.toLowerCase();
+    const nicheLower = niche.toLowerCase();
+    let matches = 0;
+    for (const fp of TEMPLATE_ARTICLE_FINGERPRINTS) {
+        const fpResolved = fp.replace('${niche}', nicheLower);
+        if (normalized.includes(fpResolved)) {
+            matches++;
+            if (matches >= TEMPLATE_MATCH_THRESHOLD) return true;
+        }
+    }
+    return false;
+}
+
+const GENERIC_ARTICLE_BODY_PATTERNS = [
+    /whether you're new to/i,
+    /not all .{1,40} options are created equal/i,
+    /studies show that consumers typically overpay/i,
+    /our editorial team/i,
+    /use our \[calculator\]/i,
+    /use our \[comparison tool\]/i,
+    /check our \[verified reviews\]/i,
+    /we recommend providers that offer/i,
+    /get everything in writing/i,
+    /don't accept the first price/i,
+];
+const GENERIC_ARTICLE_BODY_THRESHOLD = 3;
+
+function isGenericArticleBody(markdown: string): boolean {
+    let matches = 0;
+    for (const pattern of GENERIC_ARTICLE_BODY_PATTERNS) {
+        if (pattern.test(markdown)) {
+            matches++;
+            if (matches >= GENERIC_ARTICLE_BODY_THRESHOLD) return true;
+        }
+    }
+    return false;
+}
+
 function isGenericFaqContent(items: unknown[] | undefined): boolean {
     if (!Array.isArray(items) || items.length === 0) return false;
     const text = JSON.stringify(items).toLowerCase();
@@ -159,44 +218,7 @@ function parseJson(raw: string): Record<string, unknown> | null {
     }
 }
 
-/**
- * Infer the site's actual purpose from its domain name and niche.
- * This gives AI prompts the context needed to generate relevant content
- * instead of generic "compare {niche} options" copy.
- */
-function inferSitePurpose(domain: string, niche: string, siteName: string): string {
-    const d = domain.toLowerCase();
-    const n = niche.toLowerCase();
-
-    // Domain name keyword → purpose mapping
-    const patterns: Array<[RegExp, string]> = [
-        [/home\s?value|property\s?value|house\s?worth/, `${siteName} helps homeowners estimate their property's current market value. The calculator should take property details (sq ft, bedrooms, bathrooms, zip code, year built, condition) and output an estimated market value range.`],
-        [/prenup|pre-?nup/, `${siteName} helps couples decide whether they need a prenuptial agreement and understand the costs. The calculator should estimate prenup costs based on complexity (simple vs contested), assets, state, and attorney involvement.`],
-        [/refinanc/, `${siteName} helps homeowners evaluate mortgage refinancing options. The calculator should compare current rate vs new rate, remaining term, closing costs, and show break-even timeline and total savings.`],
-        [/mortgage|home\s?loan/, `${siteName} helps home buyers calculate mortgage payments and affordability. Inputs should be home price, down payment, interest rate, loan term. Show monthly payment, total interest, and amortization.`],
-        [/credit\s?card\s?payoff/, `${siteName} helps people create a plan to pay off credit card debt. Calculator inputs: balance, interest rate (APR), monthly payment. Show payoff timeline, total interest, and debt-free date.`],
-        [/braces|orthodont/, `${siteName} helps people understand braces and orthodontic treatment costs. Calculator should estimate costs based on treatment type (metal/ceramic/lingual/Invisalign), insurance coverage level, region, and treatment complexity.`],
-        [/bathroom|kitchen|remodel|renovat/, `${siteName} helps homeowners estimate renovation costs. Calculator inputs should be room size, renovation scope (cosmetic/partial/full gut), material quality, and region. Output total project cost range.`],
-        [/solar|panel/, `${siteName} helps homeowners evaluate solar panel installation costs and savings. Inputs: roof size, electricity bill, sun exposure, region. Output: installation cost, monthly savings, payback period.`],
-        [/pool/, `${siteName} helps homeowners estimate swimming pool installation costs. Inputs: pool type (above-ground/in-ground), size, material, features. Output: total cost range and annual maintenance estimate.`],
-        [/therapy|counsel/, `${siteName} helps people understand therapy and counseling costs. Calculator estimates session costs based on therapy type, insurance, provider credentials, and session frequency.`],
-        [/dental|tooth|teeth/, `${siteName} helps people understand dental procedure costs. Calculator estimates costs based on procedure type, insurance coverage, provider type, and geographic region.`],
-        [/insur/, `${siteName} helps consumers compare insurance options and estimate premiums. Calculator inputs depend on insurance type (auto/home/health/life) with appropriate risk factors.`],
-        [/lawyer|attorney|legal/, `${siteName} helps people understand legal service costs and find appropriate representation. Calculator estimates legal fees based on case type, complexity, and billing method.`],
-        [/ivf|fertil/, `${siteName} helps people understand fertility treatment costs. Calculator estimates costs based on treatment type (IVF/IUI/medication), insurance coverage, number of cycles, and clinic tier.`],
-        [/wedding/, `${siteName} helps couples plan and budget their wedding. Calculator estimates total wedding cost based on guest count, venue type, region, and service tier.`],
-        [/moving|reloc/, `${siteName} helps people estimate moving costs. Calculator inputs: distance, home size, service level (DIY/partial/full-service), timing.`],
-        [/only\s?fans|creator/, `${siteName} helps content creators estimate potential earnings. Calculator inputs: subscriber count, subscription price, posting frequency, tip ratio.`],
-    ];
-
-    for (const [pattern, purpose] of patterns) {
-        if (pattern.test(d) || pattern.test(n)) return purpose;
-    }
-
-    // Generic fallback using domain name analysis
-    const slug = domain.replace(/\.[a-z]{2,}(?:\.[a-z]{2,})?$/i, '').replace(/[-_]/g, ' ');
-    return `${siteName} is a consumer information site about ${niche}. The domain "${domain}" suggests it focuses on ${slug}. Generate content that's specifically useful for someone researching ${slug} — not generic "${niche}" content.`;
-}
+// inferSitePurpose is imported from niche-registry.ts (single source of truth)
 
 async function runParallel<T>(tasks: Array<() => Promise<T>>, concurrency: number): Promise<T[]> {
     const results: T[] = [];
@@ -221,6 +243,7 @@ type EnrichJob =
     | { type: 'calculator'; pageId: string; blockIdx: number; prompt: string }
     | { type: 'faq'; pageId: string; blockIdx: number; prompt: string }
     | { type: 'article'; pageId: string; blockIdx: number; prompt: string; originalLength: number }
+    | { type: 'template-rewrite'; pageId: string; blockIdx: number; prompt: string; originalLength: number }
     | { type: 'comparison'; pageId: string; blockIdx: number; prompt: string }
     | { type: 'ranking'; pageId: string; blockIdx: number; prompt: string }
     | { type: 'proscons'; pageId: string; blockIdx: number; prompt: string }
@@ -241,6 +264,7 @@ export interface EnrichOptions {
     forceFaqs?: boolean;
     forceMeta?: boolean;
     forceArticleBodies?: boolean;
+    forceTemplateRewrites?: boolean;
     minArticleBodyWords?: number;
 }
 
@@ -256,8 +280,8 @@ export async function enrichDomain(domainId: string, options: EnrichOptions = {}
 
     const result: EnrichResult = {
         domain: domain.domain, heroesFixed: 0, calculatorsFixed: 0,
-        faqsFixed: 0, articlesExpanded: 0, comparisonsFixed: 0,
-        rankingsFixed: 0, prosconsFixed: 0, vscardsFixed: 0,
+        faqsFixed: 0, articlesExpanded: 0, templatesRewritten: 0,
+        comparisonsFixed: 0, rankingsFixed: 0, prosconsFixed: 0, vscardsFixed: 0,
         citationsFixed: 0, metaFixed: 0,
         totalAiCalls: 0, totalCost: 0, errors: [],
     };
@@ -373,7 +397,7 @@ Return ONLY valid JSON: { "items": [{ "question": "...", "answer": "..." }] }`,
                 }
             }
 
-            // Thin ArticleBody
+            // Thin ArticleBody or template boilerplate rewrite
             if (block.type === 'ArticleBody') {
                 const md = (content.markdown as string) || '';
                 const wordCount = md.split(/\s+/).filter(Boolean).length;
@@ -381,11 +405,28 @@ Return ONLY valid JSON: { "items": [{ "question": "...", "answer": "..." }] }`,
                     ? Math.max(300, Math.floor(options.minArticleBodyWords))
                     : 300;
                 const targetWords = Math.max(500, minWords);
-                if ((options.forceArticleBodies || wordCount < minWords) && wordCount > 20) {
+                const isGeneric = isGenericArticleBody(md);
+                if ((options.forceArticleBodies || wordCount < minWords || isGeneric) && wordCount > 20) {
                     const pageContext = page.title || niche;
-                    jobs.push({
-                        type: 'article', pageId: page.id, blockIdx: i, originalLength: md.length,
-                        prompt: `Expand this article for ${domain.domain}.
+                    const genericVoiceHint = voiceSeed && typeof voiceSeed === 'object' && 'name' in voiceSeed
+                        ? `\nVOICE: ${(voiceSeed as Record<string, unknown>).name}, ${(voiceSeed as Record<string, unknown>).background}. ${(voiceSeed as Record<string, unknown>).formatting}`
+                        : '';
+                    const prompt = isGeneric
+                        ? `Rewrite this article for ${domain.domain}.
+
+SITE PURPOSE: ${sitePurpose}
+Page: ${pageContext}
+Year: ${new Date().getFullYear()}
+
+Write a COMPLETELY NEW article (at least 500 words) that is specifically about what THIS site covers.
+Do NOT reuse any of the existing template text. Write original content with real facts, specific numbers, and actionable advice.
+The tone should be conversational and authoritative — like a knowledgeable friend explaining this topic.${genericVoiceHint}
+
+TOPIC TO COVER (use as a starting point, not as text to keep):
+${md.substring(0, 200)}
+
+Return ONLY a JSON object: { "markdown": "Full article in markdown" }`
+                        : `Expand this article for ${domain.domain}.
 
 SITE PURPOSE: ${sitePurpose}
 Page: ${pageContext}
@@ -397,7 +438,41 @@ Do NOT use generic template language. Write as if you're an expert in this speci
 EXISTING CONTENT:
 ${md}
 
-Return ONLY a JSON object: { "markdown": "Full expanded article in markdown" }`,
+Return ONLY a JSON object: { "markdown": "Full expanded article in markdown" }`;
+                    jobs.push({
+                        type: isGeneric ? 'template-rewrite' : 'article',
+                        pageId: page.id, blockIdx: i, originalLength: md.length,
+                        prompt,
+                    });
+                } else if (wordCount >= 20 && (
+                    options.forceTemplateRewrites
+                    || content._templateSource
+                    || isTemplateBoilerplate(md, niche)
+                )) {
+                    // Non-thin but template boilerplate — rewrite completely.
+                    // Detection: explicit _templateSource tag (set by sub-page-presets),
+                    // fingerprint matching (fallback for older articles), or force flag.
+                    const pageContext = page.title || niche;
+                    const voiceHint = voiceSeed && typeof voiceSeed === 'object' && 'name' in voiceSeed
+                        ? `VOICE: ${(voiceSeed as Record<string, unknown>).name}, ${(voiceSeed as Record<string, unknown>).background}. ${(voiceSeed as Record<string, unknown>).formatting}`
+                        : '';
+                    jobs.push({
+                        type: 'template-rewrite', pageId: page.id, blockIdx: i, originalLength: md.length,
+                        prompt: `Rewrite this article for ${domain.domain}. The current text is generic template copy that is used across many sites.
+
+SITE PURPOSE: ${sitePurpose}
+Page: ${pageContext} (${page.route})
+Year: ${new Date().getFullYear()}
+
+Write a completely original article about THIS specific topic as it relates to ${domain.domain}.
+Target 500-700 words. Use specific data, real examples, and actionable advice.
+Maintain the same H2/H3 heading structure but rewrite all body text to be unique and relevant.
+${voiceHint}
+
+EXISTING TEMPLATE (rewrite completely):
+${md}
+
+Return ONLY a JSON object: { "markdown": "Full rewritten article in markdown" }`,
                     });
                 }
             }
@@ -624,6 +699,13 @@ Return ONLY JSON: { "metaDescription": "..." }`,
                     if (parsed.markdown && (parsed.markdown as string).length > job.originalLength) {
                         updated[job.blockIdx] = { ...updated[job.blockIdx], content: { ...(updated[job.blockIdx].content as Record<string, unknown>), markdown: parsed.markdown } };
                         result.articlesExpanded++;
+                        changed = true;
+                    }
+                    break;
+                case 'template-rewrite':
+                    if (parsed.markdown && (parsed.markdown as string).length > job.originalLength * 0.5) {
+                        updated[job.blockIdx] = { ...updated[job.blockIdx], content: { ...(updated[job.blockIdx].content as Record<string, unknown>), markdown: parsed.markdown } };
+                        result.templatesRewritten++;
                         changed = true;
                     }
                     break;

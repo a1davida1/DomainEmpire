@@ -91,6 +91,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
     const ctx: RenderContext = {
         domain: domain.domain,
         siteTitle,
+        niche: domain.niche || undefined,
         route: pageDef.route,
         theme: themeName,
         skin: skinName,
@@ -220,6 +221,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     const ctx: RenderContext = {
         domain: domain.domain,
         siteTitle,
+        niche: domain.niche || undefined,
         route: pageDef.route,
         theme: themeName,
         skin: skinName,

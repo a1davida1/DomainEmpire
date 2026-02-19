@@ -107,7 +107,7 @@ export async function prepareDomain(
     if (!domain) throw new Error(`Domain not found: ${domainIdOrName}`);
 
     const domainName = domain.domain;
-    const humanName = extractSiteTitle(domainName);
+    const humanName = (domain as Record<string, unknown>).siteNameOverride as string || extractSiteTitle(domainName);
 
     // Merge explicit strategy with existing DB values
     const effectiveNiche = strategy?.niche || domain.niche || 'general';
@@ -159,7 +159,8 @@ export async function prepareDomain(
     }).where(eq(pageDefinitions.domainId, domain.id));
 
     // ── Step 3: Pages — seed if empty, regenerate if strategy was explicitly provided ──
-    const blueprint = generateBlueprint(domainName);
+    const resolvedTemplate = strategy?.siteTemplate ?? domain.siteTemplate ?? 'authority';
+    const blueprint = generateBlueprint(domainName, nicheForContent, resolvedTemplate);
 
     const existingPages = await db.select({ id: pageDefinitions.id })
         .from(pageDefinitions)
@@ -202,7 +203,15 @@ export async function prepareDomain(
             for (const slot of blueprint.homepageLayout) {
                 const blockType = sectionSlotToBlockType(slot);
                 if (blockType === 'Hero') {
-                    homeBlocks.push(mergedBlock('Hero', { variant: heroVar }));
+                    const heroContent: Record<string, unknown> = {};
+                    if (heroVar === 'stats-bar') {
+                        heroContent.stats = [
+                            { value: `${blueprint.guideCount}+`, label: 'Expert Guides' },
+                            { value: 'Free', label: 'Calculator Included' },
+                            { value: String(new Date().getFullYear()), label: 'Updated' },
+                        ];
+                    }
+                    homeBlocks.push(mergedBlock('Hero', { variant: heroVar, content: heroContent }));
                 } else if (blockType === 'CTABanner') {
                     if (ctaCfg) homeBlocks.push(mergedBlock('CTABanner', { config: ctaCfg }));
                 } else {

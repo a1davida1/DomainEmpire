@@ -116,6 +116,7 @@ function guideComplete(niche: string, siteName: string): SubPageDefinition {
             { type: 'Sidebar', config: { showSearch: true } },
             { type: 'LastUpdated' },
             { type: 'ArticleBody', content: {
+                _templateSource: 'guideComplete',
                 title: `Understanding ${n}: The Complete Guide`,
                 markdown: `## Introduction\n\nWhether you're new to ${niche} or looking to upgrade your current situation, this comprehensive guide will walk you through everything you need to know. At ${siteName}, we've spent years researching and reviewing the best ${niche} options on the market.\n\n` +
                     `## What Is ${n}?\n\n${n} encompasses a range of products, services, and solutions designed to meet your specific needs. Understanding the fundamentals will help you make better decisions and avoid common pitfalls.\n\n` +
@@ -157,6 +158,7 @@ function guideSaveMoney(niche: string, _siteName: string): SubPageDefinition {
             { type: 'Sidebar', config: { showSearch: true } },
             { type: 'LastUpdated' },
             { type: 'ArticleBody', content: {
+                _templateSource: 'guideSaveMoney',
                 title: `Save Money on ${n}`,
                 markdown: `## Why Most People Overpay for ${n}\n\nStudies show that consumers typically overpay by 15-30% for ${niche} because they don't compare options or negotiate effectively. Here's how to avoid that.\n\n` +
                     `## Top Money-Saving Strategies\n\n### 1. Compare Multiple Providers\nGetting quotes from at least 3-5 providers can save you 20% or more. Use our [comparison tool](/compare) to see options side by side.\n\n` +
@@ -212,6 +214,7 @@ function guideMistakes(niche: string, _siteName: string): SubPageDefinition {
                 ],
             }},
             { type: 'ArticleBody', content: {
+                _templateSource: 'guideMistakes',
                 title: `Mistakes to Avoid`,
                 markdown: `## Mistake #1: Not Comparing Options\n\nThe single biggest mistake is choosing the first option you find. Research shows that comparing at least 3 providers saves an average of 20%. Start with our [comparison tool](/compare).\n\n` +
                     `## Mistake #2: Focusing Only on Price\n\nThe cheapest option often ends up costing more long-term through poor quality, lack of support, and hidden fees. Look at total value, not just upfront cost.\n\n` +

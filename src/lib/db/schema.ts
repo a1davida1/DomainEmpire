@@ -46,8 +46,8 @@ export const domains = pgTable('domains', {
         enum: [
             'authority', 'comparison', 'calculator', 'review', 'tool', 'hub',
             'decision', 'cost_guide', 'niche', 'info', 'consumer', 'brand',
-            'magazine', 'landing', 'docs', 'storefront', 'minimal', 'dashboard',
-            'newsletter', 'community',
+            'magazine', 'landing', 'local_lead_gen', 'docs', 'storefront', 'minimal',
+            'dashboard', 'newsletter', 'community',
         ]
     }).default('authority'),
     // Organization & Infrastructure
@@ -59,6 +59,9 @@ export const domains = pgTable('domains', {
     skin: text('skin').default('slate'), // v2 color skin: 'ocean', 'forest', 'ember', 'slate', 'midnight', 'coral'
     monetizationModel: text('monetization_model'), // 'Lead gen', 'Display + affiliate', etc.
     monetizationTier: integer('monetization_tier').default(3), // 1=Lead Gen Only, 2=Affiliate Pri, 3=Display Pri, 4=Brand
+
+    /** Manual override for the auto-generated site title. When set, used instead of extractSiteTitle(). */
+    siteNameOverride: text('site_name_override'),
 
     // Valuation
     estimatedRevenueAtMaturityLow: real('estimated_revenue_at_maturity_low'),

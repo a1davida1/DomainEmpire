@@ -67,11 +67,14 @@ const NAV_REVIEW_LABELS = ['Reviews', 'Ratings', 'Top Picks', 'Best Of'];
 const NAV_BLOG_LABELS = ['Blog', 'Articles', 'Insights', 'News'];
 const NAV_ABOUT_LABELS = ['About', 'About Us', 'Our Story', 'Who We Are'];
 
+// Niche-aware nav labels — uses shared registry (no duplicate patterns)
+import { resolveNavLabels } from './niche-registry';
+
 // ── Hero Structural Variants ─────────────────────────────────────────────────
 
-export type HeroStructure = 'standard' | 'split-reverse' | 'minimal-left' | 'card-overlay' | 'stats-bar' | 'breadcrumb-hero';
+export type HeroStructure = 'standard' | 'single-cta' | 'minimal-text' | 'search' | 'stats-bar' | 'click-to-call';
 
-const HERO_STRUCTURES: HeroStructure[] = ['standard', 'split-reverse', 'minimal-left', 'card-overlay', 'stats-bar', 'breadcrumb-hero'];
+const HERO_STRUCTURES: HeroStructure[] = ['standard', 'single-cta', 'minimal-text', 'search', 'stats-bar', 'click-to-call'];
 
 // ── Footer Structural Variants ───────────────────────────────────────────────
 
@@ -110,9 +113,9 @@ const HEADER_STYLES: HeaderStyle[] = ['topbar-sticky', 'topbar-static', 'centere
 
 // ── Sidebar Strategy ─────────────────────────────────────────────────────────
 
-export type SidebarStrategy = 'guides-only' | 'all-content' | 'none' | 'homepage-only';
+export type SidebarStrategy = 'guides-only' | 'all-content' | 'none' | 'homepage-only' | 'never';
 
-const SIDEBAR_STRATEGIES: SidebarStrategy[] = ['guides-only', 'all-content', 'none', 'homepage-only'];
+const SIDEBAR_STRATEGIES: SidebarStrategy[] = ['guides-only', 'none', 'homepage-only', 'none'];
 
 // ── Blueprint Type ───────────────────────────────────────────────────────────
 
@@ -154,8 +157,29 @@ export interface StructuralBlueprint {
 
 // ── Blueprint Generation ─────────────────────────────────────────────────────
 
-export function generateBlueprint(domain: string): StructuralBlueprint {
+export function generateBlueprint(domain: string, niche?: string, siteTemplate?: string): StructuralBlueprint {
     const hash = domainHash(domain);
+
+    // Local lead gen gets a completely different blueprint — minimal pages, phone-first
+    if (siteTemplate === 'local_lead_gen') {
+        const localPages: SubPageSlot[] = ['calculator', 'about', 'contact', 'faq'];
+        const nav = buildNav(hash, localPages, 'flat', domain, niche);
+        return {
+            domain,
+            pages: localPages,
+            guideCount: 0,
+            nav: { style: 'flat', items: nav },
+            homepageLayout: ['hero', 'trust-badges', 'calculator', 'faq', 'lead-form'],
+            headerStyle: 'topbar-sticky',
+            heroStructure: 'click-to-call',
+            footerStructure: 'minimal-links',
+            ctaStyle: 'sticky-bottom',
+            sidebarStrategy: 'none',
+            showHomepageTrustBadges: true,
+            showTestimonials: false,
+            showPricing: false,
+        };
+    }
 
     // Page set selection
     const guideCount = 1 + pickFromHash(hash, 0, 3); // 1-3 guides
@@ -177,7 +201,7 @@ export function generateBlueprint(domain: string): StructuralBlueprint {
 
     // Nav structure
     const navStyle = pickItem(hash, 7, ['flat', 'dropdown-one', 'dropdown-two'] as const);
-    const nav = buildNav(hash, pages, navStyle);
+    const nav = buildNav(hash, pages, navStyle, domain, niche);
 
     // Structural choices
     const homepageLayout = pickItem(hash, 8, HOMEPAGE_LAYOUTS);
@@ -214,12 +238,17 @@ function buildNav(
     hash: Buffer,
     pages: SubPageSlot[],
     style: 'flat' | 'dropdown-one' | 'dropdown-two',
+    domain?: string,
+    niche?: string,
 ): Array<{ label: string; href: string; children?: Array<{ label: string; href: string }> }> {
-    const guideLabel = pickItem(hash, 20, NAV_GUIDE_LABELS);
+    const overrides = domain ? resolveNavLabels(domain, niche) : {};
+    const guideLabel = overrides.guides || pickItem(hash, 20, NAV_GUIDE_LABELS);
     const toolLabel = pickItem(hash, 21, NAV_TOOL_LABELS);
     const reviewLabel = pickItem(hash, 22, NAV_REVIEW_LABELS);
     const blogLabel = pickItem(hash, 23, NAV_BLOG_LABELS);
     const aboutLabel = pickItem(hash, 24, NAV_ABOUT_LABELS);
+    const calculatorLabel = overrides.calculator || 'Calculator';
+    const compareLabel = overrides.compare || 'Compare';
 
     const hasGuides = pages.includes('guides-hub');
     const hasCalculator = pages.includes('calculator');
@@ -236,16 +265,16 @@ function buildNav(
 
     if (style === 'flat') {
         if (hasGuides) items.push({ label: guideLabel, href: '/guides' });
-        if (hasCalculator) items.push({ label: 'Calculator', href: '/calculator' });
-        if (hasCompare) items.push({ label: 'Compare', href: '/compare' });
+        if (hasCalculator) items.push({ label: calculatorLabel, href: '/calculator' });
+        if (hasCompare) items.push({ label: compareLabel, href: '/compare' });
         if (hasReviews) items.push({ label: reviewLabel, href: '/reviews' });
         if (hasBlog) items.push({ label: blogLabel, href: '/blog' });
         items.push({ label: aboutLabel, href: '/about' });
     } else if (style === 'dropdown-one') {
         const children: Array<{ label: string; href: string }> = [];
         if (hasGuides) children.push({ label: 'Guides', href: '/guides' });
-        if (hasCalculator) children.push({ label: 'Calculator', href: '/calculator' });
-        if (hasCompare) children.push({ label: 'Compare', href: '/compare' });
+        if (hasCalculator) children.push({ label: calculatorLabel, href: '/calculator' });
+        if (hasCompare) children.push({ label: compareLabel, href: '/compare' });
         if (hasFaq) children.push({ label: 'FAQ', href: '/faq' });
         if (hasResources) children.push({ label: 'Resources', href: '/resources' });
         if (children.length > 0) {
@@ -258,8 +287,8 @@ function buildNav(
     } else {
         // dropdown-two: two dropdown groups
         const toolChildren: Array<{ label: string; href: string }> = [];
-        if (hasCalculator) toolChildren.push({ label: 'Calculator', href: '/calculator' });
-        if (hasCompare) toolChildren.push({ label: 'Compare', href: '/compare' });
+        if (hasCalculator) toolChildren.push({ label: calculatorLabel, href: '/calculator' });
+        if (hasCompare) toolChildren.push({ label: compareLabel, href: '/compare' });
         if (hasPricing) toolChildren.push({ label: 'Pricing', href: '/pricing' });
 
         const learnChildren: Array<{ label: string; href: string }> = [];
@@ -306,10 +335,14 @@ export const SLOT_TO_ROUTE: Record<SubPageSlot, string> = {
 /** Check if a route should have a sidebar based on the blueprint */
 export function shouldHaveSidebar(blueprint: StructuralBlueprint, route: string): boolean {
     switch (blueprint.sidebarStrategy) {
+        case 'never': return false;
         case 'none': return false;
         case 'homepage-only': return route === '/';
-        case 'guides-only': return route.startsWith('/guides');
-        case 'all-content': return !['/contact', '/about', '/privacy-policy', '/terms', '/disclosure'].includes(route);
+        case 'guides-only': return route === '/guides';
+        case 'all-content':
+            if (['/contact', '/about', '/privacy-policy', '/terms', '/disclosure'].includes(route)) return false;
+            if (route.startsWith('/guides/')) return false;
+            return true;
     }
 }
 
@@ -355,15 +388,15 @@ export function footerStructureToVariant(structure: FooterStructure): string {
     }
 }
 
-/** Map hero structure to block variant */
+/** Map hero structure to block variant — these are STRUCTURAL variants with different HTML */
 export function heroStructureToVariant(structure: HeroStructure): string {
     switch (structure) {
         case 'standard': return 'centered';
-        case 'split-reverse': return 'split';
-        case 'minimal-left': return 'minimal';
-        case 'card-overlay': return 'glass';
-        case 'stats-bar': return 'gradient';
-        case 'breadcrumb-hero': return 'minimal';
+        case 'single-cta': return 'single-cta';
+        case 'minimal-text': return 'minimal-text';
+        case 'search': return 'search';
+        case 'stats-bar': return 'stats-bar';
+        case 'click-to-call': return 'click-to-call';
     }
 }
 

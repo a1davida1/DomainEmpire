@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { InlineTextEditor } from './InlineTextEditor';
 
 // ============================================================
 // Types
@@ -737,6 +738,7 @@ export function VisualConfigurator({
 
     const iframeRef = useRef<HTMLIFrameElement>(null);
     const blockListRef = useRef<HTMLDivElement>(null);
+    const [inlineEditEnabled, setInlineEditEnabled] = useState(false);
 
     // --- Warn on unsaved changes before navigating away ---
     useEffect(() => {
@@ -1077,6 +1079,13 @@ export function VisualConfigurator({
                         <Button size="sm" variant="ghost" onClick={handleRandomize} className="h-7 px-2 text-xs" title="Randomize theme, skin & variants">
                             {'\u{1F3B2}'} Randomize
                         </Button>
+                        <InlineTextEditor
+                            blocks={blocks}
+                            onBlocksChange={(updated) => { updateBlocks(updated); }}
+                            iframeRef={iframeRef}
+                            enabled={inlineEditEnabled}
+                            onToggle={setInlineEditEnabled}
+                        />
                     </div>
                     <div className="flex items-center gap-1.5">
                         {dirty && <Badge variant="secondary" className="text-[10px] h-5">Unsaved</Badge>}

@@ -1195,6 +1195,142 @@ section + section{margin-top:calc(var(--spacing-unit,1.6rem) * 2.5)}
 }
 
 /* ================================================================
+   STATS-BAR HERO VARIANT (structural — stat counters)
+   ================================================================ */
+
+.hero--stats-bar{
+  background:var(--color-hero-bg,var(--color-bg-surface));
+  color:var(--color-hero-text,var(--color-text));
+  padding:5rem 2rem 3rem;
+  text-align:center;
+}
+.hero--stats-bar h1{max-width:800px;margin-left:auto;margin-right:auto;color:var(--color-hero-text,var(--color-text))}
+.hero--stats-bar .hero-sub{max-width:560px;margin-left:auto;margin-right:auto;opacity:0.85;font-size:1.15rem;line-height:1.6}
+.hero--stats-bar .hero-cta--large{padding:1rem 3rem;font-size:1.1rem}
+.hero-stats-bar{
+  display:flex;
+  justify-content:center;
+  gap:3rem;
+  margin-top:2rem;
+  padding:1.5rem 0;
+  border-top:1px solid var(--color-border,#e2e8f0);
+  border-bottom:1px solid var(--color-border,#e2e8f0);
+}
+.hero-stat{display:flex;flex-direction:column;align-items:center}
+.hero-stat-value{font-size:2rem;font-weight:800;color:var(--color-accent);line-height:1.2}
+.hero-stat-label{font-size:0.8rem;font-weight:500;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-top:0.25rem}
+@media(max-width:768px){
+  .hero-stats-bar{flex-wrap:wrap;gap:1.5rem}
+  .hero-stat-value{font-size:1.5rem}
+}
+
+/* ================================================================
+   SEARCH HERO VARIANT (structural — search bar)
+   ================================================================ */
+
+.hero--search{
+  background:var(--color-hero-bg,var(--color-bg-surface));
+  color:var(--color-hero-text,var(--color-text));
+  padding:5rem 2rem 4rem;
+  text-align:center;
+}
+.hero--search h1{max-width:700px;margin-left:auto;margin-right:auto;color:var(--color-hero-text,var(--color-text))}
+.hero--search .hero-sub{max-width:520px;margin-left:auto;margin-right:auto;opacity:0.85}
+.hero-search-form{
+  display:flex;
+  max-width:540px;
+  margin:2rem auto 0;
+  border-radius:var(--radius-lg,.75rem);
+  overflow:hidden;
+  box-shadow:0 4px 16px rgba(0,0,0,.08);
+}
+.hero-search-input{
+  flex:1;
+  padding:1rem 1.5rem;
+  border:2px solid var(--color-border,#e2e8f0);
+  border-right:none;
+  font-size:1rem;
+  border-radius:var(--radius-lg,.75rem) 0 0 var(--radius-lg,.75rem);
+  outline:none;
+}
+.hero-search-input:focus{border-color:var(--color-accent)}
+.hero-search-btn{
+  padding:1rem 2rem;
+  background:var(--color-accent);
+  color:#fff;
+  border:none;
+  font-weight:600;
+  font-size:1rem;
+  cursor:pointer;
+  border-radius:0 var(--radius-lg,.75rem) var(--radius-lg,.75rem) 0;
+}
+.hero-search-btn:hover{opacity:0.9}
+
+/* ================================================================
+   SINGLE-CTA HERO VARIANT (structural — one large CTA)
+   ================================================================ */
+
+.hero--single-cta{
+  background:var(--color-bg);
+  padding:4rem 2rem 3rem;
+  text-align:center;
+}
+.hero--single-cta h1{max-width:700px;margin-left:auto;margin-right:auto;color:var(--color-text)}
+.hero--single-cta .hero-sub{max-width:500px;margin-left:auto;margin-right:auto;color:var(--color-text-muted)}
+.hero-cta--jumbo{
+  display:inline-block;
+  margin-top:2rem;
+  padding:1.25rem 4rem;
+  font-size:1.2rem;
+  font-weight:700;
+  border-radius:var(--radius-lg,.75rem);
+  box-shadow:0 4px 20px rgba(0,0,0,.12);
+}
+.hero-cta--jumbo:hover{transform:translateY(-2px);box-shadow:0 8px 28px rgba(0,0,0,.18)}
+
+/* ================================================================
+   CLICK-TO-CALL HERO VARIANT (structural — phone-first for local services)
+   ================================================================ */
+
+.hero--click-to-call{
+  background:var(--color-hero-bg,var(--color-bg-surface));
+  color:var(--color-hero-text,var(--color-text));
+  padding:4rem 2rem 3rem;
+  text-align:center;
+}
+.hero--click-to-call h1{max-width:700px;margin-left:auto;margin-right:auto;color:var(--color-hero-text,var(--color-text))}
+.hero--click-to-call .hero-sub{max-width:520px;margin-left:auto;margin-right:auto;opacity:0.85}
+.hero-phone-row{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:0.5rem;
+  margin:2rem 0;
+}
+.hero-phone-link{
+  font-size:2.5rem;
+  font-weight:800;
+  letter-spacing:-0.02em;
+  color:var(--color-accent);
+  text-decoration:none;
+  transition:transform 0.15s;
+}
+.hero-phone-link:hover{transform:scale(1.05)}
+.hero-phone-label{font-size:0.9rem;opacity:0.7;font-weight:500}
+@media(max-width:600px){.hero-phone-link{font-size:1.8rem}}
+
+/* ================================================================
+   MINIMAL TEXT HERO VARIANT (structural — text only, no CTAs/stars)
+   ================================================================ */
+
+.hero--minimal-text{
+  background:var(--color-bg);
+  padding:3rem 2rem 2rem;
+}
+.hero--minimal-text h1{max-width:800px;color:var(--color-text);font-size:2.2rem}
+.hero--minimal-text .hero-sub--large{max-width:640px;font-size:1.2rem;line-height:1.6;color:var(--color-text-muted)}
+
+/* ================================================================
    SVG PROGRESS RING (StatGrid)
    ================================================================ */
 

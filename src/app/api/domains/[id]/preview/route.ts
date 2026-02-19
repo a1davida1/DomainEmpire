@@ -253,6 +253,7 @@ export async function GET(request: NextRequest, { params }: PageProps) {
         const ctx: RenderContext = {
             domain: domainRow.domain,
             siteTitle,
+            niche: domainRow.niche || undefined,
             route: `/${article.slug || 'preview'}`,
             theme: themeName,
             skin: skinName,
@@ -280,6 +281,7 @@ export async function GET(request: NextRequest, { params }: PageProps) {
     const ctx: RenderContext = {
         domain: domainRow.domain,
         siteTitle,
+        niche: domainRow.niche || undefined,
         route: '/',
         theme: themeName,
         skin: skinName,

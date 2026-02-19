@@ -153,6 +153,16 @@ export const HOMEPAGE_PRESETS: Record<string, PresetBlock[]> = {
         { type: 'FAQ' },
         { type: 'Footer', variant: 'legal' },
     ],
+    local_lead_gen: [
+        { type: 'Header', variant: 'topbar', config: { sticky: true, showPhone: true } },
+        { type: 'Hero', variant: 'click-to-call' },
+        { type: 'TrustBadges' },
+        { type: 'QuoteCalculator' },
+        { type: 'FAQ' },
+        { type: 'LeadForm' },
+        { type: 'CitationBlock' },
+        { type: 'Footer', variant: 'minimal' },
+    ],
     docs: [
         { type: 'Header', variant: 'topbar', config: { sticky: true } },
         { type: 'Sidebar', config: { position: 'left' } },

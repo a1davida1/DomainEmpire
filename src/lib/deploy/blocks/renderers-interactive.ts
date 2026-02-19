@@ -110,6 +110,53 @@ registerBlockRenderer('ComparisonTable', (block, _ctx) => {
 </section>`;
 });
 
+// ── Formula security helpers ──────────────────────────────────────────────────
+
+/**
+ * Parse multi-output formulas at BUILD TIME so braces never reach client JS.
+ * Accepts: ({key1: expr1, key2: expr2}) or {key1: expr1, key2: expr2}
+ * Returns map of output-id → raw expression string, or null if single-output.
+ */
+function parseMultiOutputFormula(formula: string): Record<string, string> | null {
+    const trimmed = formula.trim();
+    const match = trimmed.match(/^\(?\s*\{([\s\S]+)\}\s*\)?$/);
+    if (!match) return null;
+
+    const inner = match[1];
+    const result: Record<string, string> = {};
+    let depth = 0;
+    let segStart = 0;
+
+    for (let i = 0; i <= inner.length; i++) {
+        const ch = i < inner.length ? inner[i] : ','; // sentinel
+        if (ch === '(') depth++;
+        else if (ch === ')') depth--;
+        else if (ch === ',' && depth === 0) {
+            const seg = inner.substring(segStart, i).trim();
+            const colon = seg.indexOf(':');
+            if (colon > 0) {
+                const key = seg.substring(0, colon).trim();
+                const expr = seg.substring(colon + 1).trim();
+                if (/^[a-zA-Z_]\w*$/.test(key) && expr) result[key] = expr;
+            }
+            segStart = i + 1;
+        }
+    }
+
+    return Object.keys(result).length > 0 ? result : null;
+}
+
+/** Generate JS format expression for a calculator output value. */
+function outputFormatCode(out: { format?: string; decimals?: number }, varName: string): string {
+    if (out.format === 'currency') {
+        return `'$'+${varName}.toLocaleString(undefined,{minimumFractionDigits:${out.decimals ?? 2},maximumFractionDigits:${out.decimals ?? 2}})`;
+    }
+    if (out.format === 'percent') {
+        return `${varName}.toFixed(${out.decimals ?? 1})+'%'`;
+    }
+    return `${varName}.toLocaleString(undefined,{maximumFractionDigits:${out.decimals ?? 0}})`;
+}
+
 // ============================================================
 // QuoteCalculator
 // ============================================================
@@ -217,13 +264,55 @@ registerBlockRenderer('QuoteCalculator', (block, _ctx) => {
 
     const headingHtml = heading ? `<h2>${escapeHtml(heading)}</h2>` : '';
 
-    // SECURITY: Sanitize formula for use in new Function() evaluation.
-    // Allow identifiers, numbers, basic math ops, parens, braces (for object literals),
-    // commas, dots, colons. Brackets stripped. Formulas come from trusted admin content
-    // (default-content.ts or AI pipeline), not user input.
-    const safeFormula = formula.replace(/[^a-zA-Z0-9_\s+\-*/%(){}.,:\s]/g, '');
+    // SECURITY: Formula sanitization for new Function() evaluation.
+    // NO braces {} — prevents getter/setter injection ({get x(){evil()}}).
+    // NO colons — prevents object literal syntax in client JS.
+    // NO brackets [] — prevents dynamic property access (self[String.fromCharCode(...)]).
+    // Multi-output formulas ({key: expr, ...}) are parsed at BUILD TIME (server-side).
+    // Each expression is individually sanitized; no {} ever reaches the client browser.
+    const sanitizeExpr = (s: string) => s.replace(/[^a-zA-Z0-9_\s+\-*/%().,]/g, '');
+    const multiOutput = parseMultiOutputFormula(formula);
 
-    const calcScript = safeFormula ? `<script>
+    let evalCode: string;
+    let hasFormula: boolean;
+
+    if (multiOutput) {
+        // Multi-output: parse {key: expr} server-side, generate per-output Function calls.
+        // No {} or : ever appears in the generated client JavaScript.
+        const parts = outputs.map((out, idx) => {
+            const expr = multiOutput[out.id];
+            if (!expr) return '';
+            const safe = sanitizeExpr(expr);
+            if (!safe.trim()) return '';
+            const fmt = outputFormatCode(out, `r${idx}`);
+            return `try{var fn${idx}=new Function(keys,'return ('+${JSON.stringify(safe)}+')');var r${idx}=fn${idx}.apply(null,values);var el${idx}=document.getElementById('result-${out.id}');if(el${idx}&&typeof r${idx}==='number'&&isFinite(r${idx}))el${idx}.textContent=${fmt};}catch(e){}`;
+        }).filter(Boolean);
+        evalCode = parts.length > 0
+            ? `var keys=Object.keys(vals).join(',');var values=Object.values(vals);\n      ${parts.join('\n      ')}`
+            : '';
+        hasFormula = parts.length > 0;
+    } else {
+        // Single-output: sanitize the whole formula expression.
+        const safe = sanitizeExpr(formula);
+        if (safe.trim()) {
+            evalCode = `try{
+      var fn=new Function(Object.keys(vals).join(','),'return ('+${JSON.stringify(safe)}+')');
+      var result=fn.apply(null,Object.values(vals));
+      ${outputs.map(out => {
+                const fmt = outputFormatCode(out, 'r');
+                return `var r=result;
+      var el=document.getElementById('result-${out.id}');
+      if(el&&typeof r==='number'&&isFinite(r))el.textContent=${fmt};`;
+            }).join('\n      ')}
+    }catch(e){}`;
+            hasFormula = true;
+        } else {
+            evalCode = '';
+            hasFormula = false;
+        }
+    }
+
+    const calcScript = hasFormula ? `<script>
 (function(){
   var form=document.querySelector('.calc-split');
   if(!form)form=document.querySelector('.calc-form');
@@ -234,20 +323,7 @@ registerBlockRenderer('QuoteCalculator', (block, _ctx) => {
     inputs.forEach(function(inp){
       vals[inp.name]=parseFloat(inp.value)||0;
     });
-    try{
-      var fn=new Function(Object.keys(vals).join(','),'return ('+${JSON.stringify(safeFormula)}+')');
-      var result=fn.apply(null,Object.values(vals));
-      ${outputs.map(out => {
-        const format = out.format === 'currency'
-            ? `'$'+r.toLocaleString(undefined,{minimumFractionDigits:${out.decimals ?? 2},maximumFractionDigits:${out.decimals ?? 2}})`
-            : out.format === 'percent'
-            ? `r.toFixed(${out.decimals ?? 1})+'%'`
-            : `r.toLocaleString(undefined,{maximumFractionDigits:${out.decimals ?? 0}})`;
-        return `var r=typeof result==='object'?result['${out.id}']:result;
-      var el=document.getElementById('result-${out.id}');
-      if(el&&typeof r==='number'&&isFinite(r))el.textContent=${format};`;
-      }).join('\n      ')}
-    }catch(e){}
+    ${evalCode}
     ${isLoan ? `
     // Compute breakdown line items for loan calculators
     try{

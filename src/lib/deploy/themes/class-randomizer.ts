@@ -40,6 +40,11 @@ const FINGERPRINT_CLASSES = [
     // Hero system
     'hero-cta--secondary', 'hero-cta-row', 'hero-trust-item', 'hero-trust',
     'hero-rating-stars', 'hero-rating', 'hero-badge', 'hero-sub', 'hero-cta',
+    'hero-stats-bar', 'hero-stat-value', 'hero-stat-label', 'hero-stat',
+    'hero-search-form', 'hero-search-input', 'hero-search-btn',
+    'hero-cta--jumbo', 'hero-cta--large',
+    'hero-phone-row', 'hero-phone-link', 'hero-phone-label',
+    'hero-sub--large',
     // Header
     'header-scrolled', 'header-phone-icon', 'header-phone', 'header-nav',
     'header--topbar', 'header--centered', 'header--minimal', 'header--simple',

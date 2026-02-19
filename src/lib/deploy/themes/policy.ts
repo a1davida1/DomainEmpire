@@ -31,11 +31,11 @@ const knownV2Skins = new Set(Object.keys(v2Skins));
  * These map directly to the v2 token system, bypassing v1 entirely.
  */
 const VERTICAL_V2_POLICY: Record<string, { theme: string; skin: string }> = {
-    legal:         { theme: 'editorial', skin: 'slate' },
-    insurance:     { theme: 'bold',      skin: 'ocean' },
+    legal:         { theme: 'corporate', skin: 'slate' },
+    insurance:     { theme: 'corporate', skin: 'cobalt' },
     health:        { theme: 'clean',     skin: 'forest' },
-    finance:       { theme: 'bold',      skin: 'ocean' },
-    real_estate:   { theme: 'editorial', skin: 'ember' },
+    finance:       { theme: 'startup',   skin: 'indigo' },
+    real_estate:   { theme: 'editorial', skin: 'sand' },
     medicare:      { theme: 'clean',     skin: 'forest' },
     technology:    { theme: 'minimal',   skin: 'midnight' },
     auto:          { theme: 'bold',      skin: 'midnight' },
@@ -44,16 +44,16 @@ const VERTICAL_V2_POLICY: Record<string, { theme: string; skin: string }> = {
     travel:        { theme: 'bold',      skin: 'coral' },
     pets:          { theme: 'bold',      skin: 'ember' },
     relationships: { theme: 'bold',      skin: 'coral' },
-    business:      { theme: 'editorial', skin: 'ocean' },
+    business:      { theme: 'corporate', skin: 'steel' },
     other:         { theme: 'clean',     skin: 'slate' },
 };
 
 const NICHE_V2_POLICY: Record<string, { theme: string; skin: string }> = {
-    legal:           { theme: 'editorial', skin: 'slate' },
-    insurance:       { theme: 'bold',      skin: 'ocean' },
+    legal:           { theme: 'corporate', skin: 'slate' },
+    insurance:       { theme: 'corporate', skin: 'cobalt' },
     health:          { theme: 'clean',     skin: 'forest' },
-    finance:         { theme: 'bold',      skin: 'ocean' },
-    real_estate:     { theme: 'editorial', skin: 'ember' },
+    finance:         { theme: 'startup',   skin: 'indigo' },
+    real_estate:     { theme: 'editorial', skin: 'sand' },
     medicare:        { theme: 'clean',     skin: 'forest' },
     technology:      { theme: 'minimal',   skin: 'midnight' },
     auto:            { theme: 'bold',      skin: 'midnight' },
@@ -62,7 +62,7 @@ const NICHE_V2_POLICY: Record<string, { theme: string; skin: string }> = {
     travel:          { theme: 'bold',      skin: 'coral' },
     pets:            { theme: 'bold',      skin: 'ember' },
     relationships:   { theme: 'bold',      skin: 'coral' },
-    business:        { theme: 'editorial', skin: 'ocean' },
+    business:        { theme: 'corporate', skin: 'steel' },
     wellness:        { theme: 'craft',     skin: 'sage' },
     beauty:          { theme: 'magazine',  skin: 'rose' },
     food:            { theme: 'craft',     skin: 'copper' },

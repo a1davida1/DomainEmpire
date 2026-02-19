@@ -551,7 +551,176 @@ export function generateDataSourcesSection(datasets: ArticleDatasetInfo[]): stri
     return `<section class="data-sources"><h2>Data Sources</h2><ul>${items}</ul></section>`;
 }
 
-/** Extract a human-readable site title from a domain name. Handles ccTLDs like example.co.uk. */
+// ── Word Break Algorithm for Domain Name Segmentation ────────────────────────
+
+const WORD_SET = new Set([
+    // Common English (top ~800 words that appear in domain names)
+    'a','an','the','and','or','but','in','on','at','to','for','of','with','by','from','up','about','into','over','after',
+    'is','it','my','me','we','us','our','you','your','he','she','they','its','be','am','are','was','were','been',
+    'do','did','does','done','has','have','had','get','got','go','goes','gone','can','will','would','should','could',
+    'not','no','all','any','some','each','every','much','many','more','most','such','own','other','another',
+    'new','old','big','small','good','bad','best','worst','great','little','long','short','high','low','first','last',
+    'right','left','next','real','true','free','full','half','open','easy','hard','fast','slow','safe','sure',
+    // Actions
+    'find','get','make','take','give','help','start','stop','buy','sell','pay','save','spend','earn','lose','win',
+    'check','compare','review','rate','rank','pick','choose','switch','change','cancel','fix','build','plan',
+    'search','look','see','watch','read','write','learn','know','think','try','use','need','want','like',
+    'call','ask','tell','say','show','work','run','walk','drive','fly','move','send','bring','keep','put',
+    // Business/commerce
+    'cost','costs','price','prices','value','worth','deal','deals','offer','offers','quote','quotes',
+    'budget','cheap','affordable','expensive','premium','basic','standard','pro','plus','elite','ultimate',
+    'service','services','product','products','tool','tools','app','software','platform','system','solution',
+    'company','business','brand','store','shop','market','agency','firm','group','team','network',
+    'guide','guides','blog','article','resource','resources','info','information','data','report','analysis',
+    // Finance
+    'loan','loans','mortgage','refinance','credit','debit','card','bank','finance','financial','invest',
+    'insurance','insure','tax','taxes','debt','equity','rate','rates','interest','payment','payments',
+    'salary','income','money','cash','fund','funds','stock','stocks','bond','bonds','retirement','roth',
+    'payoff','paydown','apr','apy',
+    // Health/medical
+    'health','healthy','medical','doctor','therapy','treatment','care','dental','braces','orthodontic','orthodontics',
+    'surgery','clinic','hospital','prescription','drug','medicine','vitamin','supplement','diet','weight',
+    'loss','fitness','exercise','mental','wellness','ivf','lasik','ketamine','ozempic','mounjaro','wegovy',
+    'semaglutide','eliquis',
+    // Real estate/home
+    'home','house','apartment','condo','property','real','estate','rent','rental','mortgage','realtor',
+    'renovation','remodel','remodeling','bathroom','kitchen','roof','roofing','plumbing','hvac','pool',
+    'solar','panel','panels','install','installation','window','door','floor','flooring','paint','painting',
+    'fence','fencing','garage','basement','attic','landscape','landscaping','garden','yard','patio','deck',
+    // Legal
+    'law','lawyer','legal','attorney','court','case','claim','sue','lawsuit','settle','settlement',
+    'divorce','custody','prenup','prenuptial','eviction','injury','accident','disability','bankruptcy',
+    'contract','agreement','license','permit','filing','notary','will','trust',
+    // Auto
+    'car','cars','auto','automobile','vehicle','truck','suv','sedan','motorcycle','tire','tires',
+    'mechanic','dealer','lease','tow','towing','roadside','assistance',
+    // Technology
+    'tech','digital','online','web','website','internet','cloud','data','cyber','security','ai',
+    'software','hardware','mobile','phone','computer','laptop','printer','battery','ev','electric',
+    // Travel/location
+    'travel','trip','hotel','flight','cruise','vacation','booking','destination','city','state','local',
+    'near','nearby','area','region','county','town','north','south','east','west','central',
+    // People/life
+    'baby','child','children','kid','kids','family','parent','parenting','pet','dog','cat','animal',
+    'wedding','marriage','dating','senior','elder','student','college','education','school','university',
+    // Industry terms
+    'calculator','estimator','planner','tracker','finder','checker','advisor','consultant','contractor',
+    'provider','specialist','expert','professional','certified','licensed','insured','verified','trusted',
+    'independent','unbiased',
+    // Common domain words
+    'hub','spot','zone','base','lab','labs','point','source','central','direct','express','prime',
+    'smart','quick','rapid','instant','simple','total','complete','ultimate','master','super','mega',
+    'top','max','mini','micro','nano','net','web','site','page','link','click',
+    // Place names (common US cities/regions that appear in local domains)
+    'branson','austin','dallas','houston','phoenix','denver','seattle','portland','nashville','atlanta',
+    'miami','tampa','orlando','chicago','boston','detroit','charlotte','raleigh','columbus','indianapolis',
+    'springfield','jacksonville','memphis','louisville','richmond','sacramento','oakland','tucson','mesa',
+    'omaha','tulsa','cleveland','pittsburgh','cincinnati','kansas','milwaukee','boulder','savannah',
+    'charleston','asheville','scottsdale','henderson','chandler','gilbert','glendale','plano','frisco',
+    'mckinney','allen','prosper','celina','anna',
+    // Misc
+    'only','fans','onlyfans','creator','creators','economy','dropship','kingdom','pokemon','reddit','amazon','costco',
+    'counter','debate','shadow','ban','thot','pilot','hero','vue','fan','fansly','fanvue',
+    'fsbo','llc','corp','inc',
+    // Additional common words for domain segmentation
+    'this','that','these','those','here','there','where','when','how','what','which','who','why',
+    'way','out','back','just','also','even','still','down','between','same','different',
+    'very','really','actually','probably','definitely','maybe',
+    'day','week','month','year','time','today','now',
+    'able','part','place','thing','things','lot','set',
+    'surance','makers','make','makes','made',
+    // Words found missing from portfolio testing
+    'ac','unit','beauty','settled','settled','debate','diabetes','generic','alternative',
+    'diminished','negotiat','negotiate','trading','forex','platform','comparison','picker',
+    'medicare','advantage','receipt','receipts','ready','refurbished','research','own',
+    'regular','reg','hustle','side','mistakes','mistake','suit','settled','trade',
+    'whats','wholes','quit','promos','promo','promotion','promotions','chatting','chat',
+    'scam','scammed','scams','being','getting','clearance','catcher',
+    'appraisal','valuation','formation','tuning','fine','owe',
+    'saver','rights','facts','proof','slap','cap','nocap',
+    'told','see','settled','versus','dvd','dv',
+    // Suffixes/prefixes that help segmentation
+    'tion','ment','ness','able','ible','ful','less','ing','ings','ment','ence','ance',
+    'ive','ous','ual','ial','ity','ify','ize','ise',
+    // Words from second round of portfolio testing
+    'replacement','afford','subscription','promote','waste','whole','arm','fixed',
+    'buy','it','old','told','reviews','suv','sedan',
+    // Words from third round
+    'term','regular','tradein','doi','acas','ownresearch',
+    // Handle "Xvs" patterns: split before "vs" in preprocessing
+    'suvvs','armvs',
+    // Common word forms
+    'buying','selling','saving','spending','earning','losing','winning','fixing','moving',
+    'renting','owning','trading','investing','checking','comparing','reviewing','rating',
+    'picking','choosing','switching','changing','canceling','cancelling','building','planning',
+    'searching','looking','watching','reading','writing','learning','knowing','thinking',
+    'trying','using','needing','wanting','liking','calling','asking','telling','showing',
+    'working','running','walking','driving','flying','sending','bringing','keeping',
+    'settled','required','needed','wanted','updated','verified','certified','licensed',
+    'insured','trusted','rated','ranked','reviewed','compared','recommended',
+]);
+
+/**
+ * Dynamic programming word break: finds the segmentation that uses the fewest
+ * words (preferring longer words) to cover the input string.
+ * Returns the space-separated result.
+ */
+function wordBreakSegment(input: string): string {
+    const n = input.length;
+    if (n === 0) return input;
+
+    // dp[i] = best segmentation for input[0..i-1], or null if impossible
+    const dp: Array<string[] | null> = new Array(n + 1).fill(null);
+    dp[0] = [];
+
+    for (let i = 1; i <= n; i++) {
+        for (let j = Math.max(0, i - 20); j < i; j++) {
+            if (dp[j] === null) continue;
+            const word = input.slice(j, i);
+            if (WORD_SET.has(word)) {
+                const candidate = [...dp[j]!, word];
+                if (dp[i] === null || candidate.length < dp[i]!.length) {
+                    dp[i] = candidate;
+                }
+            }
+        }
+    }
+
+    if (dp[n]) return dp[n]!.join(' ');
+
+    // Fallback: greedy longest match with single-char skip for uncovered portions
+    const words: string[] = [];
+    let pos = 0;
+    while (pos < n) {
+        let bestLen = 0;
+        for (let len = Math.min(20, n - pos); len >= 2; len--) {
+            if (WORD_SET.has(input.slice(pos, pos + len))) {
+                bestLen = len;
+                break;
+            }
+        }
+        if (bestLen > 0) {
+            words.push(input.slice(pos, pos + bestLen));
+            pos += bestLen;
+        } else {
+            if (words.length > 0 && words[words.length - 1].length < 4) {
+                words[words.length - 1] += input[pos];
+            } else {
+                words.push(input[pos]);
+            }
+            pos++;
+        }
+    }
+    return words.join(' ');
+}
+
+/**
+ * Extract a human-readable site title from a domain name.
+ *
+ * Uses dynamic programming (word break) with a comprehensive dictionary
+ * to find the optimal segmentation. Falls back to camelCase splitting
+ * and single-char-advance if no segmentation covers the full string.
+ */
 export function extractSiteTitle(domain: string): string {
     const ccTlds = ['.co.uk', '.com.au', '.co.nz', '.co.za', '.com.br', '.co.in', '.org.uk', '.net.au'];
     let sld = domain;
@@ -572,53 +741,16 @@ export function extractSiteTitle(domain: string): string {
             .replace(/([a-z])(\d)/g, '$1 $2')
             .replace(/(\d)([a-z])/gi, '$1 $2');
         if (!spaced.includes(' ')) {
-            const DICTIONARY = ['bathroom','renovation','cost','costs','kitchen','remodel','price','pool',
-                'installation','hvac','unit','install','replacement','credit','card','payoff',
-                'insurance','compare','auto','pet','switch','medicare','whole','term','extended',
-                'warranty','guide','ozempic','mounjaro','semaglutide','wegovy','therapy','braces',
-                'ivf','lasik','surgery','prescription','ketamine','refinance','loan','student',
-                'equity','salary','roth','debt','free','tax','filing','deduction','claim',
-                'home','value','rent','realtor','fsbo','trade','diminished','divorce','disability',
-                'injury','eviction','contractor','scam','prenup','supplement','beauty','sneaker',
-                'valuation','tool','pokemon','appraisal','wedding','planner','zone','fine','tuning',
-                'dropship','kingdom','clearance','catcher','travel','deal','spot','forum',
-                'affordable','generic','weight','loss','findings','analysis','today','facts',
-                'settled','refurbished','cancel','subscription','negotiate','bill','amazon','costco',
-                'arm','fixed','worth','fix','quit','rent','own','research','creator','onlyfans',
-                'fansly','review','shadow','ban','reddit','promotion','chatting','expert',
-                'car','accident','my','file','suit','settle','total','not','should','what','how',
-                'much','do','have','case','is','or','vs','the','a','an','of','for','your','can',
-                'am','being','scammed','big','independent','no','printer',
-                'start','formation','calc','in','i','eliquis','alternative','payday','pro','renting','waste',
-                'write','off','wash','sale','rule','afford','check','ev','battery',
-                'suv','sedan','debates','over','counter','safe','take',
-                'rate','timing','pay','save','best','state','find',
-                'thot','pilot','info','help','hero','offers','service',
-                'fan','vue','shadowban'];
-            DICTIONARY.sort((a, b) => b.length - a.length);
-            const lower = spaced.toLowerCase();
-            const breaks = new Set<number>();
-            let pos = 0;
-            while (pos < lower.length) {
-                let matched = false;
-                for (const word of DICTIONARY) {
-                    if (lower.startsWith(word, pos)) {
-                        breaks.add(pos);
-                        pos += word.length;
-                        matched = true;
-                        break;
-                    }
-                }
-                if (!matched) pos++;
-            }
-            if (breaks.size > 1) {
-                let result = '';
-                for (let i = 0; i < spaced.length; i++) {
-                    if (breaks.has(i) && i > 0) result += ' ';
-                    result += spaced[i];
-                }
-                spaced = result;
-            }
+            // Preprocess: split on known compound patterns before DP
+            let preprocessed = spaced.toLowerCase()
+                .replace(/vs(?=[a-z])/g, 'vs ')    // "suvvssedan" → "suvvs sedan" → "suv vs sedan"
+                .replace(/(?<=[a-z])vs/g, ' vs')    // "armvsfixed" → "arm vsfixed" → "arm vs fixed"
+                .replace(/tradein/g, 'trade in')
+                .replace(/helpme/g, 'help me');
+            // Run word break on each pre-split segment
+            spaced = preprocessed.split(' ').map(seg => seg.trim()).filter(Boolean)
+                .map(seg => WORD_SET.has(seg) ? seg : wordBreakSegment(seg))
+                .join(' ');
         }
     }
     let titled = spaced.replaceAll(/\b\w/g, c => c.toUpperCase()).trim();

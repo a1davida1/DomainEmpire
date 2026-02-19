@@ -484,6 +484,9 @@ function buildOpenGraphMeta(ctx: RenderContext, pageUrl: string): string {
     return tags.join('\n  ');
 }
 
+// Niche-specific schema.org types — uses shared registry (no duplicate patterns)
+import { resolveSchemaType } from '../niche-registry';
+
 function buildStructuredData(ctx: RenderContext, canonicalUrl: string, blocks: BlockEnvelope[] = []): string {
     const scripts: string[] = [];
     const isHomepage = ctx.route === '/';
@@ -577,11 +580,13 @@ function buildStructuredData(ctx: RenderContext, canonicalUrl: string, blocks: B
         }
     }
 
-    // Organization + WebSite schema on homepage
+    // Organization + WebSite schema on homepage (niche-aware type)
     if (isHomepage) {
-        const orgSchema = {
+        const nicheSchema = resolveSchemaType(ctx.domain, ctx.niche);
+
+        const orgSchema: Record<string, unknown> = {
             '@context': 'https://schema.org',
-            '@type': 'Organization',
+            '@type': nicheSchema.organizationType,
             name: ctx.siteTitle,
             url: `https://${ctx.domain}`,
             logo: `https://${ctx.domain}/favicon.svg`,
@@ -1111,6 +1116,136 @@ ${cookieHtml}`;
 });
 
 // --- Hero ---
+
+function renderHeroStatsBar(
+    heading: string, subheading: string, badge: string,
+    ctaText: string, ctaUrl: string,
+    stats: Array<{ label: string; value: string }>,
+    trustItems: string[],
+): string {
+    const badgeHtml = badge ? `<span class="hero-badge">${escapeHtml(badge)}</span>` : '';
+    const subHtml = subheading ? `<p class="hero-sub">${escapeHtml(subheading)}</p>` : '';
+    const ctaHtml = ctaText && ctaUrl
+        ? `<a href="${escapeAttr(ctaUrl)}" class="cta-button hero-cta hero-cta--large">${escapeHtml(ctaText)}</a>`
+        : '';
+    const statsHtml = stats.length > 0
+        ? `<div class="hero-stats-bar">${stats.map(s =>
+            `<div class="hero-stat"><span class="hero-stat-value">${escapeHtml(s.value)}</span><span class="hero-stat-label">${escapeHtml(s.label)}</span></div>`
+          ).join('')}</div>`
+        : '';
+    const trustHtml = trustItems.length > 0
+        ? `<div class="hero-trust">${trustItems.map(t => `<span class="hero-trust-item">✓ ${escapeHtml(t)}</span>`).join('')}</div>`
+        : '';
+    return `<section class="hero hero--stats-bar">
+  <div class="site-container">
+    ${badgeHtml}
+    <h1>${escapeHtml(heading)}</h1>
+    ${subHtml}
+    ${ctaHtml}
+    ${statsHtml}
+    ${trustHtml}
+  </div>
+</section>`;
+}
+
+function renderHeroSearch(
+    heading: string, subheading: string, badge: string,
+    searchPlaceholder: string, trustItems: string[],
+): string {
+    const badgeHtml = badge ? `<span class="hero-badge">${escapeHtml(badge)}</span>` : '';
+    const subHtml = subheading ? `<p class="hero-sub">${escapeHtml(subheading)}</p>` : '';
+    const placeholder = searchPlaceholder || 'Search our guides and tools...';
+    const trustHtml = trustItems.length > 0
+        ? `<div class="hero-trust">${trustItems.map(t => `<span class="hero-trust-item">✓ ${escapeHtml(t)}</span>`).join('')}</div>`
+        : '';
+    // Client-side search that reads nav links from the page header and
+    // navigates to the best matching page. Works on fully static sites.
+    const searchScript = `<script>(function(){var i=document.querySelector('.hero-search-input');var b=document.querySelector('.hero-search-btn');if(!i||!b)return;function go(){var q=(i.value||'').trim().toLowerCase();if(!q)return;var links=Array.from(document.querySelectorAll('header a[href]'));var best=null;var bestScore=0;for(var k=0;k<links.length;k++){var a=links[k];var t=(a.textContent||'').toLowerCase();var h=(a.getAttribute('href')||'').toLowerCase();if(h==='/'||h==='#')continue;var s=0;if(t.indexOf(q)>=0)s+=2;if(h.indexOf(q)>=0)s+=1;if(s>bestScore){bestScore=s;best=a}}if(best)window.location.href=best.getAttribute('href');else if(links.length>1)window.location.href=links[1].getAttribute('href')}b.addEventListener('click',go);i.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();go()}})})()</script>`;
+    return `<section class="hero hero--search">
+  <div class="site-container">
+    ${badgeHtml}
+    <h1>${escapeHtml(heading)}</h1>
+    ${subHtml}
+    <div class="hero-search-form" role="search">
+      <input type="search" class="hero-search-input" placeholder="${escapeAttr(placeholder)}" aria-label="Search">
+      <button type="button" class="hero-search-btn">Search</button>
+    </div>
+    ${trustHtml}
+  </div>
+</section>
+${searchScript}`;
+}
+
+function renderHeroSingleCta(
+    heading: string, subheading: string, badge: string,
+    ctaText: string, ctaUrl: string, trustItems: string[],
+): string {
+    const badgeHtml = badge ? `<span class="hero-badge">${escapeHtml(badge)}</span>` : '';
+    const subHtml = subheading ? `<p class="hero-sub">${escapeHtml(subheading)}</p>` : '';
+    const ctaHtml = ctaText && ctaUrl
+        ? `<a href="${escapeAttr(ctaUrl)}" class="cta-button hero-cta hero-cta--jumbo">${escapeHtml(ctaText)}</a>`
+        : '';
+    const trustHtml = trustItems.length > 0
+        ? `<div class="hero-trust">${trustItems.map(t => `<span class="hero-trust-item">✓ ${escapeHtml(t)}</span>`).join('')}</div>`
+        : '';
+    return `<section class="hero hero--single-cta">
+  <div class="site-container">
+    ${badgeHtml}
+    <h1>${escapeHtml(heading)}</h1>
+    ${subHtml}
+    ${ctaHtml}
+    ${trustHtml}
+  </div>
+</section>`;
+}
+
+function renderHeroClickToCall(
+    heading: string, subheading: string, badge: string,
+    phone: string, ctaText: string, ctaUrl: string, trustItems: string[],
+): string {
+    const badgeHtml = badge ? `<span class="hero-badge">${escapeHtml(badge)}</span>` : '';
+    const subHtml = subheading ? `<p class="hero-sub">${escapeHtml(subheading)}</p>` : '';
+    const phoneDisplay = phone || '(555) 000-0000';
+    const phoneHref = phone ? `tel:${phone.replace(/[^0-9+]/g, '')}` : '#';
+    const ctaHtml = ctaText && ctaUrl
+        ? `<a href="${escapeAttr(ctaUrl)}" class="cta-button hero-cta--secondary">${escapeHtml(ctaText)}</a>`
+        : '';
+    const trustHtml = trustItems.length > 0
+        ? `<div class="hero-trust">${trustItems.map(t => `<span class="hero-trust-item">✓ ${escapeHtml(t)}</span>`).join('')}</div>`
+        : '';
+    return `<section class="hero hero--click-to-call">
+  <div class="site-container">
+    ${badgeHtml}
+    <h1>${escapeHtml(heading)}</h1>
+    ${subHtml}
+    <div class="hero-phone-row">
+      <a href="${escapeAttr(phoneHref)}" class="hero-phone-link">${escapeHtml(phoneDisplay)}</a>
+      <span class="hero-phone-label">Call Now — Free Estimate</span>
+    </div>
+    <div class="hero-cta-row">${ctaHtml}</div>
+    ${trustHtml}
+  </div>
+</section>`;
+}
+
+function renderHeroMinimalText(
+    heading: string, subheading: string, badge: string, trustItems: string[],
+): string {
+    const badgeHtml = badge ? `<span class="hero-badge">${escapeHtml(badge)}</span>` : '';
+    const subHtml = subheading ? `<p class="hero-sub hero-sub--large">${escapeHtml(subheading)}</p>` : '';
+    const trustHtml = trustItems.length > 0
+        ? `<div class="hero-trust">${trustItems.map(t => `<span class="hero-trust-item">✓ ${escapeHtml(t)}</span>`).join('')}</div>`
+        : '';
+    return `<section class="hero hero--minimal-text">
+  <div class="site-container">
+    ${badgeHtml}
+    <h1>${escapeHtml(heading)}</h1>
+    ${subHtml}
+    ${trustHtml}
+  </div>
+</section>`;
+}
+
 registerBlockRenderer('Hero', (block, ctx) => {
     const content = (block.content || {}) as Record<string, unknown>;
     const config = (block.config || {}) as Record<string, unknown>;
@@ -1120,9 +1255,31 @@ registerBlockRenderer('Hero', (block, ctx) => {
     const ctaText = (content.ctaText as string) || '';
     const ctaUrl = (content.ctaUrl as string) || '';
     const badge = (content.badge as string) || '';
+    const trustItems = (content.trustIndicators as string[]) || [];
+
+    // Dispatch to structural variants
+    if (variant === 'click-to-call') {
+        const phone = (content.phone as string) || '';
+        return renderHeroClickToCall(heading, subheading, badge, phone, ctaText, ctaUrl, trustItems);
+    }
+    if (variant === 'minimal-text') {
+        return renderHeroMinimalText(heading, subheading, badge, trustItems);
+    }
+    if (variant === 'stats-bar') {
+        const stats = (content.stats as Array<{ label: string; value: string }>) || [];
+        return renderHeroStatsBar(heading, subheading, badge, ctaText, ctaUrl, stats, trustItems);
+    }
+    if (variant === 'search') {
+        const searchPlaceholder = (content.searchPlaceholder as string) || '';
+        return renderHeroSearch(heading, subheading, badge, searchPlaceholder, trustItems);
+    }
+    if (variant === 'single-cta') {
+        return renderHeroSingleCta(heading, subheading, badge, ctaText, ctaUrl, trustItems);
+    }
+
+    // Default renderer for centered/split/minimal/gradient/image/glass/typing
     const secondaryCta = (content.secondaryCtaText as string) || '';
     const secondaryCtaUrl = (content.secondaryCtaUrl as string) || '';
-    const trustItems = (content.trustIndicators as string[]) || [];
     const rating = content.rating as number | undefined;
 
     const badgeHtml = badge ? `<span class="hero-badge">${escapeHtml(badge)}</span>` : '';
