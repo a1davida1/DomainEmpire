@@ -104,8 +104,56 @@ export interface RandomizePlan {
 // Constants (mirrored from VisualConfigurator — importable by client code)
 // ============================================================
 
-export const THEMES = ['clean', 'editorial', 'bold', 'minimal'] as const;
-export const SKINS = ['slate', 'ocean', 'forest', 'ember', 'midnight', 'coral'] as const;
+export const THEMES = [
+    'clean',
+    'editorial',
+    'bold',
+    'minimal',
+    'magazine',
+    'glass',
+    'corporate',
+    'craft',
+    'startup',
+    'noir',
+] as const;
+
+export const SKINS = [
+    'slate',
+    'ocean',
+    'forest',
+    'ember',
+    'midnight',
+    'sage',
+    'indigo',
+    'sand',
+    'teal',
+    'wine',
+    'cobalt',
+    'charcoal',
+    'arctic',
+    'dusk',
+] as const;
+
+type ThemeChoice = (typeof THEMES)[number];
+type SkinChoice = (typeof SKINS)[number];
+
+const DESIGN_IDENTITIES: ReadonlyArray<{ theme: ThemeChoice; skin: SkinChoice }> = [
+    { theme: 'clean', skin: 'slate' },
+    { theme: 'clean', skin: 'teal' },
+    { theme: 'editorial', skin: 'sand' },
+    { theme: 'editorial', skin: 'wine' },
+    { theme: 'bold', skin: 'cobalt' },
+    { theme: 'minimal', skin: 'sage' },
+    { theme: 'magazine', skin: 'indigo' },
+    { theme: 'glass', skin: 'arctic' },
+    { theme: 'corporate', skin: 'ocean' },
+    { theme: 'craft', skin: 'ember' },
+    { theme: 'startup', skin: 'cobalt' },
+    { theme: 'startup', skin: 'teal' },
+    { theme: 'noir', skin: 'charcoal' },
+    { theme: 'noir', skin: 'dusk' },
+    { theme: 'bold', skin: 'midnight' },
+];
 
 const VARIANT_OPTIONS: Record<string, readonly string[]> = {
     Header: ['topbar', 'centered', 'minimal', 'split'],
@@ -328,9 +376,10 @@ export function generateRandomizePlan(
     resetBlockCounter();
     const rng = createSeededRng(seed);
 
-    // Pick global identity
-    const theme = seededPick(rng, THEMES);
-    const skin = seededPick(rng, SKINS);
+    // Pick global identity from curated theme+skin pairings to keep output polished.
+    const identity = seededPick(rng, DESIGN_IDENTITIES);
+    const theme = identity.theme;
+    const skin = identity.skin;
 
     // Randomize existing pages
     const pageUpdates = pages.map(page => ({

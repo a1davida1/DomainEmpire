@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { apiFetch } from '@/lib/api-fetch';
 import { Globe, Loader2 } from 'lucide-react';
 
 export default function LoginPage() {
@@ -21,10 +22,9 @@ export default function LoginPage() {
         setLoading(true);
 
         try {
-            const response = await fetch('/api/auth/login', {
+            const response = await apiFetch('/api/auth/login', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: email || undefined, password }),
+                body: { email: email.trim() || undefined, password },
             });
 
             if (!response.ok) {

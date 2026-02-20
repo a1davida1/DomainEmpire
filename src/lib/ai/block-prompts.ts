@@ -33,6 +33,31 @@ You are writing as "${voiceSeed.name}".
 `;
 }
 
+function existingBlocksSummary(ctx: BlockPromptContext): string {
+    if (!ctx.existingBlocks || ctx.existingBlocks.length === 0) return 'No prior blocks provided.';
+    const counts = new Map<string, number>();
+    for (const b of ctx.existingBlocks) {
+        counts.set(b.type, (counts.get(b.type) || 0) + 1);
+    }
+    return [...counts.entries()]
+        .map(([type, count]) => `${type}${count > 1 ? ` x${count}` : ''}`)
+        .join(', ');
+}
+
+function siteQualityRules(ctx: BlockPromptContext): string {
+    return `
+SITE STRUCTURE CONTEXT:
+- Existing blocks on this page: ${existingBlocksSummary(ctx)}
+
+QUALITY GUARDRAILS:
+- Write production-ready copy, not placeholders.
+- NEVER use placeholders like "Option A", "Item Name", "Tier Name", "Top Choice A", "Example", or "Lorem ipsum".
+- Avoid repeating the same angle already covered by other blocks; complement them instead.
+- Prefer specific, concrete language over generic marketing claims.
+- Keep internal links route-safe: use only "/", "/compare", "/guides", "/calculator", "/reviews", "/about", "/contact", "/faq", or in-page anchors.
+`;
+}
+
 function antiAiRules(): string {
     return `
 ANTI-AI WRITING RULES:
@@ -80,6 +105,8 @@ const BLOCK_PROMPTS: Partial<Record<BlockType, BlockPromptGenerator>> = {
     Hero: (ctx) => `
 Generate hero section content for a page about "${ctx.keyword}" on ${ctx.domainName}.
 
+${siteQualityRules(ctx)}
+
 ${jsonOutputRule(`{
   "heading": "Compelling H1 headline (50-70 chars, includes keyword naturally)",
   "subheading": "One-sentence value proposition (80-120 chars)",
@@ -95,6 +122,7 @@ You are a veteran freelance writer. Write a comprehensive article about "${ctx.k
 
 ${antiAiRules()}
 ${voiceInstructions(ctx.voiceSeed)}
+${siteQualityRules(ctx)}
 
 RESEARCH DATA (cite these statistics and sources in your writing):
 ${JSON.stringify(ctx.researchData || {})}
@@ -118,6 +146,8 @@ ${jsonOutputRule(`{
     FAQ: (ctx) => `
 Generate FAQ items for a page about "${ctx.keyword}" on ${ctx.domainName}.
 
+${siteQualityRules(ctx)}
+
 Create 5-8 questions that real people actually search for about this topic.
 Answers should be 2-4 sentences each:concise but complete.
 Use the research data for factual answers.
@@ -139,6 +169,8 @@ ${jsonOutputRule(`{
     ComparisonTable: (ctx) => `
 Generate a comparison table for "${ctx.keyword}" on ${ctx.domainName}.
 
+${siteQualityRules(ctx)}
+
 Create a thorough comparison of 3-6 options with honest scoring.
 Always pick a winner:don't cop out with "it depends."
 
@@ -148,8 +180,8 @@ ${JSON.stringify(ctx.researchData || {})}
 ${jsonOutputRule(`{
   "options": [
     {
-      "name": "Product/Service Name",
-      "url": "https://example.com (if applicable, or null)",
+      "name": "Real product/service/provider name relevant to this niche",
+      "url": "Direct URL for that option (or null if unavailable)",
       "badge": "Best Overall / Best Value / Best Premium (only for top picks, null for others)",
       "scores": { "column_key": 4.5 }
     }
@@ -164,6 +196,8 @@ ${jsonOutputRule(`{
     // --- QuoteCalculator ---
     QuoteCalculator: (ctx) => `
 Design a calculator/estimator tool for "${ctx.keyword}" on ${ctx.domainName}.
+
+${siteQualityRules(ctx)}
 
 Define inputs, outputs, and the formula. Use real-world defaults from research data.
 The formula must be a valid JavaScript expression using the input IDs as variables.
@@ -188,6 +222,8 @@ ${jsonOutputRule(`{
     CostBreakdown: (ctx) => `
 Generate cost breakdown data for "${ctx.keyword}" on ${ctx.domainName}.
 
+${siteQualityRules(ctx)}
+
 Provide real cost ranges with specific dollar amounts. No "it varies" cop-outs.
 Include factors that actually move the price needle with dollar impacts.
 
@@ -208,6 +244,8 @@ ${jsonOutputRule(`{
     LeadForm: (ctx) => `
 Design a lead capture form for "${ctx.keyword}" on ${ctx.domainName} (${ctx.niche} niche).
 
+${siteQualityRules(ctx)}
+
 The form should feel helpful, not salesy. Ask only what's needed to provide value.
 Include proper consent text and a clear value proposition.
 
@@ -225,6 +263,8 @@ ${jsonOutputRule(`{
     CTABanner: (ctx) => `
 Generate CTA banner content for a page about "${ctx.keyword}" on ${ctx.domainName}.
 
+${siteQualityRules(ctx)}
+
 The CTA should be compelling but not pushy. Match the ${ctx.niche} niche tone.
 
 ${jsonOutputRule(`{
@@ -237,6 +277,8 @@ ${jsonOutputRule(`{
     // --- Wizard ---
     Wizard: (ctx) => `
 Design a multi-step interactive flow about "${ctx.keyword}" for ${ctx.domainName}.
+
+${siteQualityRules(ctx)}
 
 Create 3-5 steps that guide the user to a personalized recommendation.
 Each step should have clear, actionable questions.
@@ -273,6 +315,8 @@ ${jsonOutputRule(`{
     StatGrid: (ctx) => `
 Generate stat/metric cards for "${ctx.keyword}" on ${ctx.domainName}.
 
+${siteQualityRules(ctx)}
+
 Create 6-12 data points grouped by category. Use real numbers from research.
 Each item needs a metric value (0-100 scale), a label, and a brief summary.
 
@@ -289,6 +333,8 @@ ${jsonOutputRule(`{
     // --- InteractiveMap ---
     InteractiveMap: (ctx) => `
 Generate region-based content for "${ctx.keyword}" on ${ctx.domainName}.
+
+${siteQualityRules(ctx)}
 
 Create content for major US regions (or relevant geographic areas).
 Each region should have specific, actionable local information.
@@ -307,6 +353,8 @@ ${jsonOutputRule(`{
     // --- CitationBlock ---
     CitationBlock: (ctx) => `
 You are building a citation/sources section for a page about "${ctx.keyword}" on ${ctx.domainName} (${ctx.niche} niche).
+
+${siteQualityRules(ctx)}
 
 Generate 4-6 real, verifiable source citations. Prioritize:
 1. Government sources (.gov) — CDC, BLS, HUD, IRS, FDA, CFPB, FTC, etc.
@@ -339,6 +387,8 @@ ${jsonOutputRule(`{
     RankingList: (ctx) => `
 Generate a ranked list for "${ctx.keyword}" on ${ctx.domainName}.
 
+${siteQualityRules(ctx)}
+
 Rank 5-10 items with honest ratings. Always explain WHY each item is ranked where it is.
 Include specific pros/cons and real pricing where applicable.
 
@@ -348,7 +398,7 @@ ${JSON.stringify(ctx.researchData || {})}
 ${jsonOutputRule(`{
   "title": "Top [N] [Category] in 2026",
   "items": [
-    { "rank": 1, "name": "Item Name", "description": "2-3 sentence review with specific detail", "rating": 4.5, "badge": "Best Overall (only for #1, null for others)", "url": "https://item-url.com or null" }
+    { "rank": 1, "name": "Real option name", "description": "2-3 sentence review with specific detail", "rating": 4.5, "badge": "Best Overall (only for #1, null for others)", "url": "Direct URL for this option or null" }
   ]
 }`)}
 `,
@@ -357,18 +407,20 @@ ${jsonOutputRule(`{
     ProsConsCard: (ctx) => `
 Generate a detailed pros/cons review for "${ctx.keyword}" on ${ctx.domainName}.
 
+${siteQualityRules(ctx)}
+
 Be honest:include real weaknesses, not just token cons.
 
 RESEARCH DATA:
 ${JSON.stringify(ctx.researchData || {})}
 
 ${jsonOutputRule(`{
-  "name": "Product/Service Name",
+  "name": "Real product/service/provider name",
   "rating": 4.2,
   "pros": ["Specific pro with detail", "Another specific pro"],
   "cons": ["Honest con with context", "Another real weakness"],
   "summary": "2-3 sentence balanced verdict",
-  "url": "https://product-url.com or null",
+  "url": "Direct URL for this option or null",
   "badge": "Editor's Choice or null"
 }`)}
 `,
@@ -376,6 +428,8 @@ ${jsonOutputRule(`{
     // --- TestimonialGrid ---
     TestimonialGrid: (ctx) => `
 Generate realistic testimonial content for a ${ctx.niche} page about "${ctx.keyword}" on ${ctx.domainName}.
+
+${siteQualityRules(ctx)}
 
 These should sound like real customer quotes:varied in length, specific in detail, not generic praise.
 
@@ -389,6 +443,8 @@ ${jsonOutputRule(`{
     // --- Checklist ---
     Checklist: (ctx) => `
 Generate a step-by-step checklist for "${ctx.keyword}" on ${ctx.domainName}.
+
+${siteQualityRules(ctx)}
 
 Each step should be actionable and specific. Include enough detail in the body to actually help someone complete the step.
 
@@ -409,6 +465,8 @@ ${jsonOutputRule(`{
     AuthorBio: (ctx) => `
 Generate an author bio for content about "${ctx.keyword}" on ${ctx.domainName} (${ctx.niche} niche).
 
+${siteQualityRules(ctx)}
+
 ${ctx.voiceSeed ? `The author persona is "${ctx.voiceSeed.name}": ${ctx.voiceSeed.background}` : 'Create a credible author persona for this niche.'}
 
 ${jsonOutputRule(`{
@@ -421,6 +479,8 @@ ${jsonOutputRule(`{
     // --- TrustBadges ---
     TrustBadges: (ctx) => `
 Generate trust badge content for ${ctx.domainName} (${ctx.niche} niche).
+
+${siteQualityRules(ctx)}
 
 Create 3-5 trust signals appropriate for this vertical.
 
@@ -435,6 +495,8 @@ ${jsonOutputRule(`{
     MedicalDisclaimer: (ctx) => `
 Generate a medical disclaimer for health content about "${ctx.keyword}" on ${ctx.domainName}.
 
+${siteQualityRules(ctx)}
+
 Must be legally sound and clearly visible. Not boilerplate:make it relevant to the specific topic.
 
 ${jsonOutputRule(`{
@@ -445,6 +507,8 @@ ${jsonOutputRule(`{
     // --- DataTable ---
     DataTable: (ctx) => `
 Generate a data table for "${ctx.keyword}" on ${ctx.domainName}.
+
+${siteQualityRules(ctx)}
 
 Use real data from research. The table should be immediately useful to readers.
 
@@ -462,6 +526,8 @@ ${jsonOutputRule(`{
     PricingTable: (ctx) => `
 You are creating a pricing comparison table for a ${ctx.niche} website (${ctx.domainName}) about "${ctx.keyword}".
 
+${siteQualityRules(ctx)}
+
 This is NOT a lookup task. You are GENERATING content for a website we are building. Create 3-4 realistic pricing tiers based on industry-standard pricing for this niche. Use real market price ranges.
 
 For example, if the niche is "braces/orthodontics", the tiers might be: Metal Braces ($3,000-$7,000), Ceramic Braces ($4,000-$8,000), Invisalign ($3,500-$8,500), Lingual Braces ($8,000-$13,000).
@@ -474,7 +540,7 @@ IMPORTANT: Return valid JSON only. Do NOT refuse. Do NOT say you cannot generate
 ${jsonOutputRule(`{
   "plans": [
     {
-      "name": "Tier Name",
+      "name": "Real plan/tier name used in this niche",
       "price": "$X,XXX - $X,XXX",
       "period": "total",
       "features": ["Feature 1", "Feature 2", "Feature 3", "Feature 4"],
@@ -502,14 +568,16 @@ ${jsonOutputRule(`{
     VsCard: (ctx) => `
 Generate a head-to-head comparison for "${ctx.keyword}" on ${ctx.domainName}.
 
+${siteQualityRules(ctx)}
+
 Compare two specific items/options directly. Be opinionated:pick a winner.
 
 RESEARCH DATA:
 ${JSON.stringify(ctx.researchData || {})}
 
 ${jsonOutputRule(`{
-  "itemA": { "name": "Option A", "description": "2 sentence summary", "pros": ["Pro 1", "Pro 2"], "cons": ["Con 1"], "rating": 4.2, "url": "https://... or null" },
-  "itemB": { "name": "Option B", "description": "2 sentence summary", "pros": ["Pro 1", "Pro 2"], "cons": ["Con 1"], "rating": 3.8, "url": "https://... or null" },
+  "itemA": { "name": "Real option name A", "description": "2 sentence summary", "pros": ["Pro 1", "Pro 2"], "cons": ["Con 1"], "rating": 4.2, "url": "Direct URL or null" },
+  "itemB": { "name": "Real option name B", "description": "2 sentence summary", "pros": ["Pro 1", "Pro 2"], "cons": ["Con 1"], "rating": 3.8, "url": "Direct URL or null" },
   "verdict": "Clear recommendation with reasoning (1-2 sentences)"
 }`)}
 `,

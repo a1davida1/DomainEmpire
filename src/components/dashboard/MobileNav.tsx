@@ -2,9 +2,10 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { apiFetch } from '@/lib/api-fetch';
 import {
     LayoutDashboard,
     PlayCircle,
@@ -87,7 +88,20 @@ const navSections: NavSection[] = [
 
 export function MobileNav() {
     const pathname = usePathname();
+    const router = useRouter();
     const [isOpen, setIsOpen] = useState(false);
+
+    async function handleLogout() {
+        try {
+            await apiFetch('/api/auth/logout', { method: 'POST' });
+        } catch (err) {
+            console.error('[MobileNav] Logout request failed:', err);
+        } finally {
+            setIsOpen(false);
+            router.push('/login');
+            router.refresh();
+        }
+    }
 
     return (
         <div className="md:hidden flex items-center justify-between px-4 py-3 border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80">
@@ -137,16 +151,15 @@ export function MobileNav() {
                         </nav>
 
                         <div className="mt-auto border-t pt-4">
-                            <form action="/api/auth/logout" method="POST">
-                                <Button
-                                    type="submit"
-                                    variant="ghost"
-                                    className="w-full justify-start gap-3 text-red-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/30 dark:hover:text-red-400"
-                                >
-                                    <LogOut className="h-5 w-5" />
-                                    Sign Out
-                                </Button>
-                            </form>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                className="w-full justify-start gap-3 text-red-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/30 dark:hover:text-red-400"
+                                onClick={handleLogout}
+                            >
+                                <LogOut className="h-5 w-5" />
+                                Sign Out
+                            </Button>
                         </div>
                     </div>
                 </div>

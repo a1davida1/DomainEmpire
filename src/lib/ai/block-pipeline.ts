@@ -15,6 +15,7 @@ import { db, pageDefinitions, domains, articles } from '@/lib/db';
 import { eq, and } from 'drizzle-orm';
 import { getAIClient } from './openrouter';
 import { getOrCreateVoiceSeed } from './voice-seed';
+import { getDefaultBlockContent } from '@/lib/deploy/blocks/default-content';
 import {
     validateBlock,
     type BlockType,
@@ -74,6 +75,101 @@ function generateFallbackCitations(niche: string): Record<string, unknown> {
     return { sources: DEFAULT_CITATIONS };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function mergeGeneratedWithDefaults(generated: unknown, defaults: unknown): unknown {
+    if (generated === undefined || generated === null) {
+        return defaults;
+    }
+
+    if (Array.isArray(generated)) {
+        if (generated.length === 0 && Array.isArray(defaults) && defaults.length > 0) {
+            return defaults;
+        }
+        return generated;
+    }
+
+    if (isRecord(generated) && isRecord(defaults)) {
+        const merged: Record<string, unknown> = { ...defaults };
+        for (const [key, value] of Object.entries(generated)) {
+            merged[key] = mergeGeneratedWithDefaults(value, defaults[key]);
+        }
+        return merged;
+    }
+
+    return generated;
+}
+
+function applyBlockContentDefaults(
+    block: BlockEnvelope,
+    content: Record<string, unknown>,
+    ctx: BlockPromptContext,
+): Record<string, unknown> {
+    const defaults = getDefaultBlockContent(
+        block.type,
+        ctx.domainName,
+        ctx.niche,
+        block.variant,
+    ).content;
+
+    if (!defaults || Object.keys(defaults).length === 0) {
+        return content;
+    }
+
+    return mergeGeneratedWithDefaults(content, defaults) as Record<string, unknown>;
+}
+
+function deepEqual(a: unknown, b: unknown): boolean {
+    if (a === b) return true;
+    if (Array.isArray(a) && Array.isArray(b)) {
+        if (a.length !== b.length) return false;
+        for (let i = 0; i < a.length; i++) {
+            if (!deepEqual(a[i], b[i])) return false;
+        }
+        return true;
+    }
+    if (isRecord(a) && isRecord(b)) {
+        const aKeys = Object.keys(a);
+        const bKeys = Object.keys(b);
+        if (aKeys.length !== bKeys.length) return false;
+        for (const key of aKeys) {
+            if (!deepEqual(a[key], b[key])) return false;
+        }
+        return true;
+    }
+    return false;
+}
+
+function hasPlaceholderMarkers(content: Record<string, unknown>): boolean {
+    const blob = JSON.stringify(content);
+    return /top choice [a-z]|option [a-z]|tier name|item name|product\/service name|example\.com|lorem ipsum|\btodo\b|\breplace\b|\[insert|\[your/i.test(blob);
+}
+
+function shouldSkipGenerationForExistingContent(block: BlockEnvelope, ctx: BlockPromptContext): boolean {
+    const existing = block.content;
+    if (!existing || !isRecord(existing) || Object.keys(existing).length === 0) return false;
+
+    const defaults = getDefaultBlockContent(
+        block.type,
+        ctx.domainName,
+        ctx.niche,
+        block.variant,
+    ).content;
+
+    const isDefaultMatch = defaults ? deepEqual(existing, defaults) : false;
+    const isPlaceholderHeavy = hasPlaceholderMarkers(existing);
+
+    // If content appears to be seeded defaults or placeholders, regenerate.
+    if (isDefaultMatch || isPlaceholderHeavy) {
+        return false;
+    }
+
+    // Otherwise preserve existing authored content.
+    return true;
+}
+
 // ============================================================
 // Types
 // ============================================================
@@ -128,8 +224,9 @@ export async function generateBlockContent(
         };
     }
 
-    // Skip blocks that already have content (don't overwrite)
-    if (block.content && Object.keys(block.content).length > 0) {
+    // Skip blocks that already have meaningful authored content (don't overwrite).
+    // But do regenerate placeholder/default-seeded content for quality upgrades.
+    if (shouldSkipGenerationForExistingContent(block, ctx)) {
         return {
             blockId: block.id,
             blockType,
@@ -230,27 +327,76 @@ export async function generateBlockContent(
             }
         }
 
+        if (!isRecord(parsed)) {
+            return {
+                blockId: block.id,
+                blockType,
+                success: false,
+                error: `AI response for ${blockType} was not a JSON object`,
+                tokensUsed: response.inputTokens + response.outputTokens,
+                cost: response.cost,
+                durationMs,
+            };
+        }
+
+        const normalizedContent = applyBlockContentDefaults(block, parsed, ctx);
+
         // Validate against block schema
         const validation = validateBlock({
             id: block.id,
             type: blockType,
-            content: parsed,
+            content: normalizedContent,
         });
 
         if (!validation.success) {
-            // Log but still use the content — schema validation failures
-            // may be due to optional fields. The content is likely still usable.
-            console.warn(
-                `[block-pipeline] Schema validation warnings for ${blockType} block ${block.id}:`,
-                validation.errors,
-            );
+            const defaults = getDefaultBlockContent(
+                block.type,
+                ctx.domainName,
+                ctx.niche,
+                block.variant,
+            ).content as Record<string, unknown> | undefined;
+
+            if (defaults && Object.keys(defaults).length > 0) {
+                const fallbackValidation = validateBlock({
+                    id: block.id,
+                    type: blockType,
+                    content: defaults,
+                });
+
+                if (fallbackValidation.success) {
+                    console.warn(
+                        `[block-pipeline] Invalid ${blockType} AI output for block ${block.id}; using defaults. Errors:`,
+                        validation.errors,
+                    );
+
+                    return {
+                        blockId: block.id,
+                        blockType,
+                        success: true,
+                        content: defaults,
+                        tokensUsed: response.inputTokens + response.outputTokens,
+                        cost: response.cost,
+                        durationMs,
+                    };
+                }
+            }
+
+            return {
+                blockId: block.id,
+                blockType,
+                success: false,
+                error: `Schema validation failed: ${validation.errors?.join('; ') || 'unknown error'}`,
+                tokensUsed: response.inputTokens + response.outputTokens,
+                cost: response.cost,
+                durationMs,
+            };
         }
 
         return {
             blockId: block.id,
             blockType,
             success: true,
-            content: parsed,
+            content: normalizedContent,
             tokensUsed: response.inputTokens + response.outputTokens,
             cost: response.cost,
             durationMs,
@@ -332,8 +478,20 @@ export async function generatePageBlockContent(
 
     const updatedBlocks: BlockEnvelope[] = [];
 
-    for (const block of blocks) {
-        const result = await generateBlockContent(block, ctx);
+    for (let i = 0; i < blocks.length; i++) {
+        const block = blocks[i];
+        const blockCtx: BlockPromptContext = {
+            ...ctx,
+            existingBlocks: [
+                ...updatedBlocks,
+                ...blocks.slice(i + 1),
+            ].map(b => ({
+                type: b.type,
+                content: isRecord(b.content) ? b.content : undefined,
+            })),
+        };
+
+        const result = await generateBlockContent(block, blockCtx);
         results.push(result);
 
         if (result.skipped) {
@@ -435,7 +593,15 @@ export async function regenerateBlockContent(
         voiceSeed,
     };
 
-    const result = await generateBlockContent(blockForRegen, ctx);
+    const result = await generateBlockContent(blockForRegen, {
+        ...ctx,
+        existingBlocks: blocks
+            .filter(b => b.id !== blockId)
+            .map(b => ({
+                type: b.type,
+                content: isRecord(b.content) ? b.content : undefined,
+            })),
+    });
 
     if (result.success && result.content) {
         // Update only this block in the page definition

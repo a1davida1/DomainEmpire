@@ -114,10 +114,13 @@ export function getDefaultBlockContent(
             },
         },
         CTABanner: {
+            config: { style: 'card' },
             content: {
-                text: '',
-                buttonLabel: '',
+                text: `Get personalized ${nicheLabel} recommendations in under 60 seconds.`,
+                buttonLabel: 'Start Free Assessment',
                 buttonUrl: '/calculator',
+                subtext: 'No signup required. Instant estimate based on your inputs.',
+                icon: '⚡',
             },
         },
         LeadForm: {
@@ -164,27 +167,174 @@ export function getDefaultBlockContent(
         ComparisonTable: {
             config: { sortable: true },
             content: {
-                columns: [],
-                options: [],
-                verdict: '',
+                title: `Top ${capitalize(nicheLabel)} Options Compared`,
+                columns: [
+                    { key: 'overall', label: 'Overall Score', type: 'rating', sortable: true },
+                    { key: 'price', label: 'Typical Price', type: 'text', sortable: true },
+                    { key: 'bestFor', label: 'Best For', type: 'text', sortable: true },
+                ],
+                options: [
+                    {
+                        name: 'Top Choice A',
+                        badge: 'Best Overall',
+                        winner: true,
+                        url: '/compare#option-a',
+                        scores: {
+                            overall: 5,
+                            price: '$$$',
+                            bestFor: 'Most readers',
+                        },
+                    },
+                    {
+                        name: 'Top Choice B',
+                        badge: 'Best Value',
+                        url: '/compare#option-b',
+                        scores: {
+                            overall: 4,
+                            price: '$$',
+                            bestFor: 'Budget-focused buyers',
+                        },
+                    },
+                    {
+                        name: 'Top Choice C',
+                        badge: 'Premium Pick',
+                        url: '/compare#option-c',
+                        scores: {
+                            overall: 4,
+                            price: '$$$$',
+                            bestFor: 'Advanced needs',
+                        },
+                    },
+                ],
+                verdict: 'Top Choice A is the strongest all-around pick, while Choice B is best for tight budgets and Choice C is ideal when premium features matter most.',
             },
         },
         PricingTable: {
             content: {
-                plans: [],
+                heading: `${capitalize(nicheLabel)} Pricing Snapshot`,
+                subheading: 'Typical market ranges to help you budget before requesting quotes.',
+                plans: [
+                    {
+                        name: 'Starter',
+                        price: '$49',
+                        period: 'month',
+                        description: 'For straightforward projects with essential support.',
+                        features: [
+                            'Basic coverage',
+                            'Email support',
+                            'Standard turnaround',
+                            '✗ Dedicated specialist',
+                        ],
+                        ctaText: 'See Starter',
+                        ctaUrl: '/pricing#starter',
+                        highlighted: false,
+                    },
+                    {
+                        name: 'Growth',
+                        price: '$129',
+                        period: 'month',
+                        description: 'Balanced option for most households and teams.',
+                        features: [
+                            'Priority support',
+                            'Faster delivery windows',
+                            'Expanded service scope',
+                            'Performance tracking',
+                        ],
+                        ctaText: 'Compare Growth',
+                        ctaUrl: '/pricing#growth',
+                        highlighted: true,
+                        badge: 'Most Popular',
+                    },
+                    {
+                        name: 'Premium',
+                        price: '$249',
+                        period: 'month',
+                        description: 'Best for complex requirements and concierge support.',
+                        features: [
+                            'Dedicated specialist',
+                            'White-glove onboarding',
+                            'Advanced reporting',
+                            'Quarterly strategy reviews',
+                        ],
+                        ctaText: 'See Premium',
+                        ctaUrl: '/pricing#premium',
+                        highlighted: false,
+                    },
+                ],
             },
         },
         RankingList: {
             content: {
-                title: 'Top Picks',
-                items: [],
+                title: `Top ${capitalize(nicheLabel)} Picks for ${year}`,
+                items: [
+                    {
+                        rank: 1,
+                        name: 'Top Choice A',
+                        description: 'Strong overall performance with the best balance of quality, support, and long-term value.',
+                        rating: 4.9,
+                        badge: 'Best Overall',
+                        url: '/compare#option-a',
+                        score: 96,
+                    },
+                    {
+                        rank: 2,
+                        name: 'Top Choice B',
+                        description: 'Excellent value option with competitive pricing and dependable core features.',
+                        rating: 4.7,
+                        badge: 'Best Value',
+                        url: '/compare#option-b',
+                        score: 91,
+                    },
+                    {
+                        rank: 3,
+                        name: 'Top Choice C',
+                        description: 'Premium alternative that shines when advanced capabilities are a priority.',
+                        rating: 4.6,
+                        badge: 'Premium Pick',
+                        url: '/compare#option-c',
+                        score: 88,
+                    },
+                ],
             },
         },
         ProsConsCard: {
-            content: {},
+            content: {
+                name: 'Top Choice A',
+                rating: 4.8,
+                pros: [
+                    'Consistently high customer satisfaction',
+                    'Transparent pricing and strong warranty terms',
+                    'Reliable support response times',
+                ],
+                cons: [
+                    'Higher starting price than entry-tier options',
+                    'Premium add-ons can increase total cost quickly',
+                ],
+                summary: `A reliable pick for most ${nicheLabel} needs, especially if you prioritize long-term quality over lowest upfront price.`,
+                url: '/compare#option-a',
+                badge: 'Editor\'s Choice',
+            },
         },
         VsCard: {
-            content: {},
+            content: {
+                itemA: {
+                    name: 'Top Choice A',
+                    description: 'Balanced option with strong quality and support.',
+                    pros: ['Great all-around value', 'Strong reliability history'],
+                    cons: ['Higher base price'],
+                    rating: 4.8,
+                    url: '/compare#option-a',
+                },
+                itemB: {
+                    name: 'Top Choice B',
+                    description: 'Budget-friendly option for simpler requirements.',
+                    pros: ['Lower monthly cost', 'Quick setup'],
+                    cons: ['Fewer advanced features'],
+                    rating: 4.5,
+                    url: '/compare#option-b',
+                },
+                verdict: 'Choose Top Choice A for long-term performance and support. Choose Top Choice B when minimizing upfront cost is your top priority.',
+            },
         },
         Sidebar: {
             config: { showSearch: true },
@@ -197,19 +347,59 @@ export function getDefaultBlockContent(
         CostBreakdown: {
             content: {
                 title: `${capitalize(nicheLabel)} Cost Breakdown`,
-                ranges: [],
+                ranges: [
+                    { label: 'Basic', low: 800, high: 2000, average: 1400 },
+                    { label: 'Standard', low: 2000, high: 5000, average: 3400 },
+                    { label: 'Premium', low: 5000, high: 12000, average: 7800 },
+                ],
+                factors: [
+                    {
+                        name: 'Scope and complexity',
+                        impact: 'high',
+                        description: 'Larger or more customized requirements raise labor time and material costs significantly.',
+                    },
+                    {
+                        name: 'Location and market rates',
+                        impact: 'medium',
+                        description: 'Regional labor demand and supplier pricing can shift final quotes by 10-25%.',
+                    },
+                    {
+                        name: 'Timeline urgency',
+                        impact: 'medium',
+                        description: 'Expedited scheduling or rush delivery often adds premium service fees.',
+                    },
+                ],
             },
         },
         AuthorBio: {
             content: {
-                name: '',
-                title: '',
-                bio: '',
+                name: 'Avery Mitchell',
+                title: `${capitalize(nicheLabel)} Analyst`,
+                bio: `Avery has spent 10+ years researching ${nicheLabel} markets and helping readers compare options using transparent, data-backed criteria.`,
+                credentials: ['Independent Research Lead', 'Consumer Pricing Specialist'],
+                socialLinks: [
+                    { platform: 'website', url: '/about' },
+                ],
             },
         },
         CitationBlock: {
             content: {
-                sources: [],
+                sources: [
+                    {
+                        title: 'Consumer Expenditure Survey',
+                        url: 'https://www.bls.gov/cex/',
+                        publisher: 'U.S. Bureau of Labor Statistics',
+                        retrievedAt: `${year}-01`,
+                        usage: `Baseline spending and pricing context for ${nicheLabel}.`,
+                    },
+                    {
+                        title: 'Consumer Resources and Market Data',
+                        url: 'https://www.consumerfinance.gov/consumer-tools/',
+                        publisher: 'Consumer Financial Protection Bureau',
+                        retrievedAt: `${year}-01`,
+                        usage: 'General consumer decision-making and comparison framework.',
+                    },
+                ],
             },
         },
         LastUpdated: {

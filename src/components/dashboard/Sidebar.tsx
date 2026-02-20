@@ -1,8 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { apiFetch } from '@/lib/api-fetch';
 import {
     LayoutDashboard,
     PlayCircle,
@@ -171,6 +172,7 @@ function setSidebarCollapsed(value: boolean) {
 
 export function Sidebar() {
     const pathname = usePathname();
+    const router = useRouter();
     const collapsed = useSyncExternalStore(subscribeSidebarCollapsed, getSidebarCollapsed, () => false);
     const { theme, setTheme } = useTheme();
     const [failedCount, setFailedCount] = useState(0);
@@ -254,6 +256,17 @@ export function Sidebar() {
             })
             .catch((err) => console.error('[Sidebar] Domain count fetch failed:', err));
     }, []);
+
+    async function handleLogout() {
+        try {
+            await apiFetch('/api/auth/logout', { method: 'POST' });
+        } catch (err) {
+            console.error('[Sidebar] Logout request failed:', err);
+        } finally {
+            router.push('/login');
+            router.refresh();
+        }
+    }
 
     return (
         <aside
@@ -421,22 +434,21 @@ export function Sidebar() {
                     </TooltipTrigger>
                     {collapsed && <TooltipContent side="right">Toggle theme (Shift+D)</TooltipContent>}
                 </Tooltip>
-                <form action="/api/auth/logout" method="POST">
-                    <Tooltip>
-                        <TooltipTrigger asChild>
-                            <Button
-                                type="submit"
-                                variant="ghost"
-                                size="sm"
-                                className="w-full justify-start gap-3 text-red-500 hover:bg-red-50 hover:text-red-600"
-                            >
-                                <LogOut className="h-5 w-5" />
-                                {!collapsed && <span>Logout</span>}
-                            </Button>
-                        </TooltipTrigger>
-                        {collapsed && <TooltipContent side="right">Sign out</TooltipContent>}
-                    </Tooltip>
-                </form>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="w-full justify-start gap-3 text-red-500 hover:bg-red-50 hover:text-red-600"
+                            onClick={handleLogout}
+                        >
+                            <LogOut className="h-5 w-5" />
+                            {!collapsed && <span>Logout</span>}
+                        </Button>
+                    </TooltipTrigger>
+                    {collapsed && <TooltipContent side="right">Sign out</TooltipContent>}
+                </Tooltip>
             </div>
         </aside>
     );
