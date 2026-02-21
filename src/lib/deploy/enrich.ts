@@ -194,10 +194,17 @@ function isGenericFaqContent(items: unknown[] | undefined): boolean {
 
 // ── AI call helpers ──────────────────────────────────────────────────────────
 
+const ENRICH_CALL_TIMEOUT_MS = 30_000; // 30s max per enrichment AI call
+
 async function aiCall(prompt: string): Promise<{ content: string; cost: number } | null> {
     try {
         const ai = getAIClient();
-        const resp = await ai.generate('blockContent', prompt);
+        const resp = await Promise.race([
+            ai.generate('blockContent', prompt),
+            new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('Enrichment AI call timed out after 30s')), ENRICH_CALL_TIMEOUT_MS),
+            ),
+        ]);
         return { content: resp.content, cost: resp.cost };
     } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
