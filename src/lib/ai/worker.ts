@@ -90,6 +90,13 @@ import {
     summarizePromotionIntegrity,
 } from '@/lib/growth/integrity';
 import { archiveStaleSubscribers } from '@/lib/subscribers';
+import {
+    buildQueueSloAlerts,
+    normalizePerJobTypeConcurrency as normalizePerJobTypeConcurrencyInput,
+    normalizeWorkerConcurrency as normalizeWorkerConcurrencyInput,
+    parseJobTypeConcurrencyMap,
+    type QueueSloThresholds,
+} from './worker-queue-utils';
 
 const JOB_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes max per job
 // Keep lock TTL greater than job timeout so stale-lock recovery does not requeue
@@ -136,14 +143,6 @@ interface QueueStats {
     cancelled: number;
     total: number;
 }
-
-type QueueSloAlert = {
-    code: 'pending_age' | 'error_rate' | 'worker_idle' | 'pending_backlog';
-    severity: 'warning' | 'critical';
-    message: string;
-    value: number;
-    threshold: number;
-};
 
 type ResearchDecision = 'researching' | 'buy' | 'pass' | 'watchlist' | 'bought';
 
@@ -1017,45 +1016,12 @@ function parseEnvFloat(name: string, fallback: number, min: number, max: number)
     return Math.max(min, Math.min(raw, max));
 }
 
-function parseJobTypeConcurrencyMap(raw: string | undefined): Record<string, number> {
-    if (!raw) return {};
-
-    const entries = raw
-        .split(',')
-        .map((part) => part.trim())
-        .filter((part) => part.length > 0);
-
-    const parsed: Record<string, number> = {};
-    for (const entry of entries) {
-        const [jobTypeRaw, limitRaw] = entry.split(':').map((part) => part.trim());
-        if (!jobTypeRaw || !limitRaw) continue;
-        if (!/^[a-z0-9_]+$/i.test(jobTypeRaw)) continue;
-        const limit = Number.parseInt(limitRaw, 10);
-        if (!Number.isFinite(limit) || limit <= 0) continue;
-        parsed[jobTypeRaw] = Math.max(1, Math.min(limit, 32));
-    }
-
-    return parsed;
-}
-
 function normalizeWorkerConcurrency(value: number | undefined): number {
-    if (typeof value !== 'number' || !Number.isFinite(value)) {
-        return WORKER_CONCURRENCY;
-    }
-    return Math.max(1, Math.min(Math.floor(value), 32));
+    return normalizeWorkerConcurrencyInput(value, WORKER_CONCURRENCY);
 }
 
 function normalizePerJobTypeConcurrency(overrides?: Record<string, number>): Record<string, number> {
-    const merged: Record<string, number> = { ...WORKER_JOB_TYPE_CONCURRENCY };
-    if (overrides) {
-        for (const [jobType, rawLimit] of Object.entries(overrides)) {
-            if (!/^[a-z0-9_]+$/i.test(jobType)) continue;
-            const limit = Number.parseInt(String(rawLimit), 10);
-            if (!Number.isFinite(limit) || limit <= 0) continue;
-            merged[jobType] = Math.max(1, Math.min(limit, 32));
-        }
-    }
-    return merged;
+    return normalizePerJobTypeConcurrencyInput(overrides, WORKER_JOB_TYPE_CONCURRENCY);
 }
 
 async function maybeTriggerCampaignIntegrityAlert(input: {
@@ -3858,43 +3824,19 @@ export async function getQueueHealth() {
     const throughputPerHour = throughput[0]?.count || 0;
     const errorRate24h = totalRecent > 0 ? Math.round((failedRecent / totalRecent) * 10000) / 100 : 0;
 
-    const queueSloAlerts: QueueSloAlert[] = [];
-    if (oldestPendingAge !== null && oldestPendingAge > QUEUE_SLO_PENDING_AGE_MS) {
-        queueSloAlerts.push({
-            code: 'pending_age',
-            severity: oldestPendingAge > QUEUE_SLO_PENDING_AGE_MS * 2 ? 'critical' : 'warning',
-            message: 'Oldest pending job age exceeded SLO threshold',
-            value: oldestPendingAge,
-            threshold: QUEUE_SLO_PENDING_AGE_MS,
-        });
-    }
-    if (errorRate24h > QUEUE_SLO_ERROR_RATE_PCT) {
-        queueSloAlerts.push({
-            code: 'error_rate',
-            severity: errorRate24h > QUEUE_SLO_ERROR_RATE_PCT * 2 ? 'critical' : 'warning',
-            message: '24h queue error rate exceeded SLO threshold',
-            value: errorRate24h,
-            threshold: QUEUE_SLO_ERROR_RATE_PCT,
-        });
-    }
-    if (stats.pending > QUEUE_SLO_PENDING_BACKLOG) {
-        queueSloAlerts.push({
-            code: 'pending_backlog',
-            severity: stats.pending > QUEUE_SLO_PENDING_BACKLOG * 2 ? 'critical' : 'warning',
-            message: 'Pending queue backlog exceeded SLO threshold',
-            value: stats.pending,
-            threshold: QUEUE_SLO_PENDING_BACKLOG,
-        });
-    }
-    if (stats.pending > 0 && latestWorkerActivityAgeMs !== null && latestWorkerActivityAgeMs > QUEUE_SLO_WORKER_IDLE_MS) {
-        queueSloAlerts.push({
-            code: 'worker_idle',
-            severity: 'critical',
-            message: 'Worker idle while queue has pending jobs',
-            value: latestWorkerActivityAgeMs,
-            threshold: QUEUE_SLO_WORKER_IDLE_MS,
-        });
-    }
+    const queueSloThresholds: QueueSloThresholds = {
+        pendingAgeMs: QUEUE_SLO_PENDING_AGE_MS,
+        errorRatePct: QUEUE_SLO_ERROR_RATE_PCT,
+        workerIdleMs: QUEUE_SLO_WORKER_IDLE_MS,
+        pendingBacklog: QUEUE_SLO_PENDING_BACKLOG,
+    };
+    const queueSloAlerts = buildQueueSloAlerts({
+        oldestPendingAgeMs: oldestPendingAge,
+        errorRate24h,
+        pending: stats.pending,
+        latestWorkerActivityAgeMs,
+        thresholds: queueSloThresholds,
+    });
 
     return {
         ...stats,
@@ -3910,12 +3852,7 @@ export async function getQueueHealth() {
         queueSlo: {
             breached: queueSloAlerts.length > 0,
             alerts: queueSloAlerts,
-            thresholds: {
-                pendingAgeMs: QUEUE_SLO_PENDING_AGE_MS,
-                errorRatePct: QUEUE_SLO_ERROR_RATE_PCT,
-                workerIdleMs: QUEUE_SLO_WORKER_IDLE_MS,
-                pendingBacklog: QUEUE_SLO_PENDING_BACKLOG,
-            },
+            thresholds: queueSloThresholds,
         },
     };
 }

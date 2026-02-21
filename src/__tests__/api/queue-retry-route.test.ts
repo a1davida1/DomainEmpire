@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-const mockRequireAuth = vi.fn();
+const mockRequireRole = vi.fn();
 const mockRetryFailedJobsDetailed = vi.fn();
 const mockGetContentQueueBackendHealth = vi.fn();
 
 vi.mock('@/lib/auth', () => ({
-    requireAuth: mockRequireAuth,
+    requireRole: mockRequireRole,
 }));
 
 vi.mock('@/lib/ai/worker', () => ({
@@ -17,7 +17,7 @@ vi.mock('@/lib/queue/content-queue', () => ({
     getContentQueueBackendHealth: mockGetContentQueueBackendHealth,
 }));
 
-const { POST } = await import('@/app/api/queue/retry/route');
+const { POST } = await import('../../app/api/queue/retry/route');
 
 function makeRequest(body: unknown): NextRequest {
     return {
@@ -29,7 +29,7 @@ function makeRequest(body: unknown): NextRequest {
 describe('POST /api/queue/retry', () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        mockRequireAuth.mockResolvedValue(null);
+        mockRequireRole.mockResolvedValue(null);
         mockGetContentQueueBackendHealth.mockResolvedValue({ mode: 'postgres' });
         mockRetryFailedJobsDetailed.mockResolvedValue({
             mode: 'all',
@@ -52,6 +52,7 @@ describe('POST /api/queue/retry', () => {
         }));
 
         expect(response.status).toBe(200);
+        expect(mockRequireRole).toHaveBeenCalledWith(expect.any(Object), 'admin');
         expect(mockRetryFailedJobsDetailed).toHaveBeenCalledWith(40, {
             mode: 'transient',
             dryRun: true,

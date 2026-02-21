@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth';
+import { requireRole } from '@/lib/auth';
 import { retryFailedJobsDetailed } from '@/lib/ai/worker';
 import { getContentQueueBackendHealth } from '@/lib/queue/content-queue';
 
@@ -42,7 +42,7 @@ function parseMinFailedAgeMs(value: unknown): number | undefined {
 
 // POST /api/queue/retry - Retry failed jobs
 export async function POST(request: NextRequest) {
-    const authError = await requireAuth(request);
+    const authError = await requireRole(request, 'admin');
     if (authError) return authError;
 
     try {

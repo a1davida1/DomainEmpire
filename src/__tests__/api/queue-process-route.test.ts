@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-const mockRequireAuth = vi.fn();
+const mockRequireRole = vi.fn();
 const mockRunWorkerOnce = vi.fn();
 const mockRestartWorkerIfDead = vi.fn();
 
 vi.mock('@/lib/auth', () => ({
-    requireAuth: mockRequireAuth,
+    requireRole: mockRequireRole,
 }));
 
 vi.mock('@/lib/ai/worker', () => ({
@@ -23,7 +23,7 @@ vi.mock('@/lib/queue/content-queue', () => ({
     getContentQueueBackendHealth: vi.fn(),
 }));
 
-const { POST } = await import('@/app/api/queue/process/route');
+const { POST } = await import('../../app/api/queue/process/route');
 
 function makeRequest(body: unknown): NextRequest {
     return {
@@ -35,7 +35,7 @@ function makeRequest(body: unknown): NextRequest {
 describe('POST /api/queue/process', () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        mockRequireAuth.mockResolvedValue(null);
+        mockRequireRole.mockResolvedValue(null);
         mockRestartWorkerIfDead.mockResolvedValue(undefined);
         mockRunWorkerOnce.mockResolvedValue({ processed: 0, failed: 0 });
     });
@@ -53,6 +53,7 @@ describe('POST /api/queue/process', () => {
         }));
 
         expect(response.status).toBe(200);
+        expect(mockRequireRole).toHaveBeenCalledWith(expect.any(Object), 'admin');
         expect(mockRunWorkerOnce).toHaveBeenCalledWith({
             maxJobs: 30,
             jobTypes: ['deploy', 'research'],

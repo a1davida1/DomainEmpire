@@ -108,6 +108,7 @@ export async function generateSiteFiles(
     const scripts = getMonetizationScripts({
         adNetwork: monProfile[0]?.adNetwork || 'none',
         adNetworkId: monProfile[0]?.adNetworkId,
+        customHead: domain.customHeadTags || undefined,
     });
 
     const publishedArticles = await db

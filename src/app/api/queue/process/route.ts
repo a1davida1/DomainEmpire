@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth';
+import { requireRole } from '@/lib/auth';
 import { runWorkerOnce, getQueueStats, getQueueHealth } from '@/lib/ai/worker';
 import { getContentQueueBackendHealth } from '@/lib/queue/content-queue';
 import { restartWorkerIfDead } from '@/lib/ai/worker-bootstrap';
@@ -42,7 +42,7 @@ function parsePerJobTypeConcurrency(value: unknown): Record<string, number> | un
 
 // POST /api/queue/process - Process pending jobs
 export async function POST(request: NextRequest) {
-    const authError = await requireAuth(request);
+    const authError = await requireRole(request, 'admin');
     if (authError) return authError;
 
     try {
@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
 
 // GET /api/queue/process - Get queue stats and health
 export async function GET(request: NextRequest) {
-    const authError = await requireAuth(request);
+    const authError = await requireRole(request, 'admin');
     if (authError) return authError;
 
     try {

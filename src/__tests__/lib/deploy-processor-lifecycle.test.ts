@@ -142,7 +142,7 @@ vi.mock('@/lib/db', () => ({
     pageDefinitions: mockPageDefinitionsTable,
 }));
 
-const { processDeployJob } = await import('@/lib/deploy/processor');
+const { processDeployJob } = await import('../../lib/deploy/processor');
 
 describe('deploy processor lifecycle automation', () => {
     beforeEach(() => {

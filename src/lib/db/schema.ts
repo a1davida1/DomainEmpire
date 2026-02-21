@@ -112,6 +112,9 @@ export const domains = pgTable('domains', {
         quickDeploySeed?: number;
     }>().default({}),
 
+    /** Per-site custom tags injected into <head> (e.g. Ahrefs verification, analytics). Raw HTML. */
+    customHeadTags: text('custom_head_tags'),
+
     // Site Review (AI QA)
     lastReviewResult: jsonb('last_review_result').$type<SiteReviewReport | null>(),
     lastReviewScore: integer('last_review_score'),
