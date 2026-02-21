@@ -363,15 +363,12 @@ export function sectionSlotToBlockType(slot: HomepageSectionSlot): string {
     }
 }
 
-/** Map header style to block variant + config */
-export function headerStyleToBlock(style: HeaderStyle): { variant: string; config: Record<string, unknown> } {
-    switch (style) {
-        case 'topbar-sticky': return { variant: 'topbar', config: { sticky: true } };
-        case 'topbar-static': return { variant: 'topbar', config: { sticky: false } };
-        case 'centered-logo': return { variant: 'centered', config: { sticky: true } };
-        case 'minimal-inline': return { variant: 'minimal', config: { sticky: false } };
-        case 'split-actions': return { variant: 'split', config: { sticky: true } };
-    }
+/** Map header style to block variant + config.
+ *  Currently hardcoded to minimal+sticky — other variants need more polish
+ *  before they can be safely randomized across all sites.
+ */
+export function headerStyleToBlock(_style: HeaderStyle): { variant: string; config: Record<string, unknown> } {
+    return { variant: 'minimal', config: { sticky: true } };
 }
 
 /** Map footer structure to block variant */

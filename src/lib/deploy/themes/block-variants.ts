@@ -30,14 +30,20 @@ export const blockVariantStyles = `
   letter-spacing:-0.035em;
   line-height:1.1;
   margin-bottom:1rem;
+  text-align:center;
+  overflow-wrap:break-word;
+  word-break:break-word;
 }
 .hero-sub{
   font-size:1.2rem;
   line-height:1.7;
   max-width:600px;
+  margin-left:auto;
+  margin-right:auto;
   margin-bottom:2rem;
   color:inherit;
   opacity:.85;
+  text-align:center;
 }
 .hero-badge{
   display:inline-flex;

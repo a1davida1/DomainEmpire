@@ -92,14 +92,24 @@ function blkId(): string {
     return `blk_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+    return Promise.race([
+        promise,
+        new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms),
+        ),
+    ]);
+}
+
 /**
  * Infer a more specific content niche from the domain name when the DB niche
  * is too broad (e.g. "Home Services", "Finance", "Health").
  *
  * Examples:
- *   acunitinstall.com  + "Home Services"  → "AC Unit Installation"
- *   myhomevalue.io     + "Real estate"    → "Home Value"  (keeps DB niche as-is since it's specific enough)
- *   bestroofingcost.com + "Home Services" → "Roofing Cost"
+ *   ac-unit-install.com + "Home Services" → "Ac Unit Install"
+ *   myhomevalue.io      + "Real estate"   → "Home Value"  (keeps DB niche as-is since it's specific enough)
+ *   best-roofing-cost.com + "Home Services" → "Roofing Cost"
+ *   acunitinstall.com   + "Home Services" → "Home Services" (no separators → falls back to DB niche)
  */
 const BROAD_NICHES = new Set([
     'general', 'home services', 'finance', 'health', 'business',
@@ -110,8 +120,10 @@ function inferNicheFromDomain(domain: string, dbNiche: string): string {
     // If the DB niche is already specific, use it directly
     if (!BROAD_NICHES.has(dbNiche.toLowerCase())) return dbNiche;
 
-    // Extract the meaningful part of the domain (strip TLD)
-    const slug = domain.replace(/\.[a-z]{2,}(?:\.[a-z]{2,})?$/i, '');
+    // Strip subdomain prefix (e.g. www.) and TLD
+    const slug = domain
+        .replace(/^(?:www\.)+/i, '')
+        .replace(/\.[a-z]{2,}(?:\.[a-z]{2,})?$/i, '');
 
     // Split camelCase, hyphens, and common compound words
     const words = slug
@@ -122,12 +134,15 @@ function inferNicheFromDomain(domain: string, dbNiche: string): string {
         .replace(/\s+/g, ' ')
         .trim();
 
-    if (!words || words.length < 3) return dbNiche;
+    const parts = words.split(' ').filter(w => w.length > 0);
+
+    // If we couldn't split into at least 2 tokens the slug is an unsplittable
+    // compound word (e.g. "acunitinstall") — fall back to the DB niche rather
+    // than producing a nonsense single-token niche.
+    if (parts.length < 2) return dbNiche;
 
     // Title-case and return as the content niche
-    const inferred = words
-        .split(' ')
-        .filter(w => w.length > 0)
+    const inferred = parts
         .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
         .join(' ');
 
@@ -469,41 +484,58 @@ export async function prepareDomain(
         result.programmaticFixes.duplicatesRemoved++;
     }
 
-    // ── Step 5: Targeted AI enrichment ──
-    const enrichResult = await enrichDomain(domain.id);
-    result.enrichment = {
-        heroesFixed: enrichResult.heroesFixed,
-        calculatorsFixed: enrichResult.calculatorsFixed,
-        faqsFixed: enrichResult.faqsFixed,
-        metaFixed: enrichResult.metaFixed,
-        aiCalls: enrichResult.totalAiCalls,
-        cost: enrichResult.totalCost,
-    };
+    // ── Step 5: Targeted AI enrichment (with timeout) ──
+    const AI_STEP_TIMEOUT_MS = 90_000; // 90s per AI step — fail gracefully
+    try {
+        const enrichResult = await withTimeout(enrichDomain(domain.id), AI_STEP_TIMEOUT_MS, 'AI enrichment');
+        result.enrichment = {
+            heroesFixed: enrichResult.heroesFixed,
+            calculatorsFixed: enrichResult.calculatorsFixed,
+            faqsFixed: enrichResult.faqsFixed,
+            metaFixed: enrichResult.metaFixed,
+            aiCalls: enrichResult.totalAiCalls,
+            cost: enrichResult.totalCost,
+        };
+    } catch (err) {
+        console.warn('[prepareDomain] AI enrichment skipped:', err instanceof Error ? err.message : err);
+    }
 
     // ── Step 6: Content scanning (banned words + burstiness + AI rewrite) ──
-    result.contentScan = await scanAndFixBlockContent(domain.id, nicheForContent);
+    try {
+        result.contentScan = await withTimeout(scanAndFixBlockContent(domain.id, nicheForContent), AI_STEP_TIMEOUT_MS, 'content scan');
+    } catch (err) {
+        console.warn('[prepareDomain] Content scan skipped:', err instanceof Error ? err.message : err);
+    }
 
     // ── Step 7: Site review + auto-remediation ──
-    const firstReview = await reviewSite(domain.id);
-    const needsRemediation = firstReview.verdict === 'reject' || firstReview.criticalIssues.length > 0;
-    if (needsRemediation) {
-        await remediateSite(domain.id, firstReview);
+    let finalReview;
+    try {
+        const firstReview = await withTimeout(reviewSite(domain.id), AI_STEP_TIMEOUT_MS, 'site review');
+        const needsRemediation = firstReview.verdict === 'reject' || firstReview.criticalIssues.length > 0;
+        if (needsRemediation) {
+            await withTimeout(remediateSite(domain.id, firstReview), AI_STEP_TIMEOUT_MS, 'remediation');
+        }
+        finalReview = needsRemediation ? await withTimeout(reviewSite(domain.id), AI_STEP_TIMEOUT_MS, 'final review') : firstReview;
+    } catch (err) {
+        console.warn('[prepareDomain] Site review skipped:', err instanceof Error ? err.message : err);
+        finalReview = null;
     }
-    const finalReview = needsRemediation ? await reviewSite(domain.id) : firstReview;
 
-    await db.update(domains).set({
-        lastReviewResult: finalReview,
-        lastReviewScore: Math.round(finalReview.overallScore),
-        lastReviewedAt: finalReview.reviewedAt && !isNaN(new Date(finalReview.reviewedAt).getTime())
-            ? new Date(finalReview.reviewedAt)
-            : new Date(),
-        updatedAt: new Date(),
-    }).where(eq(domains.id, domain.id));
+    if (finalReview) {
+        await db.update(domains).set({
+            lastReviewResult: finalReview,
+            lastReviewScore: Math.round(finalReview.overallScore),
+            lastReviewedAt: finalReview.reviewedAt && !isNaN(new Date(finalReview.reviewedAt).getTime())
+                ? new Date(finalReview.reviewedAt)
+                : new Date(),
+            updatedAt: new Date(),
+        }).where(eq(domains.id, domain.id));
+    }
 
     // ── Step 8: Validate ──
     result.validation = await validateDomain(domain.id);
     result.pageCount = result.validation.pageCount;
-    result.ready = result.validation.ready && finalReview.verdict !== 'reject';
+    result.ready = result.validation.ready && (!finalReview || finalReview.verdict !== 'reject');
 
     return result;
 }
