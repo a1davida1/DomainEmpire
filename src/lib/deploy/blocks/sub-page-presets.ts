@@ -986,6 +986,20 @@ export function generateSubPagesFromBlueprint(
         });
     }
 
+    // Filter Sidebar categories to only link to pages that actually exist
+    const allRoutes = new Set(['/', ...results.map(r => r.route)]);
+    for (const page of results) {
+        for (const block of page.blocks) {
+            if (block.type === 'Sidebar' && block.content) {
+                const c = block.content as Record<string, unknown>;
+                const cats = c.categories as Array<{ href: string; label: string; icon: string; active?: boolean }> | undefined;
+                if (cats && Array.isArray(cats)) {
+                    c.categories = cats.filter(cat => allRoutes.has(cat.href));
+                }
+            }
+        }
+    }
+
     // Always add legal pages (not in blueprint.pages but always required)
     for (const legalGen of [privacyPage, termsPage]) {
         const def = legalGen(nicheLabel, siteName);

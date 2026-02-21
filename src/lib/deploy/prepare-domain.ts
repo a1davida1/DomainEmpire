@@ -93,6 +93,48 @@ function blkId(): string {
 }
 
 /**
+ * Infer a more specific content niche from the domain name when the DB niche
+ * is too broad (e.g. "Home Services", "Finance", "Health").
+ *
+ * Examples:
+ *   acunitinstall.com  + "Home Services"  → "AC Unit Installation"
+ *   myhomevalue.io     + "Real estate"    → "Home Value"  (keeps DB niche as-is since it's specific enough)
+ *   bestroofingcost.com + "Home Services" → "Roofing Cost"
+ */
+const BROAD_NICHES = new Set([
+    'general', 'home services', 'finance', 'health', 'business',
+    'technology', 'education', 'lifestyle', 'travel', 'food',
+]);
+
+function inferNicheFromDomain(domain: string, dbNiche: string): string {
+    // If the DB niche is already specific, use it directly
+    if (!BROAD_NICHES.has(dbNiche.toLowerCase())) return dbNiche;
+
+    // Extract the meaningful part of the domain (strip TLD)
+    const slug = domain.replace(/\.[a-z]{2,}(?:\.[a-z]{2,})?$/i, '');
+
+    // Split camelCase, hyphens, and common compound words
+    const words = slug
+        .replace(/([a-z])([A-Z])/g, '$1 $2')       // camelCase
+        .replace(/[-_]/g, ' ')                        // hyphens/underscores
+        .replace(/(\d+)/g, ' $1 ')                    // separate numbers
+        .replace(/\b(my|best|top|the|get|go|find|pro|ez|cheap)\b/gi, ' ')  // strip filler words
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    if (!words || words.length < 3) return dbNiche;
+
+    // Title-case and return as the content niche
+    const inferred = words
+        .split(' ')
+        .filter(w => w.length > 0)
+        .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+        .join(' ');
+
+    return inferred || dbNiche;
+}
+
+/**
  * Run the full site preparation pipeline.
  *
  * @param domainIdOrName - domain UUID or domain name (e.g. "example.com")
@@ -118,7 +160,10 @@ export async function prepareDomain(
     const effectiveMonTier = strategy?.monetizationTier ?? domain.monetizationTier ?? 3;
     const effectiveHomeTitle = strategy?.homeTitle ?? extractSiteTitle(domainName);
     const effectiveHomeMeta = strategy?.homeMeta ?? null;
-    const nicheForContent = effectiveSubNiche || effectiveNiche;
+
+    // Infer a more specific niche from the domain name when the DB niche is too broad.
+    // e.g. "acunitinstall.com" with niche "Home Services" → content niche "AC Unit Installation"
+    const nicheForContent = effectiveSubNiche || inferNicheFromDomain(domainName, effectiveNiche);
 
     const result: PrepareResult = {
         domain: domainName,

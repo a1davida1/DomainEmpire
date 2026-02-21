@@ -1417,6 +1417,12 @@ section + section{margin-top:calc(var(--spacing-unit,1.6rem) * 2.5)}
 /* Layout: sidebar + main content side by side */
 [data-block-type="Sidebar"]+[data-block-type]{margin-left:0}
 .has-sidebar .site-container>main{display:grid;grid-template-columns:260px 1fr;gap:2rem;align-items:start}
+/* Full-width blocks span both columns in sidebar layouts */
+.has-sidebar .site-container>main>[data-block-type="Hero"],
+.has-sidebar .site-container>main>[data-block-type="Header"],
+.has-sidebar .site-container>main>[data-block-type="Footer"],
+.has-sidebar .site-container>main>[data-block-type="CTABanner"],
+.has-sidebar .site-container>main>[data-block-type="LastUpdated"]{grid-column:1/-1}
 @media(max-width:768px){
   .sidebar--categories{position:static;max-height:none}
   .has-sidebar .site-container>main{grid-template-columns:1fr}
