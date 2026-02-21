@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Loader2, Sparkles, Rocket, Zap, CheckCircle2, CircleDashed, Play, FileSearch, Wand2 } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
+import { apiFetch } from '@/lib/api-fetch';
 
 interface PipelineState {
     domainId: string;
@@ -119,10 +120,14 @@ export function DomainPipelineCard({ state }: { state: PipelineState }) {
     async function handleDeploy() {
         setDeploying(true);
         try {
-            const res = await fetch(`/api/domains/${state.domainId}/deploy`, {
+            const idempotencyKey = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+                ? crypto.randomUUID()
+                : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+            const res = await apiFetch(`/api/domains/${state.domainId}/deploy`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ triggerBuild: true, addCustomDomain: true }),
+                headers: { 'Idempotency-Key': idempotencyKey },
+                body: { triggerBuild: true, addCustomDomain: true },
             });
             if (!res.ok) {
                 const data = await res.json();

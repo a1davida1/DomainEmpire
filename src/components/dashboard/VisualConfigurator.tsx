@@ -32,8 +32,15 @@ interface VisualConfiguratorProps {
 // Constants
 // ============================================================
 
-export const AVAILABLE_THEMES = ['clean', 'editorial', 'bold', 'minimal'] as const;
-export const AVAILABLE_SKINS = ['slate', 'ocean', 'forest', 'ember', 'midnight', 'coral'] as const;
+export const AVAILABLE_THEMES = [
+    'clean', 'editorial', 'bold', 'minimal', 'magazine', 'brutalist',
+    'glass', 'retro', 'corporate', 'craft', 'academic', 'startup', 'noir',
+] as const;
+export const AVAILABLE_SKINS = [
+    'slate', 'ocean', 'forest', 'ember', 'midnight', 'coral',
+    'sage', 'rose', 'indigo', 'sand', 'teal', 'wine', 'plum',
+    'steel', 'cobalt', 'copper', 'arctic', 'charcoal', 'dusk',
+] as const;
 
 const SKIN_COLORS: Record<string, string> = {
     slate: '#1e293b',
@@ -42,6 +49,19 @@ const SKIN_COLORS: Record<string, string> = {
     ember: '#b45309',
     midnight: '#38bdf8',
     coral: '#7c3aed',
+    sage: '#4a6741',
+    rose: '#8b3a62',
+    indigo: '#3730a3',
+    sand: '#78603c',
+    teal: '#0d6e6e',
+    wine: '#722f37',
+    plum: '#6b2fa0',
+    steel: '#374151',
+    cobalt: '#1e40af',
+    copper: '#92400e',
+    arctic: '#155e75',
+    charcoal: '#d4d4d8',
+    dusk: '#7e22ce',
 };
 
 const THEME_LABELS: Record<string, string> = {
@@ -49,6 +69,15 @@ const THEME_LABELS: Record<string, string> = {
     editorial: 'Editorial — Merriweather serif, narrow reading width',
     bold: 'Bold — DM Sans, large radius, strong shadows',
     minimal: 'Minimal — System UI, tight, no shadows',
+    magazine: 'Magazine — Playfair Display, elegant serif, wide margins',
+    brutalist: 'Brutalist — Space Mono, no radius, thick borders',
+    glass: 'Glass — Inter, frosted glass, large radius',
+    retro: 'Retro — Quicksand, rounded, playful shadows',
+    corporate: 'Corporate — Libre Franklin, subtle, conservative',
+    craft: 'Craft — Vollkorn serif, warm shadows, artisan feel',
+    academic: 'Academic — IBM Plex, dense, research-focused',
+    startup: 'Startup — Plus Jakarta Sans, airy, modern SaaS',
+    noir: 'Noir — Sora, dark-optimized, luminous accents',
 };
 
 const BLOCK_CATEGORIES: Record<string, string[]> = {
@@ -60,6 +89,7 @@ const BLOCK_CATEGORIES: Record<string, string[]> = {
     Social: ['TestimonialGrid', 'TrustBadges', 'CitationBlock'],
     Utility: ['LastUpdated', 'MedicalDisclaimer', 'PdfDownload', 'EmbedWidget'],
     Interactive: ['Wizard', 'GeoContent', 'InteractiveMap'],
+    Discovery: ['ResourceGrid', 'LatestArticles'],
 };
 
 const BLOCK_DESCRIPTIONS: Record<string, string> = {
@@ -94,6 +124,8 @@ const BLOCK_DESCRIPTIONS: Record<string, string> = {
     Wizard: 'Multi-step interactive wizard',
     GeoContent: 'Location-aware content block',
     InteractiveMap: 'Interactive map display',
+    ResourceGrid: 'Icon card grid linking to related resources',
+    LatestArticles: 'Card grid of recent articles with excerpts',
 };
 
 const CATEGORY_ICONS: Record<string, string> = {
@@ -105,6 +137,7 @@ const CATEGORY_ICONS: Record<string, string> = {
     Social: '\u{2B50}',
     Utility: '\u{1F527}',
     Interactive: '\u{1F579}\u{FE0F}',
+    Discovery: '\u{1F517}',
 };
 
 const VARIANT_OPTIONS: Record<string, string[]> = {
@@ -271,6 +304,7 @@ const CONTENT_TYPE_BLOCK_MAP: Record<string, string[]> = {
     configurator: ['Wizard'],
     interactive_infographic: ['StatGrid', 'DataTable', 'EmbedWidget'],
     interactive_map: ['InteractiveMap', 'GeoContent'],
+    health_decision: ['MedicalDisclaimer', 'Checklist', 'StepByStep', 'FAQ', 'AuthorBio', 'CitationBlock'],
     guide: ['ArticleBody', 'StepByStep', 'FAQ', 'AuthorBio', 'CitationBlock'],
 };
 
@@ -632,6 +666,29 @@ const BLOCK_FIELD_SCHEMAS: Record<string, FieldDef[]> = {
         { key: 'title', label: 'Title', type: 'text', target: 'content' },
         { key: 'width', label: 'Width', type: 'text', target: 'config', placeholder: '100%' },
         { key: 'height', label: 'Height', type: 'text', target: 'config', placeholder: '600px' },
+    ],
+    // --- Discovery ---
+    ResourceGrid: [
+        { key: 'heading', label: 'Heading', type: 'text', target: 'content', placeholder: 'More Resources' },
+        { key: 'columns', label: 'Columns', type: 'number', target: 'config' },
+        { key: 'items', label: 'Resources', type: 'array', target: 'content', itemFields: [
+            { key: 'title', label: 'Title', type: 'text' },
+            { key: 'description', label: 'Description', type: 'text' },
+            { key: 'href', label: 'URL', type: 'url' },
+            { key: 'icon', label: 'Icon (emoji or URL)', type: 'text' },
+        ], itemLabel: (item) => String(item.title || 'Resource') },
+    ],
+    LatestArticles: [
+        { key: 'heading', label: 'Heading', type: 'text', target: 'content', placeholder: 'Latest Articles' },
+        { key: 'columns', label: 'Columns', type: 'number', target: 'config' },
+        { key: 'maxItems', label: 'Max Items', type: 'number', target: 'config' },
+        { key: 'articles', label: 'Articles', type: 'array', target: 'content', itemFields: [
+            { key: 'title', label: 'Title', type: 'text' },
+            { key: 'excerpt', label: 'Excerpt', type: 'textarea' },
+            { key: 'href', label: 'URL', type: 'url' },
+            { key: 'imageUrl', label: 'Image URL', type: 'url' },
+            { key: 'date', label: 'Date', type: 'text', placeholder: 'YYYY-MM-DD' },
+        ], itemLabel: (item) => String(item.title || 'Article') },
     ],
 };
 

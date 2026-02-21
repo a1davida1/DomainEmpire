@@ -20,6 +20,7 @@ const CONTENT_TYPES = [
     { key: 'faq', label: 'FAQ', desc: 'Frequently asked questions pages' },
     { key: 'review', label: 'Review', desc: 'Product or service reviews' },
     { key: 'wizard', label: 'Wizard', desc: 'Multi-step decision-making tools' },
+    { key: 'health_decision', label: 'Health Decision', desc: 'YMYL health/medical decision-support content' },
     { key: 'guide', label: 'Guide', desc: 'Long-form comprehensive guides' },
 ] as const;
 

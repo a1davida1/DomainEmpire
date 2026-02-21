@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, domains } from '@/lib/db';
-import { requireAuth } from '@/lib/auth';
+import { requireAuth, requireRole } from '@/lib/auth';
 import { eq, and } from 'drizzle-orm';
 import { z } from 'zod';
 import { notDeleted, softDeleteDomain } from '@/lib/db/soft-delete';
@@ -217,7 +217,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
 // DELETE /api/domains/[id] - Soft-delete a domain (and cascade to articles)
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
-    const authError = await requireAuth(request);
+    const authError = await requireRole(request, 'admin');
     if (authError) return authError;
 
     try {

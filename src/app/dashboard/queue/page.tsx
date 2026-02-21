@@ -25,6 +25,14 @@ type QueueStatus = (typeof QUEUE_STATUS_VALUES)[number];
 const QUEUE_SLA_FILTER_VALUES = ['all', 'ok', 'breached'] as const;
 type QueueSlaFilter = (typeof QUEUE_SLA_FILTER_VALUES)[number];
 
+type QueueSloAlertView = {
+    code: string;
+    severity: 'warning' | 'critical';
+    message: string;
+    value: number;
+    threshold: number;
+};
+
 type QueueSearchParams = {
     preset?: string;
     status?: string;
@@ -741,6 +749,13 @@ export default async function QueuePage({
     const workerNeedsPersistentProcess = health.pending > 0
         && health.processing === 0
         && (latestWorkerActivityAge ?? Number.MAX_SAFE_INTEGER) > 5 * 60 * 1000;
+    const queueSlo = (health as {
+        queueSlo?: {
+            breached?: boolean;
+            alerts?: QueueSloAlertView[];
+        };
+    }).queueSlo;
+    const queueSloAlerts = Array.isArray(queueSlo?.alerts) ? queueSlo.alerts : [];
 
     return (
         <div className="space-y-6">
@@ -776,6 +791,22 @@ export default async function QueuePage({
                     </Link>
                 </div>
             </div>
+
+            {queueSloAlerts.length > 0 && (
+                <div className="space-y-2">
+                    {queueSloAlerts.map((alert) => (
+                        <p
+                            key={`${alert.code}-${alert.threshold}`}
+                            className={`text-sm border rounded px-3 py-2 ${alert.severity === 'critical'
+                                ? 'text-red-700 bg-red-50 border-red-200'
+                                : 'text-amber-800 bg-amber-50 border-amber-200'}`}
+                        >
+                            <span className="font-medium uppercase mr-2">{alert.severity}</span>
+                            {alert.message} (value: {Math.round(alert.value)} / threshold: {Math.round(alert.threshold)})
+                        </p>
+                    ))}
+                </div>
+            )}
 
             <QueueAutoProcessor defaultMaxJobs={10} />
 

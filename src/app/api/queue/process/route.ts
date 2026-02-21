@@ -21,6 +21,25 @@ function parseJobTypes(value: unknown): string[] | undefined {
     return normalized.length > 0 ? normalized : undefined;
 }
 
+function parseConcurrency(value: unknown): number | undefined {
+    if (value === undefined || value === null || value === '') return undefined;
+    const parsed = Number.parseInt(String(value), 10);
+    if (!Number.isFinite(parsed)) return undefined;
+    return Math.max(1, Math.min(parsed, 32));
+}
+
+function parsePerJobTypeConcurrency(value: unknown): Record<string, number> | undefined {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+    const parsed: Record<string, number> = {};
+    for (const [jobType, rawLimit] of Object.entries(value as Record<string, unknown>)) {
+        if (!/^[a-z0-9_]+$/i.test(jobType)) continue;
+        const limit = Number.parseInt(String(rawLimit), 10);
+        if (!Number.isFinite(limit) || limit <= 0) continue;
+        parsed[jobType] = Math.max(1, Math.min(limit, 32));
+    }
+    return Object.keys(parsed).length > 0 ? parsed : undefined;
+}
+
 // POST /api/queue/process - Process pending jobs
 export async function POST(request: NextRequest) {
     const authError = await requireAuth(request);
@@ -31,10 +50,13 @@ export async function POST(request: NextRequest) {
         await restartWorkerIfDead();
 
         const body = await request.json().catch(() => ({}));
-        const maxJobs = parseMaxJobs(body.maxJobs);
-        const jobTypes = parseJobTypes(body.jobTypes);
+        const payload = body as Record<string, unknown>;
+        const maxJobs = parseMaxJobs(payload.maxJobs);
+        const jobTypes = parseJobTypes(payload.jobTypes);
+        const concurrency = parseConcurrency(payload.concurrency);
+        const perJobTypeConcurrency = parsePerJobTypeConcurrency(payload.perJobTypeConcurrency);
 
-        const result = await runWorkerOnce({ maxJobs, jobTypes });
+        const result = await runWorkerOnce({ maxJobs, jobTypes, concurrency, perJobTypeConcurrency });
 
         return NextResponse.json(result);
     } catch (error) {

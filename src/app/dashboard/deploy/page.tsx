@@ -9,6 +9,7 @@ import {
     ChevronDown, ChevronRight, Cloud, AlertTriangle
 } from 'lucide-react';
 import { useToast } from "@/components/ui/use-toast";
+import { apiFetch } from '@/lib/api-fetch';
 
 interface DeployStep {
     step: string;
@@ -72,7 +73,7 @@ export default function DeployPage() {
     const handleReassignThemes = useCallback(async () => {
         setReassigning(true);
         try {
-            const res = await fetch('/api/domains/reassign-themes', { method: 'POST' });
+            const res = await apiFetch('/api/domains/reassign-themes', { method: 'POST' });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Failed');
             toast({
@@ -101,14 +102,18 @@ export default function DeployPage() {
         blockedDomains: string[];
         warningDomains: string[];
     }> => {
-        const res = await fetch('/api/domains/bulk-deploy', {
+        const idempotencyKey = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+        const res = await apiFetch('/api/domains/bulk-deploy', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
+            headers: { 'Idempotency-Key': idempotencyKey },
+            body: {
                 domainIds: batch,
                 triggerBuild: true,
                 dryRun,
-            }),
+            },
         });
 
         if (!res.ok) {
@@ -538,10 +543,14 @@ export default function DeployPage() {
                                             className="h-7 px-2 text-xs"
                                             onClick={async () => {
                                                 try {
-                                                    const res = await fetch(`/api/domains/${domain.id}/deploy`, {
+                                                    const idempotencyKey = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+                                                        ? crypto.randomUUID()
+                                                        : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+                                                    const res = await apiFetch(`/api/domains/${domain.id}/deploy`, {
                                                         method: 'POST',
-                                                        headers: { 'Content-Type': 'application/json' },
-                                                        body: JSON.stringify({ triggerBuild: true, addCustomDomain: true }),
+                                                        headers: { 'Idempotency-Key': idempotencyKey },
+                                                        body: { triggerBuild: true, addCustomDomain: true },
                                                     });
                                                     if (res.ok) {
                                                         toast({ title: `Deploy queued for ${domain.domain}` });

@@ -20,6 +20,21 @@ export const responsiveStyles = `
   .author-bio{padding:1.25rem}
   .data-sources{padding:1rem}
 }
+/* Tablet — interactive blocks */
+@media(max-width:768px){
+  .pricing-grid{grid-template-columns:1fr 1fr;gap:1rem}
+  .pricing-highlighted{transform:none}
+  .pricing-card{padding:1.5rem 1rem}
+  .pricing-price{font-size:1.75rem}
+  .testimonial-grid{grid-template-columns:1fr 1fr;gap:1rem}
+  .stat-grid{grid-template-columns:1fr 1fr}
+  .lead-form-row{grid-template-columns:1fr}
+  .ranking-item{padding:1rem}
+  .ranking-header{gap:0.5rem}
+  .vs-grid{gap:1rem}
+  .vs-side{padding:1.25rem}
+  .comparison-cards{grid-template-columns:1fr}
+}
 /* Mobile */
 @media(max-width:480px){
   body{font-size:0.95rem}
@@ -47,6 +62,35 @@ export const responsiveStyles = `
   .toc-title::-webkit-details-marker{display:none}
   .toc-title::after{content:' ▾';font-size:0.7em;opacity:0.5}
   .toc-details[open] .toc-title::after{content:' ▴'}
+  /* Pricing — single column on small screens */
+  .pricing-grid{grid-template-columns:1fr;gap:1rem}
+  .pricing-highlighted{transform:none;box-shadow:var(--shadow-sm)}
+  .pricing-badge{font-size:0.7rem;padding:0.2rem 0.75rem}
+  .pricing-price{font-size:1.5rem}
+  /* Testimonials — single column */
+  .testimonial-grid{grid-template-columns:1fr}
+  .testimonial-card{padding:1.25rem}
+  /* Stat grid — 2-col on mobile */
+  .stat-grid{grid-template-columns:1fr 1fr;gap:0.75rem}
+  .stat-card{padding:1rem}
+  .stat-ring-value{font-size:0.9rem}
+  /* Ranking — compact */
+  .ranking-item{padding:0.875rem;gap:0.75rem}
+  .ranking-number{width:2rem;height:2rem;font-size:0.85rem}
+  .ranking-header h3{font-size:0.95rem}
+  .ranking-badge{font-size:0.65rem;padding:0.1rem 0.4rem}
+  .ranking-score-bar{margin-bottom:0.25rem}
+  /* Review/ProsConsCard — full width columns */
+  .pros-cons{grid-template-columns:1fr;gap:0.75rem}
+  .review-card{padding:1.25rem}
+  /* Vs card — stack vertically */
+  .vs-grid{grid-template-columns:1fr;gap:0.75rem}
+  .vs-side{padding:1rem}
+  .vs-divider span{width:2rem;height:2rem;font-size:0.75rem}
+  /* Lead form half-width fields stack */
+  .lead-field--half{grid-column:span 1}
+  /* Comparison cards — single column */
+  .comparison-cards{grid-template-columns:1fr}
 }
 /* Print */
 @media print{

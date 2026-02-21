@@ -56,6 +56,8 @@ export interface ContentScanStats {
     totalViolations: number;
     blocksRewritten: number;
     lowBurstinessBlocks: number;
+    placeholderBlocks: number;
+    totalPlaceholders: number;
     aiCalls: number;
     cost: number;
 }
@@ -127,7 +129,7 @@ export async function prepareDomain(
         pagesSeeded: false,
         programmaticFixes: { namesFixed: 0, endpointsFixed: 0, duplicatesRemoved: 0, citationsInjected: 0 },
         enrichment: { heroesFixed: 0, calculatorsFixed: 0, faqsFixed: 0, metaFixed: 0, aiCalls: 0, cost: 0 },
-        contentScan: { pagesScanned: 0, blocksWithViolations: 0, totalViolations: 0, blocksRewritten: 0, lowBurstinessBlocks: 0, aiCalls: 0, cost: 0 },
+        contentScan: { pagesScanned: 0, blocksWithViolations: 0, totalViolations: 0, blocksRewritten: 0, lowBurstinessBlocks: 0, placeholderBlocks: 0, totalPlaceholders: 0, aiCalls: 0, cost: 0 },
         validation: { domain: domainName, pageCount: 0, blockCount: 0, issues: [], errorCount: 0, warningCount: 0, ready: false },
         ready: false,
     };
@@ -167,7 +169,11 @@ export async function prepareDomain(
         .where(eq(pageDefinitions.domainId, domain.id))
         .limit(1);
     const hasPages = existingPages.length > 0;
-    const forceRegenerate = strategy !== undefined && !!strategy.niche;
+    const forceRegenerate = strategy !== undefined && (
+        strategy.niche !== undefined
+        || strategy.subNiche !== undefined
+        || strategy.siteTemplate !== undefined
+    );
 
     if (!hasPages || forceRegenerate) {
         await db.transaction(async (tx) => {
@@ -467,7 +473,8 @@ const COMPLIANCE_ROUTES = new Set([
 async function scanAndFixBlockContent(domainId: string, niche: string): Promise<ContentScanStats> {
     const stats: ContentScanStats = {
         pagesScanned: 0, blocksWithViolations: 0, totalViolations: 0,
-        blocksRewritten: 0, lowBurstinessBlocks: 0, aiCalls: 0, cost: 0,
+        blocksRewritten: 0, lowBurstinessBlocks: 0, placeholderBlocks: 0,
+        totalPlaceholders: 0, aiCalls: 0, cost: 0,
     };
 
     const pages = await db.select().from(pageDefinitions).where(eq(pageDefinitions.domainId, domainId));
@@ -496,6 +503,15 @@ async function scanAndFixBlockContent(domainId: string, niche: string): Promise<
                 }
                 stats.aiCalls += rewriteResult.aiCalls;
                 stats.cost += rewriteResult.cost;
+            }
+
+            if (scanResult.placeholders.length > 0) {
+                stats.placeholderBlocks++;
+                stats.totalPlaceholders += scanResult.placeholders.length;
+                console.warn(
+                    `[content-scanner] ${scanResult.placeholders.length} placeholder(s) in ${block.type} block ${block.id}:`,
+                    scanResult.placeholders.map(p => `${p.field}: ${p.reason}`).join('; '),
+                );
             }
 
             if (scanResult.lowBurstiness) {

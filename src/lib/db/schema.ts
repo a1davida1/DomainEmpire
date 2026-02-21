@@ -470,6 +470,7 @@ export const articles = pgTable('articles', {
             'assessment',
             'interactive_infographic',
             'interactive_map',
+            'guide',
         ]
     }).default('article'),
     calculatorConfig: jsonb('calculator_config').$type<{

@@ -506,6 +506,17 @@ export default async function DomainDetailPage({ params }: PageProps) {
                     </Tooltip>
                     <Tooltip>
                         <TooltipTrigger asChild>
+                            <Link href={`/dashboard/domains/${id}/gallery`}>
+                                <Button variant="outline">
+                                    <BarChart3 className="mr-2 h-4 w-4" />
+                                    Gallery
+                                </Button>
+                            </Link>
+                        </TooltipTrigger>
+                        <TooltipContent>Visual thumbnail gallery of all pages — review the full site at a glance before deploying.</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
                             <Link href={`/dashboard/domains/${id}/pages`}>
                                 <Button variant="outline">
                                     <FileText className="mr-2 h-4 w-4" />

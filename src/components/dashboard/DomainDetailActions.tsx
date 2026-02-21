@@ -13,6 +13,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
+import { apiFetch } from '@/lib/api-fetch';
 
 const CONTENT_TYPE_OPTIONS = [
     { value: 'auto', label: 'Auto-detect' },
@@ -275,10 +276,13 @@ export function DeployDomainButton({ domainId, isDeployed }: { domainId: string;
         <Button size="sm" disabled={loading} onClick={async () => {
             setLoading(true);
             try {
-                const res = await fetch(`/api/domains/${domainId}/deploy`, {
+                const idempotencyKey = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+                    ? crypto.randomUUID()
+                    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+                const res = await apiFetch(`/api/domains/${domainId}/deploy`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ triggerBuild: true, addCustomDomain: true }),
+                    headers: { 'Idempotency-Key': idempotencyKey },
+                    body: { triggerBuild: true, addCustomDomain: true },
                 });
                 const data = await res.json().catch(() => ({}));
                 if (res.ok) {

@@ -14,6 +14,7 @@ import {
 import { MoreHorizontal, Settings, Rocket, Globe, Trash2, AlertTriangle, Waypoints } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { apiFetch } from '@/lib/api-fetch';
 
 interface DomainActionsProps {
     domainId: string;
@@ -91,13 +92,17 @@ export function DomainActions({
     const handleDeploy = async () => {
         setDeploying(true);
         try {
-            const res = await fetch(`/api/domains/${domainId}/deploy`, {
+            const idempotencyKey = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+                ? crypto.randomUUID()
+                : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+            const res = await apiFetch(`/api/domains/${domainId}/deploy`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
+                headers: { 'Idempotency-Key': idempotencyKey },
+                body: {
                     triggerBuild: true,
                     addCustomDomain: true,
-                }),
+                },
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) {
@@ -127,7 +132,13 @@ export function DomainActions({
             return;
         }
         try {
-            const res = await fetch(`/api/domains/${domainId}`, { method: 'DELETE' });
+            const idempotencyKey = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+                ? crypto.randomUUID()
+                : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+            const res = await apiFetch(`/api/domains/${domainId}`, {
+                method: 'DELETE',
+                headers: { 'Idempotency-Key': idempotencyKey },
+            });
             if (!res.ok) {
                 const data = await res.json();
                 throw new Error(data.error || 'Delete failed');

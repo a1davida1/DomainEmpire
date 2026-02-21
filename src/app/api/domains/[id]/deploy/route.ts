@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, domains } from '@/lib/db';
-import { requireAuth } from '@/lib/auth';
+import { requireAuth, requireRole } from '@/lib/auth';
 import { eq, and, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
@@ -22,7 +22,7 @@ export async function POST(request: NextRequest, { params }: PageProps) {
     const cached = await checkIdempotencyKey(request);
     if (cached) return cached;
 
-    const authError = await requireAuth(request);
+    const authError = await requireRole(request, 'admin');
     if (authError) return authError;
 
     const { id } = await params;

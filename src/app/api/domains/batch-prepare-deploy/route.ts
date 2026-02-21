@@ -1,19 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthUser } from '@/lib/auth';
-import { db, domains, contentQueue } from '@/lib/db';
-import { eq, and, inArray, isNull } from 'drizzle-orm';
+import { requireRole } from '@/lib/auth';
+import { db, domains } from '@/lib/db';
+import { and, inArray, isNull } from 'drizzle-orm';
 import { prepareDomain, type DomainStrategy } from '@/lib/deploy/prepare-domain';
 import { enqueueContentJob } from '@/lib/queue/content-queue';
-import { processDeployJob } from '@/lib/deploy/processor';
 import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
+import { withIdempotency } from '@/lib/api/idempotency';
 
 const MAX_PARALLEL = 5;
 const MAX_BATCH = 50;
+
+const strategySchema = z.object({
+    wave: z.number().int().optional(),
+    cluster: z.string().min(1).max(120).optional(),
+    niche: z.string().min(1).max(120).optional(),
+    subNiche: z.string().min(1).max(120).optional(),
+    vertical: z.string().min(1).max(120).optional(),
+    siteTemplate: z.string().min(1).max(120).optional(),
+    monetizationTier: z.number().int().min(1).max(5).optional(),
+    homeTitle: z.string().min(1).max(200).optional(),
+    homeMeta: z.string().min(1).max(320).optional(),
+}).strict();
+
+const batchPrepareDeploySchema = z.object({
+    domainIds: z.array(z.string().uuid()).min(1).max(MAX_BATCH),
+    strategy: strategySchema.optional(),
+    skipDeploy: z.boolean().optional(),
+}).strict();
 
 interface BatchResult {
     domain: string;
     domainId: string;
     status: 'success' | 'failed';
+    deployStatus?: 'skipped' | 'queued' | 'already_running';
+    deployJobId?: string;
     pageCount?: number;
     theme?: string;
     skin?: string;
@@ -26,27 +47,31 @@ interface BatchResult {
  *
  * Body: { domainIds: string[], strategy?: DomainStrategy, skipDeploy?: boolean }
  *
- * Runs prepareDomain + deploy for up to 50 domains in parallel batches of 5.
- * Returns results as they complete via streaming JSON.
+ * Runs prepareDomain for up to 50 domains in parallel batches of 5.
+ * Deploys are enqueued asynchronously per domain and processed by workers.
  */
-export async function POST(request: NextRequest) {
-    const user = await getAuthUser();
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+async function postBatchPrepareDeploy(request: NextRequest): Promise<NextResponse> {
+    const authError = await requireRole(request, 'admin');
+    if (authError) return authError;
 
-    let body: { domainIds?: string[]; strategy?: DomainStrategy; skipDeploy?: boolean };
+    let body: unknown;
     try {
         body = await request.json();
     } catch {
         return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
     }
 
-    const domainIds = body.domainIds;
-    if (!Array.isArray(domainIds) || domainIds.length === 0) {
-        return NextResponse.json({ error: 'domainIds array required' }, { status: 400 });
+    const parsed = batchPrepareDeploySchema.safeParse(body);
+    if (!parsed.success) {
+        return NextResponse.json(
+            { error: 'Invalid request', details: parsed.error.issues },
+            { status: 400 },
+        );
     }
-    if (domainIds.length > MAX_BATCH) {
-        return NextResponse.json({ error: `Max ${MAX_BATCH} domains per batch` }, { status: 400 });
-    }
+
+    const domainIds = parsed.data.domainIds;
+    const strategy = parsed.data.strategy as DomainStrategy | undefined;
+    const skipDeploy = parsed.data.skipDeploy === true;
 
     const domainRows = await db.select({ id: domains.id, domain: domains.domain, niche: domains.niche })
         .from(domains)
@@ -56,10 +81,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'No valid domains found' }, { status: 404 });
     }
 
-    const skipDeploy = body.skipDeploy === true;
-    const strategy = body.strategy;
     const results: BatchResult[] = [];
-    let completed = 0;
 
     async function processSite(row: typeof domainRows[number]): Promise<BatchResult> {
         const start = Date.now();
@@ -67,30 +89,41 @@ export async function POST(request: NextRequest) {
             const nicheOverride = strategy?.niche || row.niche || undefined;
             const result = await prepareDomain(row.id, nicheOverride ? { ...strategy, niche: nicheOverride } : strategy);
 
+            let deployStatus: BatchResult['deployStatus'] = 'skipped';
+            let deployJobId: string | undefined;
+
             if (!skipDeploy) {
-                await db.update(contentQueue).set({ status: 'failed', completedAt: new Date() })
-                    .where(and(
-                        eq(contentQueue.domainId, row.id),
-                        eq(contentQueue.jobType, 'deploy'),
-                        inArray(contentQueue.status, ['pending', 'processing']),
-                    ));
                 const jobId = randomUUID();
-                await enqueueContentJob({
-                    id: jobId, domainId: row.id, jobType: 'deploy', priority: 1,
-                    payload: { domain: row.domain, triggerBuild: true, addCustomDomain: true },
-                    status: 'pending', scheduledFor: new Date(), maxAttempts: 3,
-                });
-                await processDeployJob(jobId);
+                try {
+                    await enqueueContentJob({
+                        id: jobId,
+                        domainId: row.id,
+                        jobType: 'deploy',
+                        priority: 1,
+                        payload: { domain: row.domain, triggerBuild: true, addCustomDomain: true },
+                        status: 'pending',
+                        scheduledFor: new Date(),
+                        maxAttempts: 3,
+                    });
+                    deployStatus = 'queued';
+                    deployJobId = jobId;
+                } catch (enqueueErr: unknown) {
+                    if (enqueueErr instanceof Error && 'code' in enqueueErr && (enqueueErr as { code: string }).code === '23505') {
+                        deployStatus = 'already_running';
+                    } else {
+                        throw enqueueErr;
+                    }
+                }
             }
 
-            completed++;
             return {
                 domain: row.domain, domainId: row.id, status: 'success',
+                deployStatus,
+                deployJobId,
                 pageCount: result.pageCount, theme: result.theme, skin: result.skin,
                 durationMs: Date.now() - start,
             };
         } catch (err) {
-            completed++;
             return {
                 domain: row.domain, domainId: row.id, status: 'failed',
                 error: err instanceof Error ? err.message : 'Unknown error',
@@ -103,18 +136,24 @@ export async function POST(request: NextRequest) {
     const startTime = Date.now();
     for (let i = 0; i < domainRows.length; i += MAX_PARALLEL) {
         const batch = domainRows.slice(i, i + MAX_PARALLEL);
-        const batchResults = await Promise.all(batch.map(row => processSite(row)));
+        const batchResults = await Promise.all(batch.map((row: typeof domainRows[number]) => processSite(row)));
         results.push(...batchResults);
     }
 
     const succeeded = results.filter(r => r.status === 'success').length;
     const failed = results.filter(r => r.status === 'failed').length;
+    const queued = results.filter(r => r.deployStatus === 'queued').length;
+    const alreadyRunning = results.filter(r => r.deployStatus === 'already_running').length;
 
     return NextResponse.json({
         total: results.length,
         succeeded,
         failed,
+        queued,
+        alreadyRunning,
         durationMs: Date.now() - startTime,
         results,
     });
 }
+
+export const POST = withIdempotency(postBatchPrepareDeploy);

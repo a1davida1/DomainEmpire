@@ -147,6 +147,272 @@ function hasPlaceholderMarkers(content: Record<string, unknown>): boolean {
     return /top choice [a-z]|option [a-z]|tier name|item name|product\/service name|example\.com|lorem ipsum|\btodo\b|\breplace\b|\[insert|\[your/i.test(blob);
 }
 
+// ============================================================
+// Semantic Validation — detect and auto-repair low-quality AI output
+// ============================================================
+
+interface SemanticIssue {
+    field: string;
+    reason: string;
+}
+
+const GENERIC_NAME_PATTERNS = [
+    /^(top\s+)?choice\s+[a-z0-9]/i,
+    /^option\s+[a-z0-9]/i,
+    /^(product|service|provider|item|plan|tier)\s+[a-z0-9]/i,
+    /^(company|brand)\s+[a-z0-9]/i,
+    /^(best|top)\s+(overall|pick|choice)$/i,
+    /^placeholder/i,
+    /^example/i,
+    /^my\s+(site|company|brand|product)/i,
+    /^acme\b/i,
+    /^lorem/i,
+    /^test\s/i,
+    /^\[.*\]$/,
+];
+
+const GENERIC_VERDICT_PATTERNS = [
+    /choice [a-z]\b/i,
+    /option [a-z]\b/i,
+    /product [a-z]\b/i,
+    /\[insert/i,
+    /\[your/i,
+    /lorem ipsum/i,
+];
+
+const PLACEHOLDER_URL_PATTERNS = [
+    /^#$/,
+    /example\.com/i,
+    /placeholder/i,
+    /test\.com/i,
+];
+
+function isGenericName(name: unknown): boolean {
+    if (typeof name !== 'string') return false;
+    return GENERIC_NAME_PATTERNS.some(p => p.test(name.trim()));
+}
+
+function isGenericVerdict(verdict: unknown): boolean {
+    if (typeof verdict !== 'string' || verdict.length < 10) return true;
+    return GENERIC_VERDICT_PATTERNS.some(p => p.test(verdict));
+}
+
+function isPlaceholderUrl(url: unknown): boolean {
+    if (typeof url !== 'string' || !url) return false;
+    return PLACEHOLDER_URL_PATTERNS.some(p => p.test(url.trim()));
+}
+
+function semanticValidateBlock(
+    blockType: string,
+    content: Record<string, unknown>,
+): SemanticIssue[] {
+    const issues: SemanticIssue[] = [];
+
+    // Check ComparisonTable options
+    if (blockType === 'ComparisonTable') {
+        const options = content.options;
+        if (Array.isArray(options)) {
+            for (let i = 0; i < options.length; i++) {
+                const opt = options[i] as Record<string, unknown>;
+                if (isGenericName(opt?.name)) {
+                    issues.push({ field: `options[${i}].name`, reason: `Generic name: "${opt.name}"` });
+                }
+            }
+        }
+        if (isGenericVerdict(content.verdict)) {
+            issues.push({ field: 'verdict', reason: 'Generic or too-short verdict' });
+        }
+    }
+
+    // Check RankingList items
+    if (blockType === 'RankingList') {
+        const items = content.items;
+        if (Array.isArray(items)) {
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i] as Record<string, unknown>;
+                if (isGenericName(item?.name)) {
+                    issues.push({ field: `items[${i}].name`, reason: `Generic name: "${item.name}"` });
+                }
+            }
+            if (items.length === 0) {
+                issues.push({ field: 'items', reason: 'Empty ranking list' });
+            }
+        }
+    }
+
+    // Check ProsConsCard
+    if (blockType === 'ProsConsCard') {
+        if (isGenericName(content.name)) {
+            issues.push({ field: 'name', reason: `Generic product name: "${content.name}"` });
+        }
+        const pros = content.pros;
+        const cons = content.cons;
+        if (Array.isArray(pros) && pros.length === 0) {
+            issues.push({ field: 'pros', reason: 'Empty pros list' });
+        }
+        if (Array.isArray(cons) && cons.length === 0) {
+            issues.push({ field: 'cons', reason: 'Empty cons list' });
+        }
+    }
+
+    // Check VsCard
+    if (blockType === 'VsCard') {
+        const itemA = content.itemA as Record<string, unknown> | undefined;
+        const itemB = content.itemB as Record<string, unknown> | undefined;
+        if (itemA && isGenericName(itemA.name)) {
+            issues.push({ field: 'itemA.name', reason: `Generic name: "${itemA.name}"` });
+        }
+        if (itemB && isGenericName(itemB.name)) {
+            issues.push({ field: 'itemB.name', reason: `Generic name: "${itemB.name}"` });
+        }
+        if (isGenericVerdict(content.verdict)) {
+            issues.push({ field: 'verdict', reason: 'Generic or too-short verdict' });
+        }
+    }
+
+    // Check Hero
+    if (blockType === 'Hero') {
+        if (typeof content.heading === 'string' && content.heading.length < 5) {
+            issues.push({ field: 'heading', reason: 'Heading too short' });
+        }
+        if (typeof content.ctaUrl === 'string' && isPlaceholderUrl(content.ctaUrl)) {
+            issues.push({ field: 'ctaUrl', reason: 'Placeholder CTA URL' });
+        }
+    }
+
+    // Check FAQ
+    if (blockType === 'FAQ') {
+        const items = content.items;
+        if (Array.isArray(items) && items.length === 0) {
+            issues.push({ field: 'items', reason: 'Empty FAQ list' });
+        }
+    }
+
+    // Check TestimonialGrid
+    if (blockType === 'TestimonialGrid') {
+        const testimonials = content.testimonials;
+        if (Array.isArray(testimonials)) {
+            for (let i = 0; i < testimonials.length; i++) {
+                const t = testimonials[i] as Record<string, unknown>;
+                if (typeof t?.quote === 'string' && t.quote.length < 15) {
+                    issues.push({ field: `testimonials[${i}].quote`, reason: 'Quote too short' });
+                }
+            }
+        }
+    }
+
+    // Check PricingTable
+    if (blockType === 'PricingTable') {
+        const plans = content.plans;
+        if (Array.isArray(plans)) {
+            for (let i = 0; i < plans.length; i++) {
+                const plan = plans[i] as Record<string, unknown>;
+                if (isGenericName(plan?.name)) {
+                    issues.push({ field: `plans[${i}].name`, reason: `Generic plan name: "${plan.name}"` });
+                }
+            }
+        }
+    }
+
+    // Global: check for placeholder URLs in any string field
+    const blob = JSON.stringify(content);
+    if (/example\.com/i.test(blob)) {
+        issues.push({ field: '_global', reason: 'Contains example.com placeholder URL' });
+    }
+
+    return issues;
+}
+
+/**
+ * Auto-repair semantically invalid content by merging in niche-aware defaults
+ * for the flagged fields. Only patches the broken fields, preserving the rest.
+ */
+function semanticRepairBlock(
+    blockType: string,
+    content: Record<string, unknown>,
+    ctx: BlockPromptContext,
+): Record<string, unknown> {
+    const defaults = getDefaultBlockContent(
+        blockType,
+        ctx.domainName,
+        ctx.niche,
+    ).content;
+
+    if (!defaults) return content;
+
+    const repaired = { ...content };
+
+    if (blockType === 'ComparisonTable' && defaults.options) {
+        const options = repaired.options;
+        const defOptions = defaults.options as Array<Record<string, unknown>>;
+        if (Array.isArray(options)) {
+            repaired.options = options.map((opt, i) => {
+                const o = opt as Record<string, unknown>;
+                const d = defOptions[i] || defOptions[0];
+                if (d && isGenericName(o.name)) {
+                    return { ...o, name: d.name, badge: o.badge || d.badge };
+                }
+                return o;
+            });
+        }
+        if (isGenericVerdict(repaired.verdict) && defaults.verdict) {
+            repaired.verdict = defaults.verdict;
+        }
+    }
+
+    if (blockType === 'RankingList' && defaults.items) {
+        const items = repaired.items;
+        const defItems = defaults.items as Array<Record<string, unknown>>;
+        if (Array.isArray(items)) {
+            repaired.items = items.map((item, i) => {
+                const it = item as Record<string, unknown>;
+                const d = defItems[i] || defItems[0];
+                if (d && isGenericName(it.name)) {
+                    return { ...it, name: d.name, badge: it.badge || d.badge };
+                }
+                return it;
+            });
+        }
+    }
+
+    if (blockType === 'ProsConsCard') {
+        if (isGenericName(repaired.name) && defaults.name) {
+            repaired.name = defaults.name;
+        }
+        if (Array.isArray(repaired.pros) && (repaired.pros as unknown[]).length === 0 && defaults.pros) {
+            repaired.pros = defaults.pros;
+        }
+        if (Array.isArray(repaired.cons) && (repaired.cons as unknown[]).length === 0 && defaults.cons) {
+            repaired.cons = defaults.cons;
+        }
+    }
+
+    if (blockType === 'VsCard') {
+        const defA = (defaults.itemA || {}) as Record<string, unknown>;
+        const defB = (defaults.itemB || {}) as Record<string, unknown>;
+        const itemA = repaired.itemA as Record<string, unknown> | undefined;
+        const itemB = repaired.itemB as Record<string, unknown> | undefined;
+        if (itemA && isGenericName(itemA.name) && defA.name) {
+            repaired.itemA = { ...itemA, name: defA.name };
+        }
+        if (itemB && isGenericName(itemB.name) && defB.name) {
+            repaired.itemB = { ...itemB, name: defB.name };
+        }
+        if (isGenericVerdict(repaired.verdict) && defaults.verdict) {
+            repaired.verdict = defaults.verdict;
+        }
+    }
+
+    // Replace placeholder URLs globally
+    const blob = JSON.stringify(repaired);
+    if (/example\.com/i.test(blob)) {
+        const fixed = blob.replace(/https?:\/\/example\.com\/?/gi, '/guides');
+        try { return JSON.parse(fixed); } catch { /* keep repaired */ }
+    }
+
+    return repaired;
+}
+
 function shouldSkipGenerationForExistingContent(block: BlockEnvelope, ctx: BlockPromptContext): boolean {
     const existing = block.content;
     if (!existing || !isRecord(existing) || Object.keys(existing).length === 0) return false;
@@ -392,11 +658,22 @@ export async function generateBlockContent(
             };
         }
 
+        // Semantic validation — detect and auto-repair generic/placeholder content
+        const semanticIssues = semanticValidateBlock(blockType, normalizedContent);
+        let finalContent = normalizedContent;
+        if (semanticIssues.length > 0) {
+            console.warn(
+                `[block-pipeline] Semantic issues in ${blockType} block ${block.id}:`,
+                semanticIssues.map(i => `${i.field}: ${i.reason}`).join('; '),
+            );
+            finalContent = semanticRepairBlock(blockType, normalizedContent, ctx);
+        }
+
         return {
             blockId: block.id,
             blockType,
             success: true,
-            content: normalizedContent,
+            content: finalContent,
             tokensUsed: response.inputTokens + response.outputTokens,
             cost: response.cost,
             durationMs,

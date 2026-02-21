@@ -5,8 +5,15 @@ import { eq, and } from 'drizzle-orm';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const VALID_THEMES = new Set(['clean', 'editorial', 'bold', 'minimal']);
-const VALID_SKINS = new Set(['slate', 'ocean', 'forest', 'ember', 'midnight', 'coral']);
+const VALID_THEMES = new Set([
+    'clean', 'editorial', 'bold', 'minimal', 'magazine', 'brutalist',
+    'glass', 'retro', 'corporate', 'craft', 'academic', 'startup', 'noir',
+]);
+const VALID_SKINS = new Set([
+    'slate', 'ocean', 'forest', 'ember', 'midnight', 'coral',
+    'sage', 'rose', 'indigo', 'sand', 'teal', 'wine', 'plum',
+    'steel', 'cobalt', 'copper', 'arctic', 'charcoal', 'dusk',
+]);
 
 // GET /api/pages/[id] — Fetch a single page definition with its blocks
 export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {

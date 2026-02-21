@@ -15,6 +15,145 @@ export interface BlockContentDefaults {
     config?: Record<string, unknown>;
 }
 
+// ============================================================
+// Niche-aware example names for comparison/ranking/review blocks
+// ============================================================
+
+interface NicheExamples {
+    names: [string, string, string];
+    badges: [string, string, string];
+    bestFor: [string, string, string];
+    prices: [string, string, string];
+}
+
+function getNicheExamples(niche: string): NicheExamples {
+    const n = niche.toLowerCase();
+
+    if (n.match(/roof/)) return {
+        names: ['GAF Timberline HDZ', 'Owens Corning Duration', 'CertainTeed Landmark'],
+        badges: ['Best Overall', 'Best Value', 'Premium Pick'],
+        bestFor: ['Most homeowners', 'Budget-conscious buyers', 'High-wind regions'],
+        prices: ['$8,500–$12,000', '$7,000–$10,000', '$10,000–$15,000'],
+    };
+    if (n.match(/solar|panel/)) return {
+        names: ['SunPower Maxeon 7', 'Tesla Solar Panels', 'Enphase + REC Alpha'],
+        badges: ['Highest Efficiency', 'Best Integrated', 'Best Value'],
+        bestFor: ['Maximum output per sq ft', 'Powerwall owners', 'Budget-focused installs'],
+        prices: ['$3.50/W', '$2.85/W', '$2.95/W'],
+    };
+    if (n.match(/mortgage|home\s?loan|refinanc/)) return {
+        names: ['Rocket Mortgage', 'Better.com', 'Veterans United'],
+        badges: ['Best Overall', 'Fastest Closing', 'Best for Veterans'],
+        bestFor: ['Most borrowers', 'Tech-savvy buyers', 'VA-eligible borrowers'],
+        prices: ['6.25% APR', '6.10% APR', '5.90% APR'],
+    };
+    if (n.match(/insur/)) return {
+        names: ['State Farm', 'GEICO', 'Progressive'],
+        badges: ['Best Overall', 'Best Rates', 'Best Online Experience'],
+        bestFor: ['Full-service coverage', 'Lowest premiums', 'Easy policy management'],
+        prices: ['$145/mo avg', '$120/mo avg', '$130/mo avg'],
+    };
+    if (n.match(/braces|orthodont/)) return {
+        names: ['Invisalign', 'Traditional Metal Braces', 'Ceramic Braces'],
+        badges: ['Most Popular', 'Most Affordable', 'Best Aesthetics'],
+        bestFor: ['Adults and teens', 'Complex cases', 'Discreet treatment'],
+        prices: ['$3,000–$7,000', '$2,500–$6,000', '$3,500–$8,000'],
+    };
+    if (n.match(/dental|tooth|teeth/)) return {
+        names: ['Aspen Dental', 'Smile Direct Club', 'Western Dental'],
+        badges: ['Most Locations', 'Best Remote Option', 'Best Value'],
+        bestFor: ['In-person care', 'Mild alignment cases', 'Budget dental plans'],
+        prices: ['$150–$300/visit', '$1,950 total', '$99–$250/visit'],
+    };
+    if (n.match(/therapy|counsel|mental/)) return {
+        names: ['BetterHelp', 'Talkspace', 'Cerebral'],
+        badges: ['Most Therapists', 'Best App', 'Best for Medication'],
+        bestFor: ['Talk therapy', 'Messaging therapy', 'Therapy + prescriptions'],
+        prices: ['$65–$100/week', '$69–$109/week', '$85–$325/month'],
+    };
+    if (n.match(/loan|credit|debt|lending/)) return {
+        names: ['SoFi Personal Loans', 'LightStream', 'Upstart'],
+        badges: ['Best Overall', 'Best Rates', 'Best for Fair Credit'],
+        bestFor: ['Most borrowers', 'Excellent credit', 'Thin credit file'],
+        prices: ['8.99–25.81% APR', '7.49–25.49% APR', '6.70–35.99% APR'],
+    };
+    if (n.match(/pool/)) return {
+        names: ['Fiberglass In-Ground', 'Vinyl Liner In-Ground', 'Above-Ground Steel'],
+        badges: ['Most Popular', 'Best Value', 'Budget Pick'],
+        bestFor: ['Low maintenance', 'Custom shapes', 'Renters or small yards'],
+        prices: ['$25,000–$65,000', '$20,000–$50,000', '$1,500–$6,000'],
+    };
+    if (n.match(/home\s?value|property|real estate|realtor/)) return {
+        names: ['Zillow Zestimate', 'Redfin Estimate', 'Realtor.com Valuation'],
+        badges: ['Most Recognized', 'Most Accurate', 'Best Data Depth'],
+        bestFor: ['Quick estimates', 'Listing-stage accuracy', 'Market trend context'],
+        prices: ['Free', 'Free', 'Free'],
+    };
+    if (n.match(/wedding/)) return {
+        names: ['The Knot', 'Zola', 'WeddingWire'],
+        badges: ['Best Overall', 'Best Registry', 'Best Vendor Search'],
+        bestFor: ['Full planning suite', 'Registry + website', 'Local vendor matching'],
+        prices: ['Free / Premium $99', 'Free', 'Free'],
+    };
+    if (n.match(/moving|reloc/)) return {
+        names: ['International Van Lines', 'North American Van Lines', 'U-Pack'],
+        badges: ['Best Full-Service', 'Most Experienced', 'Best Budget'],
+        bestFor: ['Long-distance moves', 'Corporate relocations', 'DIY movers'],
+        prices: ['$2,500–$7,500', '$3,000–$8,000', '$800–$3,500'],
+    };
+    if (n.match(/ivf|fertil/)) return {
+        names: ['Shady Grove Fertility', 'CCRM', 'CNY Fertility'],
+        badges: ['Highest Success Rate', 'Best Research', 'Most Affordable'],
+        bestFor: ['Complex cases', 'Cutting-edge protocols', 'Budget-conscious patients'],
+        prices: ['$15,000–$25,000/cycle', '$18,000–$30,000/cycle', '$3,900–$8,000/cycle'],
+    };
+    if (n.match(/lawyer|legal|attorney|prenup/)) return {
+        names: ['LegalZoom', 'Avvo Attorney Match', 'Rocket Lawyer'],
+        badges: ['Best Online', 'Best Attorney Network', 'Best Subscription'],
+        bestFor: ['Simple legal docs', 'Finding local counsel', 'Ongoing legal needs'],
+        prices: ['$89–$499', 'Free consultation', '$39.99/month'],
+    };
+    if (n.match(/car|auto|vehicle|truck|suv/)) return {
+        names: ['CarMax', 'Carvana', 'AutoTrader'],
+        badges: ['Best In-Person', 'Best Online', 'Largest Selection'],
+        bestFor: ['Test-drive buyers', 'Delivery convenience', 'Comparison shopping'],
+        prices: ['Market pricing', 'Market pricing', 'Dealer pricing'],
+    };
+    if (n.match(/bath|kitchen|remodel|renovat|construct|contract/)) return {
+        names: ['Bath Fitter', 'Home Depot Services', 'Angi Certified Pros'],
+        badges: ['Best Turnkey', 'Best Big-Box', 'Best Marketplace'],
+        bestFor: ['Quick remodels', 'Material + install bundles', 'Finding local pros'],
+        prices: ['$5,000–$15,000', '$8,000–$25,000', 'Varies by pro'],
+    };
+    if (n.match(/hvac|ac unit/)) return {
+        names: ['Carrier Infinity', 'Trane XV20i', 'Lennox XC25'],
+        badges: ['Best Overall', 'Best Durability', 'Best Efficiency'],
+        bestFor: ['Most homes', 'Extreme climates', 'Energy savings'],
+        prices: ['$4,500–$8,000', '$5,000–$9,500', '$5,500–$10,000'],
+    };
+    if (n.match(/only\s?fans|fansly|creator|influencer/)) return {
+        names: ['OnlyFans', 'Fansly', 'Fanvue'],
+        badges: ['Largest Audience', 'Best Features', 'Lowest Fees'],
+        bestFor: ['Maximum reach', 'Advanced tools', 'Keeping more earnings'],
+        prices: ['20% platform fee', '20% platform fee', '15% platform fee'],
+    };
+    if (n.match(/software|saas|tech|crm|erp/)) return {
+        names: ['Salesforce', 'HubSpot', 'Zoho CRM'],
+        badges: ['Best Enterprise', 'Best Mid-Market', 'Best Value'],
+        bestFor: ['Large teams', 'Marketing-first orgs', 'Small businesses'],
+        prices: ['$25–$300/user/mo', '$0–$120/user/mo', '$14–$52/user/mo'],
+    };
+
+    // Fallback: use niche label to generate semi-specific names
+    const cap = capitalize(niche);
+    return {
+        names: [`${cap} Pro Select`, `${cap} Value Plus`, `${cap} Premium Elite`],
+        badges: ['Best Overall', 'Best Value', 'Premium Pick'],
+        bestFor: ['Most readers', 'Budget-focused buyers', 'Advanced needs'],
+        prices: ['$$$', '$$', '$$$$'],
+    };
+}
+
 /**
  * Generate rich default content for a block type, personalized to a domain.
  *
@@ -32,6 +171,7 @@ export function getDefaultBlockContent(
     const siteName = domainToSiteName(domain || 'example.com');
     const nicheLabel = niche || inferNiche(domain || 'example.com');
     const year = new Date().getFullYear();
+    const ex = getNicheExamples(nicheLabel);
 
     const defaults: Record<string, BlockContentDefaults> = {
         Header: {
@@ -175,38 +315,38 @@ export function getDefaultBlockContent(
                 ],
                 options: [
                     {
-                        name: 'Top Choice A',
-                        badge: 'Best Overall',
+                        name: ex.names[0],
+                        badge: ex.badges[0],
                         winner: true,
                         url: '/compare#option-a',
                         scores: {
                             overall: 5,
-                            price: '$$$',
-                            bestFor: 'Most readers',
+                            price: ex.prices[0],
+                            bestFor: ex.bestFor[0],
                         },
                     },
                     {
-                        name: 'Top Choice B',
-                        badge: 'Best Value',
+                        name: ex.names[1],
+                        badge: ex.badges[1],
                         url: '/compare#option-b',
                         scores: {
                             overall: 4,
-                            price: '$$',
-                            bestFor: 'Budget-focused buyers',
+                            price: ex.prices[1],
+                            bestFor: ex.bestFor[1],
                         },
                     },
                     {
-                        name: 'Top Choice C',
-                        badge: 'Premium Pick',
+                        name: ex.names[2],
+                        badge: ex.badges[2],
                         url: '/compare#option-c',
                         scores: {
                             overall: 4,
-                            price: '$$$$',
-                            bestFor: 'Advanced needs',
+                            price: ex.prices[2],
+                            bestFor: ex.bestFor[2],
                         },
                     },
                 ],
-                verdict: 'Top Choice A is the strongest all-around pick, while Choice B is best for tight budgets and Choice C is ideal when premium features matter most.',
+                verdict: `${ex.names[0]} is the strongest all-around pick for most ${nicheLabel} needs, while ${ex.names[1]} is best for tight budgets and ${ex.names[2]} is ideal when premium features matter most.`,
             },
         },
         PricingTable: {
@@ -269,28 +409,28 @@ export function getDefaultBlockContent(
                 items: [
                     {
                         rank: 1,
-                        name: 'Top Choice A',
-                        description: 'Strong overall performance with the best balance of quality, support, and long-term value.',
+                        name: ex.names[0],
+                        description: `Strong overall performance with the best balance of quality, support, and long-term value. ${ex.bestFor[0]}.`,
                         rating: 4.9,
-                        badge: 'Best Overall',
+                        badge: ex.badges[0],
                         url: '/compare#option-a',
                         score: 96,
                     },
                     {
                         rank: 2,
-                        name: 'Top Choice B',
-                        description: 'Excellent value option with competitive pricing and dependable core features.',
+                        name: ex.names[1],
+                        description: `Excellent value option with competitive pricing and dependable core features. ${ex.bestFor[1]}.`,
                         rating: 4.7,
-                        badge: 'Best Value',
+                        badge: ex.badges[1],
                         url: '/compare#option-b',
                         score: 91,
                     },
                     {
                         rank: 3,
-                        name: 'Top Choice C',
-                        description: 'Premium alternative that shines when advanced capabilities are a priority.',
+                        name: ex.names[2],
+                        description: `Premium alternative that shines when advanced capabilities are a priority. ${ex.bestFor[2]}.`,
                         rating: 4.6,
-                        badge: 'Premium Pick',
+                        badge: ex.badges[2],
                         url: '/compare#option-c',
                         score: 88,
                     },
@@ -299,7 +439,7 @@ export function getDefaultBlockContent(
         },
         ProsConsCard: {
             content: {
-                name: 'Top Choice A',
+                name: ex.names[0],
                 rating: 4.8,
                 pros: [
                     'Consistently high customer satisfaction',
@@ -310,7 +450,7 @@ export function getDefaultBlockContent(
                     'Higher starting price than entry-tier options',
                     'Premium add-ons can increase total cost quickly',
                 ],
-                summary: `A reliable pick for most ${nicheLabel} needs, especially if you prioritize long-term quality over lowest upfront price.`,
+                summary: `${ex.names[0]} is a reliable pick for most ${nicheLabel} needs, especially if you prioritize long-term quality over lowest upfront price.`,
                 url: '/compare#option-a',
                 badge: 'Editor\'s Choice',
             },
@@ -318,22 +458,22 @@ export function getDefaultBlockContent(
         VsCard: {
             content: {
                 itemA: {
-                    name: 'Top Choice A',
-                    description: 'Balanced option with strong quality and support.',
+                    name: ex.names[0],
+                    description: `Balanced option with strong quality and support. ${ex.bestFor[0]}.`,
                     pros: ['Great all-around value', 'Strong reliability history'],
                     cons: ['Higher base price'],
                     rating: 4.8,
                     url: '/compare#option-a',
                 },
                 itemB: {
-                    name: 'Top Choice B',
-                    description: 'Budget-friendly option for simpler requirements.',
+                    name: ex.names[1],
+                    description: `Budget-friendly option for simpler requirements. ${ex.bestFor[1]}.`,
                     pros: ['Lower monthly cost', 'Quick setup'],
                     cons: ['Fewer advanced features'],
                     rating: 4.5,
                     url: '/compare#option-b',
                 },
-                verdict: 'Choose Top Choice A for long-term performance and support. Choose Top Choice B when minimizing upfront cost is your top priority.',
+                verdict: `Choose ${ex.names[0]} for long-term performance and support. Choose ${ex.names[1]} when minimizing upfront cost is your top priority.`,
             },
         },
         Sidebar: {

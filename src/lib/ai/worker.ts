@@ -91,12 +91,20 @@ import {
 } from '@/lib/growth/integrity';
 import { archiveStaleSubscribers } from '@/lib/subscribers';
 
-const LOCK_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 const JOB_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes max per job
+// Keep lock TTL greater than job timeout so stale-lock recovery does not requeue
+// an actively running job before its timeout has elapsed.
+const LOCK_DURATION_MS = JOB_TIMEOUT_MS + 60 * 1000;
 const BATCH_SIZE = parseEnvInt('WORKER_BATCH_SIZE', 10, 1, 1000);
+const WORKER_CONCURRENCY = parseEnvInt('WORKER_CONCURRENCY', 4, 1, 32);
+const WORKER_JOB_TYPE_CONCURRENCY = parseJobTypeConcurrencyMap(process.env.WORKER_JOB_TYPE_CONCURRENCY);
 const POLL_INTERVAL_MS = 5000;
 const STALE_LOCK_CHECK_INTERVAL = 60_000; // Check for stale locks every 60s
 const SCHEDULER_CHECK_INTERVAL = 60 * 60 * 1000; // Run scheduler every hour
+const QUEUE_SLO_PENDING_AGE_MS = parseEnvInt('QUEUE_SLO_PENDING_AGE_MS', 15 * 60 * 1000, 60_000, 24 * 60 * 60 * 1000);
+const QUEUE_SLO_ERROR_RATE_PCT = parseEnvFloat('QUEUE_SLO_ERROR_RATE_PCT', 5, 0, 100);
+const QUEUE_SLO_WORKER_IDLE_MS = parseEnvInt('QUEUE_SLO_WORKER_IDLE_MS', 10 * 60 * 1000, 60_000, 24 * 60 * 60 * 1000);
+const QUEUE_SLO_PENDING_BACKLOG = parseEnvInt('QUEUE_SLO_PENDING_BACKLOG', 150, 1, 200_000);
 
 let workerStopRequested = false;
 let activeJobs = 0;
@@ -106,6 +114,8 @@ interface WorkerOptions {
     continuous?: boolean;
     maxJobs?: number;
     jobTypes?: string[];
+    concurrency?: number;
+    perJobTypeConcurrency?: Record<string, number>;
 }
 
 interface WorkerResult {
@@ -113,6 +123,8 @@ interface WorkerResult {
     failed: number;
     staleLocksCleaned: number;
     transientRetriesQueued: number;
+    concurrencyUsed: number;
+    perJobTypeConcurrency: Record<string, number>;
     stats: QueueStats;
 }
 
@@ -124,6 +136,14 @@ interface QueueStats {
     cancelled: number;
     total: number;
 }
+
+type QueueSloAlert = {
+    code: 'pending_age' | 'error_rate' | 'worker_idle' | 'pending_backlog';
+    severity: 'warning' | 'critical';
+    message: string;
+    value: number;
+    threshold: number;
+};
 
 type ResearchDecision = 'researching' | 'buy' | 'pass' | 'watchlist' | 'bought';
 
@@ -995,6 +1015,47 @@ function parseEnvFloat(name: string, fallback: number, min: number, max: number)
     const raw = Number.parseFloat(process.env[name] || '');
     if (!Number.isFinite(raw)) return fallback;
     return Math.max(min, Math.min(raw, max));
+}
+
+function parseJobTypeConcurrencyMap(raw: string | undefined): Record<string, number> {
+    if (!raw) return {};
+
+    const entries = raw
+        .split(',')
+        .map((part) => part.trim())
+        .filter((part) => part.length > 0);
+
+    const parsed: Record<string, number> = {};
+    for (const entry of entries) {
+        const [jobTypeRaw, limitRaw] = entry.split(':').map((part) => part.trim());
+        if (!jobTypeRaw || !limitRaw) continue;
+        if (!/^[a-z0-9_]+$/i.test(jobTypeRaw)) continue;
+        const limit = Number.parseInt(limitRaw, 10);
+        if (!Number.isFinite(limit) || limit <= 0) continue;
+        parsed[jobTypeRaw] = Math.max(1, Math.min(limit, 32));
+    }
+
+    return parsed;
+}
+
+function normalizeWorkerConcurrency(value: number | undefined): number {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return WORKER_CONCURRENCY;
+    }
+    return Math.max(1, Math.min(Math.floor(value), 32));
+}
+
+function normalizePerJobTypeConcurrency(overrides?: Record<string, number>): Record<string, number> {
+    const merged: Record<string, number> = { ...WORKER_JOB_TYPE_CONCURRENCY };
+    if (overrides) {
+        for (const [jobType, rawLimit] of Object.entries(overrides)) {
+            if (!/^[a-z0-9_]+$/i.test(jobType)) continue;
+            const limit = Number.parseInt(String(rawLimit), 10);
+            if (!Number.isFinite(limit) || limit <= 0) continue;
+            merged[jobType] = Math.max(1, Math.min(limit, 32));
+        }
+    }
+    return merged;
 }
 
 async function maybeTriggerCampaignIntegrityAlert(input: {
@@ -2174,18 +2235,22 @@ async function processJob(job: typeof contentQueue.$inferSelect): Promise<boolea
     console.log(`[Worker] Processing job ${job.id} (${job.jobType}) — attempt ${(job.attempts || 0) + 1}/${job.maxAttempts || 3}`);
 
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const abortController = new AbortController();
     activeJobs += 1;
 
     try {
         // Create a timeout promise (cleared on success or failure to prevent leak)
         const timeoutPromise = new Promise<never>((_, reject) => {
-            timeoutId = setTimeout(() => reject(new Error(`Job timed out after ${JOB_TIMEOUT_MS / 1000}s`)), JOB_TIMEOUT_MS);
+            timeoutId = setTimeout(() => {
+                abortController.abort(`timeout:${JOB_TIMEOUT_MS}`);
+                reject(new Error(`Job timed out after ${JOB_TIMEOUT_MS / 1000}s`));
+            }, JOB_TIMEOUT_MS);
         });
 
         await markLinkedPromotionJobRunning(job);
 
         // Race the job against the timeout
-        const jobPromise = executeJob(job);
+        const jobPromise = executeJob(job, abortController.signal);
         await Promise.race([jobPromise, timeoutPromise]);
 
         if (timeoutId) {
@@ -2276,42 +2341,64 @@ async function processJob(job: typeof contentQueue.$inferSelect): Promise<boolea
 /**
  * Execute the actual job logic based on job type
  */
-async function executeJob(job: typeof contentQueue.$inferSelect): Promise<void> {
+async function executeJob(job: typeof contentQueue.$inferSelect, signal: AbortSignal): Promise<void> {
+    const assertNotAborted = (signal: AbortSignal): void => {
+        if (!signal.aborted) return;
+        const reason = signal.reason;
+        if (typeof reason === 'string' && reason.length > 0) {
+            throw new Error(`Job aborted: ${reason}`);
+        }
+        throw new Error('Job aborted');
+    };
+    assertNotAborted(signal);
+
     switch (job.jobType) {
         case 'generate_outline':
+            assertNotAborted(signal);
             await processOutlineJob(job.id);
             break;
         case 'generate_draft':
+            assertNotAborted(signal);
             await processDraftJob(job.id);
             break;
         case 'humanize':
+            assertNotAborted(signal);
             await processHumanizeJob(job.id);
             break;
         case 'seo_optimize':
+            assertNotAborted(signal);
             await processSeoOptimizeJob(job.id);
             break;
         case 'resolve_external_links':
+            assertNotAborted(signal);
             await processResolveExternalLinksJob(job.id);
             break;
         case 'ai_detection_check':
+            assertNotAborted(signal);
             await processAiDetectionCheckJob(job.id);
             break;
         case 'generate_meta':
+            assertNotAborted(signal);
             await processMetaJob(job.id);
             break;
         case 'keyword_research':
+            assertNotAborted(signal);
             await processKeywordResearchJob(job.id);
             break;
         case 'research':
+            assertNotAborted(signal);
             await processResearchJob(job.id);
             break;
         case 'bulk_seed':
+            assertNotAborted(signal);
             await processBulkSeedJob(job.id);
             break;
         case 'deploy':
-            await processDeployJob(job.id);
+            assertNotAborted(signal);
+            await processDeployJob(job.id, signal);
             break;
         case 'domain_site_review':
+            assertNotAborted(signal);
             await processDomainSiteReviewJob(job.id);
             break;
         case 'evaluate': {
@@ -3308,6 +3395,8 @@ async function markJobFailed(
  */
 export async function runWorkerOnce(options: WorkerOptions = {}): Promise<WorkerResult> {
     const maxJobs = options.maxJobs || BATCH_SIZE;
+    const concurrencyUsed = normalizeWorkerConcurrency(options.concurrency);
+    const perJobTypeConcurrency = normalizePerJobTypeConcurrency(options.perJobTypeConcurrency);
 
     // Step 1: Recover any stale locks from crashed workers
     const staleLocksCleaned = await recoverStaleLocks();
@@ -3329,19 +3418,98 @@ export async function runWorkerOnce(options: WorkerOptions = {}): Promise<Worker
     let processed = 0;
     let failed = 0;
 
-    for (const job of jobs) {
-        const success = await processJob(job);
-        if (success) {
-            processed++;
+    const pendingJobs = [...jobs];
+    const inFlightByType = new Map<string, number>();
+    const waiters: Array<() => void> = [];
+    let activeLocal = 0;
+
+    const notifyWaiters = () => {
+        if (waiters.length === 0) return;
+        const batch = waiters.splice(0, waiters.length);
+        for (const resolve of batch) {
+            resolve();
+        }
+    };
+
+    const waitForSlot = async (): Promise<void> => {
+        await new Promise<void>((resolve) => {
+            waiters.push(resolve);
+        });
+    };
+
+    const getTypeLimit = (jobType: string): number => {
+        const typeLimit = perJobTypeConcurrency[jobType];
+        if (typeof typeLimit === 'number' && Number.isFinite(typeLimit) && typeLimit > 0) {
+            return Math.min(typeLimit, concurrencyUsed);
+        }
+        return concurrencyUsed;
+    };
+
+    const takeNextJob = (): (typeof jobs)[number] | null => {
+        for (let i = 0; i < pendingJobs.length; i++) {
+            const candidate = pendingJobs[i];
+            const inFlight = inFlightByType.get(candidate.jobType) || 0;
+            if (inFlight >= getTypeLimit(candidate.jobType)) {
+                continue;
+            }
+            pendingJobs.splice(i, 1);
+            inFlightByType.set(candidate.jobType, inFlight + 1);
+            activeLocal += 1;
+            return candidate;
+        }
+        return null;
+    };
+
+    const releaseJob = (jobType: string): void => {
+        activeLocal = Math.max(0, activeLocal - 1);
+        const inFlight = inFlightByType.get(jobType) || 0;
+        if (inFlight <= 1) {
+            inFlightByType.delete(jobType);
         } else {
-            failed++;
+            inFlightByType.set(jobType, inFlight - 1);
+        }
+        notifyWaiters();
+    };
+
+    async function runSlot(): Promise<void> {
+        while (true) {
+            const job = takeNextJob();
+            if (!job) {
+                if (pendingJobs.length === 0 && activeLocal === 0) {
+                    return;
+                }
+                await waitForSlot();
+                continue;
+            }
+
+            try {
+                const success = await processJob(job);
+                if (success) {
+                    processed++;
+                } else {
+                    failed++;
+                }
+            } finally {
+                releaseJob(job.jobType);
+            }
         }
     }
+
+    const slotCount = Math.max(1, Math.min(concurrencyUsed, jobs.length || 1));
+    await Promise.all(Array.from({ length: slotCount }, () => runSlot()));
 
     // Step 3: Get current stats
     const stats = await getQueueStats();
 
-    return { processed, failed, staleLocksCleaned, transientRetriesQueued, stats };
+    return {
+        processed,
+        failed,
+        staleLocksCleaned,
+        transientRetriesQueued,
+        concurrencyUsed,
+        perJobTypeConcurrency,
+        stats,
+    };
 }
 
 /**
@@ -3683,19 +3851,72 @@ export async function getQueueHealth() {
         ? Date.now() - latestWorkerActivityAt.getTime()
         : null;
 
+    const oldestPendingAge = oldestPending[0]?.createdAt
+        ? Date.now() - oldestPending[0].createdAt.getTime()
+        : null;
+    const avgProcessingTimeMs = avgDuration[0]?.avgMs || null;
+    const throughputPerHour = throughput[0]?.count || 0;
+    const errorRate24h = totalRecent > 0 ? Math.round((failedRecent / totalRecent) * 10000) / 100 : 0;
+
+    const queueSloAlerts: QueueSloAlert[] = [];
+    if (oldestPendingAge !== null && oldestPendingAge > QUEUE_SLO_PENDING_AGE_MS) {
+        queueSloAlerts.push({
+            code: 'pending_age',
+            severity: oldestPendingAge > QUEUE_SLO_PENDING_AGE_MS * 2 ? 'critical' : 'warning',
+            message: 'Oldest pending job age exceeded SLO threshold',
+            value: oldestPendingAge,
+            threshold: QUEUE_SLO_PENDING_AGE_MS,
+        });
+    }
+    if (errorRate24h > QUEUE_SLO_ERROR_RATE_PCT) {
+        queueSloAlerts.push({
+            code: 'error_rate',
+            severity: errorRate24h > QUEUE_SLO_ERROR_RATE_PCT * 2 ? 'critical' : 'warning',
+            message: '24h queue error rate exceeded SLO threshold',
+            value: errorRate24h,
+            threshold: QUEUE_SLO_ERROR_RATE_PCT,
+        });
+    }
+    if (stats.pending > QUEUE_SLO_PENDING_BACKLOG) {
+        queueSloAlerts.push({
+            code: 'pending_backlog',
+            severity: stats.pending > QUEUE_SLO_PENDING_BACKLOG * 2 ? 'critical' : 'warning',
+            message: 'Pending queue backlog exceeded SLO threshold',
+            value: stats.pending,
+            threshold: QUEUE_SLO_PENDING_BACKLOG,
+        });
+    }
+    if (stats.pending > 0 && latestWorkerActivityAgeMs !== null && latestWorkerActivityAgeMs > QUEUE_SLO_WORKER_IDLE_MS) {
+        queueSloAlerts.push({
+            code: 'worker_idle',
+            severity: 'critical',
+            message: 'Worker idle while queue has pending jobs',
+            value: latestWorkerActivityAgeMs,
+            threshold: QUEUE_SLO_WORKER_IDLE_MS,
+        });
+    }
+
     return {
         ...stats,
-        oldestPendingAge: oldestPending[0]?.createdAt
-            ? Date.now() - oldestPending[0].createdAt.getTime()
-            : null,
-        avgProcessingTimeMs: avgDuration[0]?.avgMs || null,
-        throughputPerHour: throughput[0]?.count || 0,
-        errorRate24h: totalRecent > 0 ? Math.round((failedRecent / totalRecent) * 10000) / 100 : 0,
+        oldestPendingAge,
+        avgProcessingTimeMs,
+        throughputPerHour,
+        errorRate24h,
         latestStartedAt,
         latestCompletedAt,
         latestQueuedAt,
         latestWorkerActivityAt,
         latestWorkerActivityAgeMs,
+        queueSlo: {
+            breached: queueSloAlerts.length > 0,
+            alerts: queueSloAlerts,
+            thresholds: {
+                pendingAgeMs: QUEUE_SLO_PENDING_AGE_MS,
+                errorRatePct: QUEUE_SLO_ERROR_RATE_PCT,
+                workerIdleMs: QUEUE_SLO_WORKER_IDLE_MS,
+                pendingBacklog: QUEUE_SLO_PENDING_BACKLOG,
+            },
+        },
     };
 }
 
@@ -3736,16 +3957,41 @@ type RetryFailedMode = 'all' | 'transient';
 type RetryFailedOptions = {
     mode?: RetryFailedMode;
     minFailedAgeMs?: number;
+    jobTypes?: string[];
+    domainId?: string;
+    dryRun?: boolean;
 };
 
 type FailedQueueRetryCandidate = {
     id: string;
+    jobType: string | null;
+    domainId: string | null;
     attempts: number | null;
     maxAttempts: number | null;
     errorMessage: string | null;
     result: unknown;
     completedAt: Date | null;
     createdAt: Date | null;
+};
+
+export type RetryFailedJobsSummary = {
+    mode: RetryFailedMode;
+    dryRun: boolean;
+    selectedCount: number;
+    retriedCount: number;
+    filters: {
+        jobTypes: string[];
+        domainId: string | null;
+        minFailedAgeMs: number;
+    };
+    candidates: Array<{
+        id: string;
+        jobType: string | null;
+        domainId: string | null;
+        attempts: number;
+        maxAttempts: number;
+        errorMessage: string | null;
+    }>;
 };
 
 function getRetryableFailureFlag(result: unknown): boolean | null {
@@ -3807,17 +4053,34 @@ export async function retryTransientFailedJobs(limit = 10): Promise<number> {
     return retryFailedJobs(limit, { mode: 'transient' });
 }
 
-export async function retryFailedJobs(limit = 10, options: RetryFailedOptions = {}): Promise<number> {
+export async function retryFailedJobsDetailed(limit = 10, options: RetryFailedOptions = {}): Promise<RetryFailedJobsSummary> {
     const normalizedLimit = Math.max(1, Math.min(limit, 200));
     const mode = options.mode ?? 'all';
     const minFailedAgeMs = Math.max(
         0,
         Math.min(options.minFailedAgeMs ?? 2 * 60 * 1000, 24 * 60 * 60 * 1000),
     );
+    const dryRun = options.dryRun === true;
+    const filteredJobTypes = [...new Set((options.jobTypes || [])
+        .map((jobType) => jobType.trim())
+        .filter((jobType) => jobType.length > 0 && /^[a-z0-9_]+$/i.test(jobType)))];
+    const domainId = typeof options.domainId === 'string' && options.domainId.trim().length > 0
+        ? options.domainId.trim()
+        : null;
+
+    let whereClause = eq(contentQueue.status, 'failed');
+    if (filteredJobTypes.length > 0) {
+        whereClause = and(whereClause, inArray(contentQueue.jobType, filteredJobTypes))!;
+    }
+    if (domainId) {
+        whereClause = and(whereClause, eq(contentQueue.domainId, domainId))!;
+    }
 
     const failedJobs = await db
         .select({
             id: contentQueue.id,
+            jobType: contentQueue.jobType,
+            domainId: contentQueue.domainId,
             attempts: contentQueue.attempts,
             maxAttempts: contentQueue.maxAttempts,
             errorMessage: contentQueue.errorMessage,
@@ -3826,15 +4089,44 @@ export async function retryFailedJobs(limit = 10, options: RetryFailedOptions = 
             createdAt: contentQueue.createdAt,
         })
         .from(contentQueue)
-        .where(eq(contentQueue.status, 'failed'))
+        .where(whereClause)
         .orderBy(desc(contentQueue.completedAt), desc(contentQueue.createdAt))
         .limit(mode === 'transient' ? normalizedLimit * 8 : normalizedLimit);
 
+    const ageFiltered = failedJobs.filter((job: FailedQueueRetryCandidate) => {
+        if (minFailedAgeMs <= 0) return true;
+        const failedAt = job.completedAt ?? job.createdAt;
+        if (!failedAt || !Number.isFinite(failedAt.getTime())) return true;
+        return Date.now() - failedAt.getTime() >= minFailedAgeMs;
+    });
+
     const candidates = mode === 'transient'
-        ? failedJobs
-            .filter((job) => isTransientFailedJob(job, minFailedAgeMs))
+        ? ageFiltered
+            .filter((job: FailedQueueRetryCandidate) => isTransientFailedJob(job, minFailedAgeMs))
             .slice(0, normalizedLimit)
-        : failedJobs.slice(0, normalizedLimit);
+        : ageFiltered.slice(0, normalizedLimit);
+
+    if (dryRun) {
+        return {
+            mode,
+            dryRun: true,
+            selectedCount: candidates.length,
+            retriedCount: 0,
+            filters: {
+                jobTypes: filteredJobTypes,
+                domainId,
+                minFailedAgeMs,
+            },
+            candidates: candidates.map((job: FailedQueueRetryCandidate) => ({
+                id: job.id,
+                jobType: job.jobType,
+                domainId: job.domainId,
+                attempts: Math.max(0, Number(job.attempts ?? 0)),
+                maxAttempts: Math.max(1, Number(job.maxAttempts ?? 3)),
+                errorMessage: job.errorMessage,
+            })),
+        };
+    }
 
     const now = Date.now();
     for (const job of candidates) {
@@ -3883,7 +4175,30 @@ export async function retryFailedJobs(limit = 10, options: RetryFailedOptions = 
             .where(eq(contentQueue.id, job.id));
     }
 
-    return candidates.length;
+    return {
+        mode,
+        dryRun: false,
+        selectedCount: candidates.length,
+        retriedCount: candidates.length,
+        filters: {
+            jobTypes: filteredJobTypes,
+            domainId,
+            minFailedAgeMs,
+        },
+        candidates: candidates.map((job: FailedQueueRetryCandidate) => ({
+            id: job.id,
+            jobType: job.jobType,
+            domainId: job.domainId,
+            attempts: Math.max(0, Number(job.attempts ?? 0)),
+            maxAttempts: Math.max(1, Number(job.maxAttempts ?? 3)),
+            errorMessage: job.errorMessage,
+        })),
+    };
+}
+
+export async function retryFailedJobs(limit = 10, options: RetryFailedOptions = {}): Promise<number> {
+    const summary = await retryFailedJobsDetailed(limit, options);
+    return summary.retriedCount;
 }
 
 /**

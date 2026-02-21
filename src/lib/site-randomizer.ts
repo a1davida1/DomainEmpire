@@ -110,9 +110,12 @@ export const THEMES = [
     'bold',
     'minimal',
     'magazine',
+    'brutalist',
     'glass',
+    'retro',
     'corporate',
     'craft',
+    'academic',
     'startup',
     'noir',
 ] as const;
@@ -123,14 +126,19 @@ export const SKINS = [
     'forest',
     'ember',
     'midnight',
+    'coral',
     'sage',
+    'rose',
     'indigo',
     'sand',
     'teal',
     'wine',
+    'plum',
+    'steel',
     'cobalt',
-    'charcoal',
+    'copper',
     'arctic',
+    'charcoal',
     'dusk',
 ] as const;
 
@@ -138,21 +146,59 @@ type ThemeChoice = (typeof THEMES)[number];
 type SkinChoice = (typeof SKINS)[number];
 
 const DESIGN_IDENTITIES: ReadonlyArray<{ theme: ThemeChoice; skin: SkinChoice }> = [
+    // Clean — versatile, works with many skins
     { theme: 'clean', skin: 'slate' },
     { theme: 'clean', skin: 'teal' },
+    { theme: 'clean', skin: 'cobalt' },
+    { theme: 'clean', skin: 'forest' },
+    // Editorial — serif-forward, warm tones
     { theme: 'editorial', skin: 'sand' },
     { theme: 'editorial', skin: 'wine' },
+    { theme: 'editorial', skin: 'copper' },
+    // Bold — strong shadows, punchy colors
     { theme: 'bold', skin: 'cobalt' },
+    { theme: 'bold', skin: 'midnight' },
+    { theme: 'bold', skin: 'coral' },
+    // Minimal — subdued, airy
     { theme: 'minimal', skin: 'sage' },
+    { theme: 'minimal', skin: 'steel' },
+    { theme: 'minimal', skin: 'arctic' },
+    // Magazine — elegant editorial
     { theme: 'magazine', skin: 'indigo' },
+    { theme: 'magazine', skin: 'rose' },
+    { theme: 'magazine', skin: 'plum' },
+    // Brutalist — raw, high-contrast
+    { theme: 'brutalist', skin: 'charcoal' },
+    { theme: 'brutalist', skin: 'steel' },
+    { theme: 'brutalist', skin: 'ember' },
+    // Glass — frosted, modern
     { theme: 'glass', skin: 'arctic' },
+    { theme: 'glass', skin: 'dusk' },
+    { theme: 'glass', skin: 'ocean' },
+    // Retro — playful, rounded
+    { theme: 'retro', skin: 'coral' },
+    { theme: 'retro', skin: 'ember' },
+    { theme: 'retro', skin: 'teal' },
+    // Corporate — conservative, trustworthy
     { theme: 'corporate', skin: 'ocean' },
+    { theme: 'corporate', skin: 'slate' },
+    { theme: 'corporate', skin: 'cobalt' },
+    // Craft — warm, artisan
     { theme: 'craft', skin: 'ember' },
+    { theme: 'craft', skin: 'copper' },
+    { theme: 'craft', skin: 'sand' },
+    // Academic — dense, research-focused
+    { theme: 'academic', skin: 'slate' },
+    { theme: 'academic', skin: 'indigo' },
+    { theme: 'academic', skin: 'steel' },
+    // Startup — airy, modern SaaS
     { theme: 'startup', skin: 'cobalt' },
     { theme: 'startup', skin: 'teal' },
+    { theme: 'startup', skin: 'plum' },
+    // Noir — dark-optimized, premium
     { theme: 'noir', skin: 'charcoal' },
     { theme: 'noir', skin: 'dusk' },
-    { theme: 'bold', skin: 'midnight' },
+    { theme: 'noir', skin: 'midnight' },
 ];
 
 const VARIANT_OPTIONS: Record<string, readonly string[]> = {

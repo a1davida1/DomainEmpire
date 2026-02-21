@@ -242,7 +242,10 @@ describe('Visual Configurator', () => {
         const VALID_SKINS = new Set<string>(EXPECTED_SKINS);
 
         it('accepts valid themes', () => {
-            expect(VALID_THEMES).toEqual(new Set(['clean', 'editorial', 'bold', 'minimal']));
+            expect(VALID_THEMES).toEqual(new Set([
+                'clean', 'editorial', 'bold', 'minimal', 'magazine', 'brutalist',
+                'glass', 'retro', 'corporate', 'craft', 'academic', 'startup', 'noir',
+            ]));
             expect(VALID_THEMES.has('clean')).toBe(true);
             expect(VALID_THEMES.has('minimal')).toBe(true);
         });
@@ -254,7 +257,11 @@ describe('Visual Configurator', () => {
         });
 
         it('accepts valid skins', () => {
-            expect(VALID_SKINS).toEqual(new Set(['slate', 'ocean', 'forest', 'ember', 'midnight', 'coral']));
+            expect(VALID_SKINS).toEqual(new Set([
+                'slate', 'ocean', 'forest', 'ember', 'midnight', 'coral',
+                'sage', 'rose', 'indigo', 'sand', 'teal', 'wine', 'plum',
+                'steel', 'cobalt', 'copper', 'arctic', 'charcoal', 'dusk',
+            ]));
             expect(VALID_SKINS.has('slate')).toBe(true);
             expect(VALID_SKINS.has('modern')).toBe(false);
         });

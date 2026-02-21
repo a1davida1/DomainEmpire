@@ -506,7 +506,17 @@ async function validateJob(jobId: string) {
 /**
  * Process a deployment job
  */
-export async function processDeployJob(jobId: string): Promise<void> {
+export async function processDeployJob(jobId: string, signal?: AbortSignal): Promise<void> {
+    const assertNotAborted = (): void => {
+        if (!signal?.aborted) return;
+        const reason = signal.reason;
+        if (typeof reason === 'string' && reason.length > 0) {
+            throw new Error(`Deploy job aborted: ${reason}`);
+        }
+        throw new Error('Deploy job aborted');
+    };
+
+    assertNotAborted();
     const { job, payload, domain } = await validateJob(jobId);
     const hostShardPlan = await resolveCloudflareHostShardPlan({
         domain: payload.domain,
@@ -557,8 +567,11 @@ export async function processDeployJob(jobId: string): Promise<void> {
     };
 
     try {
+        assertNotAborted();
         const files = await stepGenerateFiles(ctx);
+        assertNotAborted();
         await stepDirectUpload(ctx, files);
+        assertNotAborted();
 
         // Staging deploys: skip custom domain, DNS, and NS steps
         if (isStaging) {
@@ -577,9 +590,13 @@ export async function processDeployJob(jobId: string): Promise<void> {
             return;
         }
 
+        assertNotAborted();
         const customDomainLinked = await stepAddCustomDomain(ctx);
+        assertNotAborted();
         await stepConfigureDnsRecord(ctx, customDomainLinked);
+        assertNotAborted();
         const dnsUpdateResult = await stepUpdateDns(ctx, customDomainLinked);
+        assertNotAborted();
         const dnsVerified = await stepVerifyDns(ctx);
 
         // Determine deployed status:
@@ -590,6 +607,7 @@ export async function processDeployJob(jobId: string): Promise<void> {
 
         // Fix 5: Only ping search engines if the site is actually reachable
         if (shouldMarkDeployed) {
+            assertNotAborted();
             await stepPingSearchEngines(ctx);
         } else {
             await doneStep(ctx, 6, 'Skipped (DNS not yet pointing to Cloudflare)');
@@ -655,10 +673,18 @@ export async function processDeployJob(jobId: string): Promise<void> {
             result: { steps: ctx.steps, failedAt: new Date().toISOString() },
         }).where(eq(contentQueue.id, jobId));
 
-        await db.update(domains).set({
-            isDeployed: false,
-            updatedAt: new Date(),
-        }).where(eq(domains.id, ctx.domainId));
+        // Preserve deployed=true if the domain was already live before this failed re-deploy.
+        // Only mark not deployed for first-time deploy attempts.
+        if (!domain.isDeployed) {
+            await db.update(domains).set({
+                isDeployed: false,
+                updatedAt: new Date(),
+            }).where(eq(domains.id, ctx.domainId));
+        } else {
+            await db.update(domains).set({
+                updatedAt: new Date(),
+            }).where(eq(domains.id, ctx.domainId));
+        }
 
         throw error;
     }

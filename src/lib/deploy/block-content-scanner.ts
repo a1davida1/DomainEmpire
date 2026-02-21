@@ -11,8 +11,15 @@ import { scanForBannedPatterns, measureBurstiness, type BannedPatternViolation }
 import { getAIClient } from '@/lib/ai/openrouter';
 import type { BlockEnvelope } from './blocks/schemas';
 
+export interface PlaceholderViolation {
+    field: string;
+    value: string;
+    reason: string;
+}
+
 export interface BlockScanResult {
     violations: BannedPatternViolation[];
+    placeholders: PlaceholderViolation[];
     lowBurstiness: boolean;
     extractedText: string;
 }
@@ -70,16 +77,97 @@ function extractTextFromBlock(block: BlockEnvelope): string {
     return parts.join('\n');
 }
 
+// ============================================================
+// Placeholder pattern detection
+// ============================================================
+
+const PLACEHOLDER_NAME_RE = /^(top\s+)?choice\s+[a-z0-9]|^option\s+[a-z0-9]|^(product|service|provider|item|plan|tier)\s+[a-z0-9]|^(company|brand)\s+[a-z0-9]|^placeholder|^example\b|^my\s+(site|company|brand)|^acme\b|^lorem|^test\s|^\[.*\]$/i;
+const PLACEHOLDER_URL_RE = /example\.com|placeholder|test\.com/i;
+const TEMPLATE_MARKER_RE = /\[insert|\[your|\[name|\[company|\{\{|\}\}|TODO:|REPLACE:|FIXME:/i;
+const GENERIC_SITE_NAME_RE = /^(my site|site name|your site|company name|brand name|website name)$/i;
+
+function scanBlockForPlaceholders(block: BlockEnvelope): PlaceholderViolation[] {
+    const content = (block.content || {}) as Record<string, unknown>;
+    const issues: PlaceholderViolation[] = [];
+
+    function checkString(field: string, val: string) {
+        if (PLACEHOLDER_NAME_RE.test(val.trim())) {
+            issues.push({ field, value: val, reason: 'Generic placeholder name' });
+        }
+        if (TEMPLATE_MARKER_RE.test(val)) {
+            issues.push({ field, value: val, reason: 'Template marker detected' });
+        }
+    }
+
+    function checkUrl(field: string, val: string) {
+        if (PLACEHOLDER_URL_RE.test(val.trim())) {
+            issues.push({ field, value: val, reason: 'Placeholder URL' });
+        }
+    }
+
+    // Check top-level string fields
+    for (const [key, val] of Object.entries(content)) {
+        if (typeof val === 'string') {
+            if (key.toLowerCase().includes('url') || key.toLowerCase().includes('href')) {
+                checkUrl(key, val);
+            } else {
+                checkString(key, val);
+            }
+            if (key === 'siteName' && GENERIC_SITE_NAME_RE.test(val.trim())) {
+                issues.push({ field: key, value: val, reason: 'Generic site name' });
+            }
+        }
+    }
+
+    // Check arrays of objects
+    for (const [key, val] of Object.entries(content)) {
+        if (Array.isArray(val)) {
+            for (let i = 0; i < val.length; i++) {
+                const item = val[i];
+                if (item && typeof item === 'object' && !Array.isArray(item)) {
+                    const obj = item as Record<string, unknown>;
+                    for (const [subKey, subVal] of Object.entries(obj)) {
+                        if (typeof subVal === 'string') {
+                            const fieldPath = `${key}[${i}].${subKey}`;
+                            if (subKey.toLowerCase().includes('url') || subKey.toLowerCase().includes('href')) {
+                                checkUrl(fieldPath, subVal);
+                            } else if (subKey === 'name' || subKey === 'title' || subKey === 'label') {
+                                checkString(fieldPath, subVal);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Check nested objects (itemA, itemB for VsCard)
+    for (const [key, val] of Object.entries(content)) {
+        if (val && typeof val === 'object' && !Array.isArray(val)) {
+            const obj = val as Record<string, unknown>;
+            if (typeof obj.name === 'string') {
+                checkString(`${key}.name`, obj.name);
+            }
+            if (typeof obj.url === 'string') {
+                checkUrl(`${key}.url`, obj.url);
+            }
+        }
+    }
+
+    return issues;
+}
+
 /**
- * Scan a single block for banned patterns and burstiness issues.
+ * Scan a single block for banned patterns, placeholder content, and burstiness issues.
  */
 export function scanBlocksForBannedPatterns(block: BlockEnvelope): BlockScanResult {
     const text = extractTextFromBlock(block);
     if (text.length < 20) {
-        return { violations: [], lowBurstiness: false, extractedText: text };
+        return { violations: [], placeholders: scanBlockForPlaceholders(block), lowBurstiness: false, extractedText: text };
     }
 
     const violations = scanForBannedPatterns(text);
+    const placeholders = scanBlockForPlaceholders(block);
 
     let lowBurstiness = false;
     if (block.type === 'ArticleBody') {
@@ -87,7 +175,7 @@ export function scanBlocksForBannedPatterns(block: BlockEnvelope): BlockScanResu
         lowBurstiness = !burstiness.pass;
     }
 
-    return { violations, lowBurstiness, extractedText: text };
+    return { violations, placeholders, lowBurstiness, extractedText: text };
 }
 
 /**
