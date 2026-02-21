@@ -28,7 +28,7 @@ async function main() {
     console.log(`Validation issues: ${result.validation.errorCount} errors, ${result.validation.warningCount} warnings`);
     if (result.validation.issues.length > 0) {
         for (const issue of result.validation.issues.slice(0, 10)) {
-            console.log(`  [${issue.severity}] ${issue.message}`);
+            console.log(`  [${issue.severity}] ${issue.detail}`);
         }
     }
 }

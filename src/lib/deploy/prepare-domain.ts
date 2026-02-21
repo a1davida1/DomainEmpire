@@ -149,52 +149,69 @@ function inferNicheFromDomain(domain: string, dbNiche: string): string {
     return inferred || dbNiche;
 }
 
-/**
- * Run the full site preparation pipeline.
- *
- * @param domainIdOrName - domain UUID or domain name (e.g. "example.com")
- * @param strategy - optional overrides; when omitted, values are inferred from DB
- */
-export async function prepareDomain(
-    domainIdOrName: string,
-    strategy?: DomainStrategy,
-): Promise<PrepareResult> {
+// ═══════════════════════════════════════════════════════════════════════════════
+// Composable pipeline steps — each can be called independently
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export interface UpdateDomainResult {
+    domain: string;
+    humanName: string;
+    theme: string;
+    skin: string;
+    programmaticFixes: { namesFixed: number; endpointsFixed: number; duplicatesRemoved: number; citationsInjected: number };
+    validation: ValidationReport;
+    ready: boolean;
+}
+
+export interface RegenerateResult {
+    domain: string;
+    pageCount: number;
+    pagesSeeded: boolean;
+}
+
+export interface EnrichContentResult {
+    enrichment: { heroesFixed: number; calculatorsFixed: number; faqsFixed: number; metaFixed: number; aiCalls: number; cost: number };
+    contentScan: ContentScanStats;
+    reviewScore: number | null;
+    reviewVerdict: string | null;
+}
+
+/** Shared helper: resolve domain record from ID or name */
+async function resolveDomain(domainIdOrName: string) {
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(domainIdOrName);
     const [domain] = isUuid
         ? await db.select().from(domains).where(eq(domains.id, domainIdOrName)).limit(1)
         : await db.select().from(domains).where(eq(domains.domain, domainIdOrName)).limit(1);
     if (!domain) throw new Error(`Domain not found: ${domainIdOrName}`);
+    return domain;
+}
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 1. updateDomain — fast, safe, always runs programmatic fixes + validation
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Update domain metadata (niche, theme, skin, etc.), propagate to pages,
+ * run programmatic fixes on all existing pages, ensure compliance pages,
+ * and validate. Safe to call repeatedly.
+ */
+export async function updateDomain(
+    domainIdOrName: string,
+    strategy?: DomainStrategy,
+): Promise<UpdateDomainResult> {
+    const domain = await resolveDomain(domainIdOrName);
     const domainName = domain.domain;
     const humanName = (domain as Record<string, unknown>).siteNameOverride as string || extractSiteTitle(domainName);
 
-    // Merge explicit strategy with existing DB values
     const effectiveNiche = strategy?.niche || domain.niche || 'general';
     const effectiveSubNiche = strategy?.subNiche ?? domain.subNiche ?? null;
     const effectiveCluster = strategy?.cluster ?? domain.cluster ?? null;
     const effectiveMonTier = strategy?.monetizationTier ?? domain.monetizationTier ?? 3;
-    const effectiveHomeTitle = strategy?.homeTitle ?? extractSiteTitle(domainName);
-    const effectiveHomeMeta = strategy?.homeMeta ?? null;
-
-    // Infer a more specific niche from the domain name when the DB niche is too broad.
-    // e.g. "acunitinstall.com" with niche "Home Services" → content niche "AC Unit Installation"
     const nicheForContent = effectiveSubNiche || inferNicheFromDomain(domainName, effectiveNiche);
 
-    const result: PrepareResult = {
-        domain: domainName,
-        humanName,
-        theme: '',
-        skin: '',
-        pageCount: 0,
-        pagesSeeded: false,
-        programmaticFixes: { namesFixed: 0, endpointsFixed: 0, duplicatesRemoved: 0, citationsInjected: 0 },
-        enrichment: { heroesFixed: 0, calculatorsFixed: 0, faqsFixed: 0, metaFixed: 0, aiCalls: 0, cost: 0 },
-        contentScan: { pagesScanned: 0, blocksWithViolations: 0, totalViolations: 0, blocksRewritten: 0, lowBurstinessBlocks: 0, placeholderBlocks: 0, totalPlaceholders: 0, aiCalls: 0, cost: 0 },
-        validation: { domain: domainName, pageCount: 0, blockCount: 0, issues: [], errorCount: 0, warningCount: 0, ready: false },
-        ready: false,
-    };
+    const fixes = { namesFixed: 0, endpointsFixed: 0, duplicatesRemoved: 0, citationsInjected: 0 };
 
-    // ── Step 1: Update strategy fields on the domain record ──
+    // Update strategy fields on the domain record
     const strategyUpdate: Record<string, unknown> = { updatedAt: new Date() };
     if (strategy?.niche) strategyUpdate.niche = strategy.niche;
     if (strategy?.subNiche !== undefined) strategyUpdate.subNiche = strategy.subNiche || null;
@@ -207,152 +224,44 @@ export async function prepareDomain(
         await db.update(domains).set(strategyUpdate).where(eq(domains.id, domain.id));
     }
 
-    // ── Step 2: Theme + skin ──
-    const combo = assignThemeSkin(domainName, effectiveCluster, [domainName]);
-    await db.update(domains).set({ skin: combo.skin, updatedAt: new Date() }).where(eq(domains.id, domain.id));
-    result.theme = combo.theme;
-    result.skin = combo.skin;
+    // Theme + skin — respect existing, only auto-assign when missing
+    const existingTheme = (domain as Record<string, unknown>).themeStyle as string | null;
+    const existingSkin = domain.skin as string | null;
+    const hasExplicitCombo = existingTheme && existingSkin;
+    const combo = hasExplicitCombo
+        ? { theme: existingTheme, skin: existingSkin }
+        : assignThemeSkin(domainName, effectiveCluster, [domainName]);
+    if (!hasExplicitCombo) {
+        await db.update(domains).set({ skin: combo.skin, updatedAt: new Date() }).where(eq(domains.id, domain.id));
+    }
 
-    // Propagate theme+skin to all existing page definitions
+    // Propagate theme+skin to all page definitions
     await db.update(pageDefinitions).set({
         theme: combo.theme,
         skin: combo.skin,
         updatedAt: new Date(),
     }).where(eq(pageDefinitions.domainId, domain.id));
 
-    // ── Step 3: Pages — seed if empty, regenerate if strategy was explicitly provided ──
-    const resolvedTemplate = strategy?.siteTemplate ?? domain.siteTemplate ?? 'authority';
-    const blueprint = generateBlueprint(domainName, nicheForContent, resolvedTemplate);
-
-    const existingPages = await db.select({ id: pageDefinitions.id })
-        .from(pageDefinitions)
-        .where(eq(pageDefinitions.domainId, domain.id))
-        .limit(1);
-    const hasPages = existingPages.length > 0;
-    const forceRegenerate = strategy !== undefined && (
-        strategy.niche !== undefined
-        || strategy.subNiche !== undefined
-        || strategy.siteTemplate !== undefined
-    );
-
-    if (!hasPages || forceRegenerate) {
-        await db.transaction(async (tx) => {
-            if (hasPages && forceRegenerate) {
-                await tx.delete(pageDefinitions).where(eq(pageDefinitions.domainId, domain.id));
-            }
-
-            // Build homepage from blueprint layout (not a static preset)
-            const headerDef = headerStyleToBlock(blueprint.headerStyle);
-            const heroVar = heroStructureToVariant(blueprint.heroStructure);
-            const footerVar = footerStructureToVariant(blueprint.footerStructure);
-            const ctaCfg = ctaStyleToConfig(blueprint.ctaStyle);
-
-            function mergedBlock(type: string, overrides?: { variant?: string; config?: Record<string, unknown>; content?: Record<string, unknown> }) {
-                const defaults = mergeBlockDefaults({ type: type as BlockType }, domainName, nicheForContent);
-                return {
-                    type,
-                    id: blkId(),
-                    variant: overrides?.variant,
-                    content: { ...(defaults.content || {}), ...(overrides?.content || {}) },
-                    config: { ...(defaults.config || {}), ...(overrides?.config || {}) },
-                };
-            }
-
-            const homeBlocks = [
-                mergedBlock('Header', {
-                    variant: headerDef.variant,
-                    config: headerDef.config,
-                    content: { navLinks: blueprint.nav.items, siteName: humanName },
-                }),
-            ];
-
-            for (const slot of blueprint.homepageLayout) {
-                const blockType = sectionSlotToBlockType(slot);
-                if (blockType === 'Hero') {
-                    const heroContent: Record<string, unknown> = {};
-                    if (heroVar === 'stats-bar') {
-                        heroContent.stats = [
-                            { value: `${blueprint.guideCount}+`, label: 'Expert Guides' },
-                            { value: 'Free', label: 'Calculator Included' },
-                            { value: String(new Date().getFullYear()), label: 'Updated' },
-                        ];
-                    }
-                    homeBlocks.push(mergedBlock('Hero', { variant: heroVar, content: heroContent }));
-                } else if (blockType === 'CTABanner') {
-                    if (ctaCfg) homeBlocks.push(mergedBlock('CTABanner', { config: ctaCfg }));
-                } else {
-                    homeBlocks.push(mergedBlock(blockType));
-                }
-            }
-
-            homeBlocks.push(mergedBlock('CitationBlock'));
-            homeBlocks.push(mergedBlock('Footer', { variant: footerVar, content: { siteName: humanName } }));
-
-            // Generate sub-pages from blueprint (structurally differentiated)
-            const subPages = generateSubPagesFromBlueprint(domainName, nicheForContent, blueprint);
-
-            const allPages = [
-                {
-                    domainId: domain.id,
-                    route: '/',
-                    title: effectiveHomeTitle,
-                    metaDescription: effectiveHomeMeta || `Expert guides about ${nicheForContent}`,
-                    theme: combo.theme,
-                    skin: combo.skin,
-                    blocks: homeBlocks,
-                    isPublished: true,
-                    status: 'published' as const,
-                },
-                ...subPages.map(page => ({
-                    domainId: domain.id,
-                    route: page.route,
-                    title: page.title,
-                    metaDescription: page.metaDescription,
-                    theme: combo.theme,
-                    skin: combo.skin,
-                    blocks: page.blocks,
-                    isPublished: true,
-                    status: 'published' as const,
-                })),
-            ];
-
-            await tx.insert(pageDefinitions).values(allPages);
-        });
-
-        result.pagesSeeded = true;
-    }
-
-    // Compliance pages (always ensure they exist)
-    const updatedDomain = {
-        ...domain,
-        cluster: effectiveCluster,
-        niche: effectiveNiche,
-        subNiche: effectiveSubNiche,
-        monetizationTier: effectiveMonTier,
-        skin: combo.skin,
-    };
+    // Ensure compliance pages exist
+    const updatedDomain = { ...domain, cluster: effectiveCluster, niche: effectiveNiche, subNiche: effectiveSubNiche, monetizationTier: effectiveMonTier, skin: combo.skin };
     const compPages = getRequiredCompliancePages(updatedDomain);
     const allCurrentRoutes = new Set(
-        (await db.select({ route: pageDefinitions.route }).from(pageDefinitions).where(eq(pageDefinitions.domainId, domain.id)))
-            .map(p => p.route),
+        (await db.select({ route: pageDefinitions.route }).from(pageDefinitions).where(eq(pageDefinitions.domainId, domain.id))).map(p => p.route),
     );
     const missingCompPages = compPages.filter(p => p.route && !allCurrentRoutes.has(p.route));
-    if (missingCompPages.length > 0) {
-        await db.insert(pageDefinitions).values(missingCompPages);
-    }
+    if (missingCompPages.length > 0) await db.insert(pageDefinitions).values(missingCompPages);
 
-    // ── Step 4: Programmatic fixes ──
-    // Build the set of routes that actually exist for footer link filtering
+    // Programmatic fixes on all pages
+    const resolvedTemplate = strategy?.siteTemplate ?? domain.siteTemplate ?? 'authority';
+    const blueprint = generateBlueprint(domainName, nicheForContent, resolvedTemplate);
     const liveRoutes = new Set(
-        (await db.select({ route: pageDefinitions.route }).from(pageDefinitions).where(eq(pageDefinitions.domainId, domain.id)))
-            .map(p => p.route),
+        (await db.select({ route: pageDefinitions.route }).from(pageDefinitions).where(eq(pageDefinitions.domainId, domain.id))).map(p => p.route),
     );
     const blueprintFooterColumns = buildBlueprintFooterColumns(blueprint, liveRoutes, humanName, nicheForContent);
     const blueprintFooterVariant = footerStructureToVariant(blueprint.footerStructure);
     const allowedFooterVariants = new Set(['minimal', 'multi-column', 'newsletter', 'legal']);
 
     const allPages = await db.select().from(pageDefinitions).where(eq(pageDefinitions.domainId, domain.id));
-
     for (const page of allPages) {
         const blocks = (page.blocks || []) as BlockEnvelope[];
         let changed = false;
@@ -361,98 +270,63 @@ export async function prepareDomain(
             const cfg = b.config ? { ...b.config } as Record<string, unknown> : {};
 
             if (typeof c.siteName === 'string' && c.siteName !== humanName) {
-                c.siteName = humanName;
-                result.programmaticFixes.namesFixed++;
-                changed = true;
+                c.siteName = humanName; fixes.namesFixed++; changed = true;
             }
 
-            // Fix footer: inject blueprint-aware columns with only valid links
             if (b.type === 'Footer') {
-                c.columns = blueprintFooterColumns;
-                c.siteName = humanName;
-                changed = true;
-                const currentVariant = typeof b.variant === 'string' ? b.variant : null;
-                if (currentVariant && !allowedFooterVariants.has(currentVariant)) {
-                    return { ...b, variant: blueprintFooterVariant, content: c, config: cfg };
-                }
+                c.columns = blueprintFooterColumns; c.siteName = humanName; changed = true;
+                const cv = typeof b.variant === 'string' ? b.variant : null;
+                if (cv && !allowedFooterVariants.has(cv)) return { ...b, variant: blueprintFooterVariant, content: c, config: cfg };
                 return { ...b, content: c, config: cfg };
             }
 
-            // Fix dead links in markdown content — strip links to pages that don't exist
             if (b.type === 'ArticleBody' || b.type === 'FAQ') {
                 const linkRe = /\[([^\]]+)\]\(\/([^)]+)\)/g;
                 let fixCount = 0;
                 function stripDeadLinks(text: string): string {
                     return text.replace(linkRe, (full, label, path) => {
                         const route = '/' + path;
-                        if (!liveRoutes.has(route) && !liveRoutes.has(route.replace(/\/$/, ''))) {
-                            fixCount++;
-                            return label;
-                        }
+                        if (!liveRoutes.has(route) && !liveRoutes.has(route.replace(/\/$/, ''))) { fixCount++; return label; }
                         return full;
                     });
                 }
                 for (const key of Object.keys(c)) {
                     const val = c[key];
-                    if (typeof val === 'string' && val.includes('](/')) {
-                        c[key] = stripDeadLinks(val);
-                    }
+                    if (typeof val === 'string' && val.includes('](/')) c[key] = stripDeadLinks(val);
                     if (Array.isArray(val)) {
-                        for (let j = 0; j < val.length; j++) {
-                            const item = val[j];
+                        for (const item of val) {
                             if (item && typeof item === 'object') {
                                 for (const ik of Object.keys(item as Record<string, unknown>)) {
                                     const iv = (item as Record<string, unknown>)[ik];
-                                    if (typeof iv === 'string' && iv.includes('](/')) {
-                                        (item as Record<string, unknown>)[ik] = stripDeadLinks(iv);
-                                    }
+                                    if (typeof iv === 'string' && iv.includes('](/')) (item as Record<string, unknown>)[ik] = stripDeadLinks(iv);
                                 }
                             }
                         }
                     }
                 }
-                if (fixCount > 0) {
-                    result.programmaticFixes.namesFixed += fixCount;
-                    changed = true;
-                }
+                if (fixCount > 0) { fixes.namesFixed += fixCount; changed = true; }
             }
 
-            if (b.type === 'LeadForm' && (cfg.endpoint === '#')) {
-                cfg.endpoint = '';
-                result.programmaticFixes.endpointsFixed++;
-                changed = true;
-            }
-
+            if (b.type === 'LeadForm' && cfg.endpoint === '#') { cfg.endpoint = ''; fixes.endpointsFixed++; changed = true; }
             if (b.type === 'LeadForm' && page.route === '/contact') {
                 const fields = c.fields as Array<Record<string, unknown>> | undefined;
-                const hasFullForm = fields && fields.length > 2;
-                if (hasFullForm) {
+                if (fields && fields.length > 2) {
                     c.fields = [
                         { name: 'email', label: 'Email Address', type: 'email', required: true, placeholder: 'you@email.com' },
                         { name: 'question', label: 'What can we help with?', type: 'text', required: false, placeholder: 'Brief description (optional)' },
                     ];
                     c.consentText = 'I agree to receive email communications. You can unsubscribe at any time. Privacy Policy.';
-                    c.privacyUrl = '/privacy-policy';
-                    c.successMessage = 'Thanks! Check your inbox for our recommendations.';
-                    cfg.submitLabel = 'SEND ME RECOMMENDATIONS';
-                    cfg.endpoint = '';
-                    result.programmaticFixes.endpointsFixed++;
-                    changed = true;
+                    c.privacyUrl = '/privacy-policy'; c.successMessage = 'Thanks! Check your inbox for our recommendations.';
+                    cfg.submitLabel = 'SEND ME RECOMMENDATIONS'; cfg.endpoint = ''; fixes.endpointsFixed++; changed = true;
                 }
             }
-
-            if (changed && (b.type === 'LeadForm')) {
-                return { ...b, content: c, config: cfg };
-            }
+            if (changed && b.type === 'LeadForm') return { ...b, content: c, config: cfg };
 
             if (b.type === 'CitationBlock') {
                 const sources = c.sources as unknown[];
-                const hasPlaceholder = Array.isArray(sources) && sources.length > 0
-                    && JSON.stringify(sources).includes('"url":"#"');
+                const hasPlaceholder = Array.isArray(sources) && sources.length > 0 && JSON.stringify(sources).includes('"url":"#"');
                 if (!sources || (Array.isArray(sources) && sources.length === 0) || hasPlaceholder) {
-                    c.sources = getCitations(effectiveNiche);
-                    result.programmaticFixes.citationsInjected++;
-                    changed = true;
+                    c.sources = getCitations(effectiveNiche); fixes.citationsInjected++; changed = true;
                 }
             }
 
@@ -462,17 +336,10 @@ export async function prepareDomain(
         let title = page.title || '';
         const rawSlug = domainName.replace(/\.[a-z]+$/i, '');
         const rawTitle = rawSlug.charAt(0).toUpperCase() + rawSlug.slice(1);
-        if (title.includes(rawTitle) && rawTitle !== humanName) {
-            title = title.replaceAll(rawTitle, humanName);
-            changed = true;
-        }
+        if (title.includes(rawTitle) && rawTitle !== humanName) { title = title.replaceAll(rawTitle, humanName); changed = true; }
 
         if (changed) {
-            await db.update(pageDefinitions).set({
-                blocks: fixed as typeof page.blocks,
-                title,
-                updatedAt: new Date(),
-            }).where(eq(pageDefinitions.id, page.id));
+            await db.update(pageDefinitions).set({ blocks: fixed as typeof page.blocks, title, updatedAt: new Date() }).where(eq(pageDefinitions.id, page.id));
         }
     }
 
@@ -481,63 +348,220 @@ export async function prepareDomain(
     const privacyPreset = refreshedPages.find(p => p.route === '/privacy');
     if (privacyPreset && refreshedPages.some(p => p.route === '/privacy-policy')) {
         await db.delete(pageDefinitions).where(eq(pageDefinitions.id, privacyPreset.id));
-        result.programmaticFixes.duplicatesRemoved++;
+        fixes.duplicatesRemoved++;
     }
 
-    // ── Step 5: Targeted AI enrichment (with timeout) ──
-    const AI_STEP_TIMEOUT_MS = 90_000; // 90s per AI step — fail gracefully
+    const validation = await validateDomain(domain.id);
+    return { domain: domainName, humanName, theme: combo.theme, skin: combo.skin, programmaticFixes: fixes, validation, ready: validation.ready };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 2. regeneratePages — explicit, destructive — deletes all pages + re-seeds
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Delete all existing pages and re-seed from the structural blueprint.
+ * Reads niche/theme/skin from the domain record — call updateDomain() first
+ * to set those fields if needed.
+ */
+export async function regeneratePages(domainIdOrName: string): Promise<RegenerateResult> {
+    const domain = await resolveDomain(domainIdOrName);
+    const domainName = domain.domain;
+    const humanName = (domain as Record<string, unknown>).siteNameOverride as string || extractSiteTitle(domainName);
+    const effectiveNiche = domain.niche || 'general';
+    const nicheForContent = domain.subNiche || inferNicheFromDomain(domainName, effectiveNiche);
+    const resolvedTemplate = domain.siteTemplate ?? 'authority';
+    const theme = (domain as Record<string, unknown>).themeStyle as string || 'clean';
+    const skin = domain.skin || 'slate';
+
+    const blueprint = generateBlueprint(domainName, nicheForContent, resolvedTemplate);
+    const headerDef = headerStyleToBlock(blueprint.headerStyle);
+    const heroVar = heroStructureToVariant(blueprint.heroStructure);
+    const footerVar = footerStructureToVariant(blueprint.footerStructure);
+    const ctaCfg = ctaStyleToConfig(blueprint.ctaStyle);
+
+    function mergedBlock(type: string, overrides?: { variant?: string; config?: Record<string, unknown>; content?: Record<string, unknown> }) {
+        const defaults = mergeBlockDefaults({ type: type as BlockType }, domainName, nicheForContent);
+        return {
+            type, id: blkId(), variant: overrides?.variant,
+            content: { ...(defaults.content || {}), ...(overrides?.content || {}) },
+            config: { ...(defaults.config || {}), ...(overrides?.config || {}) },
+        };
+    }
+
+    const homeBlocks = [
+        mergedBlock('Header', { variant: headerDef.variant, config: headerDef.config, content: { navLinks: blueprint.nav.items, siteName: humanName } }),
+    ];
+    for (const slot of blueprint.homepageLayout) {
+        const blockType = sectionSlotToBlockType(slot);
+        if (blockType === 'Hero') {
+            const heroContent: Record<string, unknown> = {};
+            if (heroVar === 'stats-bar') {
+                heroContent.stats = [
+                    { value: `${blueprint.guideCount}+`, label: 'Expert Guides' },
+                    { value: 'Free', label: 'Calculator Included' },
+                    { value: String(new Date().getFullYear()), label: 'Updated' },
+                ];
+            }
+            homeBlocks.push(mergedBlock('Hero', { variant: heroVar, content: heroContent }));
+        } else if (blockType === 'CTABanner') {
+            if (ctaCfg) homeBlocks.push(mergedBlock('CTABanner', { config: ctaCfg }));
+        } else {
+            homeBlocks.push(mergedBlock(blockType));
+        }
+    }
+    homeBlocks.push(mergedBlock('CitationBlock'));
+    homeBlocks.push(mergedBlock('Footer', { variant: footerVar, content: { siteName: humanName } }));
+
+    const subPages = generateSubPagesFromBlueprint(domainName, nicheForContent, blueprint);
+    const homeTitle = extractSiteTitle(domainName);
+
+    let pageCount = 0;
+    await db.transaction(async (tx) => {
+        await tx.delete(pageDefinitions).where(eq(pageDefinitions.domainId, domain.id));
+        const allPages = [
+            { domainId: domain.id, route: '/', title: homeTitle, metaDescription: `Expert guides about ${nicheForContent}`, theme, skin, blocks: homeBlocks, isPublished: true, status: 'published' as const },
+            ...subPages.map(page => ({ domainId: domain.id, route: page.route, title: page.title, metaDescription: page.metaDescription, theme, skin, blocks: page.blocks, isPublished: true, status: 'published' as const })),
+        ];
+        await tx.insert(pageDefinitions).values(allPages);
+        pageCount = allPages.length;
+    });
+
+    // Ensure compliance pages exist
+    const compPages = getRequiredCompliancePages({ ...domain, skin });
+    const currentRoutes = new Set(
+        (await db.select({ route: pageDefinitions.route }).from(pageDefinitions).where(eq(pageDefinitions.domainId, domain.id))).map(p => p.route),
+    );
+    const missing = compPages.filter(p => p.route && !currentRoutes.has(p.route));
+    if (missing.length > 0) {
+        await db.insert(pageDefinitions).values(missing);
+        pageCount += missing.length;
+    }
+
+    console.log(`[regeneratePages] ${domainName}: ${pageCount} pages seeded`);
+    return { domain: domainName, pageCount, pagesSeeded: true };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3. enrichContent — AI enrichment, content scan, site review (optional)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const AI_STEP_TIMEOUT_MS = 180_000; // 3 min — more generous with reduced parallelism
+
+/**
+ * Run AI-powered content enrichment on all pages:
+ *   - Hero headlines, calculator inputs, FAQ, meta descriptions
+ *   - Content scanning (banned words, burstiness, AI rewrite)
+ *   - Site review + auto-remediation
+ *
+ * Each sub-step has a 90s timeout and fails gracefully.
+ */
+export async function enrichContent(domainIdOrName: string): Promise<EnrichContentResult> {
+    const domain = await resolveDomain(domainIdOrName);
+    const nicheForContent = domain.subNiche || inferNicheFromDomain(domain.domain, domain.niche || 'general');
+
+    const result: EnrichContentResult = {
+        enrichment: { heroesFixed: 0, calculatorsFixed: 0, faqsFixed: 0, metaFixed: 0, aiCalls: 0, cost: 0 },
+        contentScan: { pagesScanned: 0, blocksWithViolations: 0, totalViolations: 0, blocksRewritten: 0, lowBurstinessBlocks: 0, placeholderBlocks: 0, totalPlaceholders: 0, aiCalls: 0, cost: 0 },
+        reviewScore: null,
+        reviewVerdict: null,
+    };
+
+    // AI enrichment
     try {
         const enrichResult = await withTimeout(enrichDomain(domain.id), AI_STEP_TIMEOUT_MS, 'AI enrichment');
         result.enrichment = {
-            heroesFixed: enrichResult.heroesFixed,
-            calculatorsFixed: enrichResult.calculatorsFixed,
-            faqsFixed: enrichResult.faqsFixed,
-            metaFixed: enrichResult.metaFixed,
-            aiCalls: enrichResult.totalAiCalls,
-            cost: enrichResult.totalCost,
+            heroesFixed: enrichResult.heroesFixed, calculatorsFixed: enrichResult.calculatorsFixed,
+            faqsFixed: enrichResult.faqsFixed, metaFixed: enrichResult.metaFixed,
+            aiCalls: enrichResult.totalAiCalls, cost: enrichResult.totalCost,
         };
     } catch (err) {
-        console.warn('[prepareDomain] AI enrichment skipped:', err instanceof Error ? err.message : err);
+        console.warn('[enrichContent] AI enrichment failed:', err instanceof Error ? err.message : err);
     }
 
-    // ── Step 6: Content scanning (banned words + burstiness + AI rewrite) ──
+    // Content scanning
     try {
         result.contentScan = await withTimeout(scanAndFixBlockContent(domain.id, nicheForContent), AI_STEP_TIMEOUT_MS, 'content scan');
     } catch (err) {
-        console.warn('[prepareDomain] Content scan skipped:', err instanceof Error ? err.message : err);
+        console.warn('[enrichContent] Content scan failed:', err instanceof Error ? err.message : err);
     }
 
-    // ── Step 7: Site review + auto-remediation ──
-    let finalReview;
+    // Site review + auto-remediation
     try {
         const firstReview = await withTimeout(reviewSite(domain.id), AI_STEP_TIMEOUT_MS, 'site review');
         const needsRemediation = firstReview.verdict === 'reject' || firstReview.criticalIssues.length > 0;
         if (needsRemediation) {
             await withTimeout(remediateSite(domain.id, firstReview), AI_STEP_TIMEOUT_MS, 'remediation');
         }
-        finalReview = needsRemediation ? await withTimeout(reviewSite(domain.id), AI_STEP_TIMEOUT_MS, 'final review') : firstReview;
-    } catch (err) {
-        console.warn('[prepareDomain] Site review skipped:', err instanceof Error ? err.message : err);
-        finalReview = null;
-    }
-
-    if (finalReview) {
+        const finalReview = needsRemediation ? await withTimeout(reviewSite(domain.id), AI_STEP_TIMEOUT_MS, 'final review') : firstReview;
+        result.reviewScore = Math.round(finalReview.overallScore);
+        result.reviewVerdict = finalReview.verdict;
         await db.update(domains).set({
             lastReviewResult: finalReview,
-            lastReviewScore: Math.round(finalReview.overallScore),
-            lastReviewedAt: finalReview.reviewedAt && !isNaN(new Date(finalReview.reviewedAt).getTime())
-                ? new Date(finalReview.reviewedAt)
-                : new Date(),
+            lastReviewScore: result.reviewScore,
+            lastReviewedAt: finalReview.reviewedAt && !isNaN(new Date(finalReview.reviewedAt).getTime()) ? new Date(finalReview.reviewedAt) : new Date(),
             updatedAt: new Date(),
         }).where(eq(domains.id, domain.id));
+    } catch (err) {
+        console.warn('[enrichContent] Site review failed:', err instanceof Error ? err.message : err);
     }
 
-    // ── Step 8: Validate ──
-    result.validation = await validateDomain(domain.id);
-    result.pageCount = result.validation.pageCount;
-    result.ready = result.validation.ready && (!finalReview || finalReview.verdict !== 'reject');
-
     return result;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// prepareDomain — convenience wrapper that calls all 3 steps
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type PrepareMode = 'full' | 'edit';
+
+/**
+ * Full site preparation pipeline. Convenience wrapper around the 3 composable steps.
+ *
+ * - 'full' mode: updateDomain → regeneratePages → updateDomain (fixes) → enrichContent
+ * - 'edit' mode: updateDomain → regeneratePages (if niche changed) → updateDomain (fixes)
+ */
+export async function prepareDomain(
+    domainIdOrName: string,
+    strategy?: DomainStrategy,
+    mode: PrepareMode = 'full',
+): Promise<PrepareResult> {
+    // Step 1: Update domain metadata
+    const updateResult1 = await updateDomain(domainIdOrName, strategy);
+
+    // Step 2: Regenerate pages if niche/template changed or no pages exist
+    const domain = await resolveDomain(domainIdOrName);
+    const existingPages = await db.select({ id: pageDefinitions.id }).from(pageDefinitions).where(eq(pageDefinitions.domainId, domain.id)).limit(1);
+    const hasPages = existingPages.length > 0;
+    const needsRegen = !hasPages || (strategy !== undefined && (strategy.niche !== undefined || strategy.subNiche !== undefined || strategy.siteTemplate !== undefined));
+
+    let regenResult: RegenerateResult | null = null;
+    if (needsRegen) {
+        regenResult = await regeneratePages(domainIdOrName);
+    }
+
+    // Step 3: Re-run fixes on regenerated pages
+    const updateResult = regenResult ? await updateDomain(domainIdOrName) : updateResult1;
+
+    // Step 4: AI enrichment (full mode only)
+    let enrichResult: EnrichContentResult | null = null;
+    if (mode === 'full') {
+        enrichResult = await enrichContent(domainIdOrName);
+    }
+
+    return {
+        domain: updateResult.domain,
+        humanName: updateResult.humanName,
+        theme: updateResult.theme,
+        skin: updateResult.skin,
+        pageCount: updateResult.validation.pageCount,
+        pagesSeeded: regenResult?.pagesSeeded ?? false,
+        programmaticFixes: updateResult.programmaticFixes,
+        enrichment: enrichResult?.enrichment ?? { heroesFixed: 0, calculatorsFixed: 0, faqsFixed: 0, metaFixed: 0, aiCalls: 0, cost: 0 },
+        contentScan: enrichResult?.contentScan ?? { pagesScanned: 0, blocksWithViolations: 0, totalViolations: 0, blocksRewritten: 0, lowBurstinessBlocks: 0, placeholderBlocks: 0, totalPlaceholders: 0, aiCalls: 0, cost: 0 },
+        validation: updateResult.validation,
+        ready: updateResult.ready,
+    };
 }
 
 // ── Block-level content scanning ─────────────────────────────────────────────

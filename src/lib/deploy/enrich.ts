@@ -21,8 +21,8 @@ import { extractSiteTitle } from './templates/shared';
 import type { BlockEnvelope } from './blocks/schemas';
 import { inferSitePurpose } from './niche-registry';
 
-const PARALLEL_PAGES = 4;
-const PARALLEL_AI_CALLS_PER_PAGE = 5;
+const PARALLEL_PAGES = 2;
+const PARALLEL_AI_CALLS_PER_PAGE = 2;
 
 // Niche-specific fallback citations (no AI call needed)
 const NICHE_CITATIONS: Record<string, Array<{ title: string; url: string; publisher: string; retrievedAt: string; usage: string }>> = {
@@ -196,8 +196,12 @@ function isGenericFaqContent(items: unknown[] | undefined): boolean {
 
 const ENRICH_CALL_TIMEOUT_MS = 30_000; // 30s max per enrichment AI call
 
+const AI_CALL_STAGGER_MS = 500; // small delay between calls to avoid burst rate limiting
+
 async function aiCall(prompt: string): Promise<{ content: string; cost: number } | null> {
     try {
+        // Stagger calls to avoid hitting rate limits
+        await new Promise(r => setTimeout(r, Math.random() * AI_CALL_STAGGER_MS));
         const ai = getAIClient();
         const resp = await Promise.race([
             ai.generate('blockContent', prompt),
