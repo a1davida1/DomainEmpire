@@ -253,9 +253,11 @@ export const blockVariantStyles = `
   color:var(--color-text);
   text-decoration:none;
 }
-.header--minimal nav{display:flex;gap:1rem}
+.header--minimal nav{display:flex;gap:1rem;align-items:center}
 .header--minimal nav a{color:var(--color-text-muted);font-size:0.85rem;text-decoration:none;transition:color .2s}
 .header--minimal nav a:hover{color:var(--color-text)}
+.header--minimal .nav-dropdown-trigger{font-size:0.85rem;color:var(--color-text-muted)}
+.header--minimal .nav-dropdown-trigger:hover{color:var(--color-text)}
 
 /* --- Split header variant --- */
 .header--split{

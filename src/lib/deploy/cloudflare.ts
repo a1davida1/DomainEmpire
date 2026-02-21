@@ -436,6 +436,18 @@ export async function createDirectUploadProject(
     const config = await getConfig(clientOptions);
 
     try {
+        // Check if the project already exists first — avoids brittle error-message
+        // parsing when the CF API returns "already exists" in varying formats.
+        const existing = await getPagesProject(projectName, clientOptions);
+        if (existing) {
+            console.log(`[CF] Project "${projectName}" already exists, reusing.`);
+            return {
+                success: true,
+                projectName: existing.name,
+                deploymentUrl: existing.subdomain,
+            };
+        }
+
         const response = await cfFetch(
             `/accounts/${config.accountId}/pages/projects`,
             {
@@ -451,8 +463,7 @@ export async function createDirectUploadProject(
         const data = await response.json();
 
         if (!data.success) {
-            // Project already exists — reuse it.
-            // Check error code (number or string) and message text as fallback.
+            // Race condition: project may have been created between GET and POST.
             const errCode = data.errors?.[0]?.code;
             const errMsg = (data.errors?.[0]?.message || '') as string;
             const alreadyExists = errCode === 8000007
@@ -460,17 +471,7 @@ export async function createDirectUploadProject(
                 || /already exists/i.test(errMsg);
 
             if (alreadyExists) {
-                console.log(`[CF] Project "${projectName}" already exists, reusing.`);
-                const existing = await getPagesProject(projectName, clientOptions);
-                if (existing) {
-                    return {
-                        success: true,
-                        projectName: existing.name,
-                        deploymentUrl: existing.subdomain,
-                    };
-                }
-                // getPagesProject failed — might be on a different account.
-                // Try proceeding with the project name anyway.
+                console.log(`[CF] Project "${projectName}" created concurrently, reusing.`);
                 return {
                     success: true,
                     projectName,
@@ -551,6 +552,7 @@ export async function directUploadDeploy(
                 timeout: CF_UPLOAD_TIMEOUT_MS,
                 encoding: 'utf-8' as BufferEncoding,
                 maxBuffer: 10 * 1024 * 1024,
+                shell: true,
             });
 
             if (proc.error) throw proc.error;

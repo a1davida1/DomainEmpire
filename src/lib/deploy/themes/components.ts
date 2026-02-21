@@ -70,6 +70,11 @@ export const componentStyles = `
 .calc-result-item .calc-result-label{font-weight:500;color:var(--color-text-muted);text-transform:none;letter-spacing:0;margin:0;display:inline}
 .calc-result-item .calc-result-value{font-size:1.25rem;font-weight:700;color:var(--color-accent);display:inline}
 
+/* Calculate button */
+.calc-button{display:block;width:100%;margin-top:1.25rem;padding:0.875rem 1.5rem;background:var(--color-primary);color:var(--color-hero-text,#fff);border:none;border-radius:var(--radius-md);font-size:1.1rem;font-weight:700;cursor:pointer;transition:background .15s,transform .1s;letter-spacing:0.01em}
+.calc-button:hover{background:var(--color-primary-hover,var(--color-primary));transform:translateY(-1px)}
+.calc-button:active{transform:translateY(0)}
+
 .calc-methodology{margin-top:1.5rem;border:var(--border-width) solid var(--color-border);border-radius:var(--radius-md);overflow:hidden}
 .calc-methodology summary{padding:0.75rem 1rem;cursor:pointer;font-weight:600;background:var(--color-bg-surface);font-size:0.9rem}
 .calc-methodology ul,.calc-methodology p{padding:1rem;font-size:0.9rem;color:var(--color-text-muted)}

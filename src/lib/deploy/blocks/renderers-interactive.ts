@@ -254,6 +254,10 @@ registerBlockRenderer('QuoteCalculator', (block, _ctx) => {
   <div class="calc-breakdown-row calc-breakdown-total"><span>Total Payments</span><span id="breakdown-total">—</span></div>
 </div>` : '';
 
+    const autoCalculate = config.autoCalculate !== false;
+    const buttonLabel = (config.buttonLabel as string) || 'Calculate';
+    const calcButtonHtml = `<button type="button" class="calc-button" id="calc-trigger">${escapeHtml(buttonLabel)}</button>`;
+
     const assumptionsHtml = assumptions.length > 0
         ? `<details class="calc-methodology"><summary>Assumptions</summary><ul>${assumptions.map(a => `<li>${escapeHtml(a)}</li>`).join('')}</ul></details>`
         : '';
@@ -358,8 +362,12 @@ registerBlockRenderer('QuoteCalculator', (block, _ctx) => {
     }catch(e){}
     ` : ''}
   }
-  inputs.forEach(function(inp){
+  var btn=document.getElementById('calc-trigger');
+  if(btn){btn.addEventListener('click',calculate);}
+  ${autoCalculate ? `inputs.forEach(function(inp){
     inp.addEventListener('input',calculate);
+  });` : ''}
+  inputs.forEach(function(inp){
     if(inp.type==='range'){
       inp.addEventListener('input',function(){
         var d=document.getElementById(inp.id+'_display');
@@ -367,7 +375,7 @@ registerBlockRenderer('QuoteCalculator', (block, _ctx) => {
       });
     }
   });
-  calculate();
+  ${autoCalculate ? 'calculate();' : ''}
 })();
 </script>` : '';
 
@@ -613,6 +621,7 @@ registerBlockRenderer('QuoteCalculator', (block, _ctx) => {
   <div class="calc-split">
     <div class="calc-inputs">
       ${inputsHtml}
+      ${calcButtonHtml}
     </div>
     <div class="calc-results">
       <h3 class="calc-results-heading">Results</h3>
