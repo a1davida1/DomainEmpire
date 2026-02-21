@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { db } from '@/lib/db';
 import { articles, contentQueue, domainResearch, domains } from '@/lib/db/schema';
 import { and, desc, eq, inArray, isNotNull, or, sql } from 'drizzle-orm';
-import { getQueueHealth, retryFailedJobs } from '@/lib/ai/worker';
+import { getQueueHealth, retryFailedJobs, retryFailedJobsDetailed } from '@/lib/ai/worker';
 import { getContentQueueBackendHealth, requeueContentJobIds } from '@/lib/queue/content-queue';
 import { revalidatePath } from 'next/cache';
 import { QueueAutoProcessor } from '@/components/dashboard/QueueAutoProcessor';
@@ -41,6 +41,12 @@ type QueueSearchParams = {
     domainId?: string;
     q?: string;
     limit?: string;
+    replayMode?: string;
+    replayLimit?: string;
+    replayJobTypes?: string | string[];
+    replayDomainId?: string;
+    replayMinFailedAgeMs?: string;
+    replayPreview?: string;
 };
 
 const RETRYABLE_STATUSES = ['failed', 'cancelled'] as const;
@@ -157,6 +163,26 @@ function isQueueSlaFilter(value: string | undefined): value is QueueSlaFilter {
 async function retryFailedAction() {
     'use server';
     await retryFailedJobs(25);
+    revalidatePath('/dashboard/queue');
+}
+
+async function replayFailedAction(formData: FormData) {
+    'use server';
+
+    const mode = parseReplayMode(typeof formData.get('replayMode') === 'string' ? String(formData.get('replayMode')) : null);
+    const limit = parseReplayLimit(typeof formData.get('replayLimit') === 'string' ? String(formData.get('replayLimit')) : undefined);
+    const replayJobTypesRaw = typeof formData.get('replayJobTypes') === 'string' ? String(formData.get('replayJobTypes')) : '';
+    const replayDomainIdRaw = typeof formData.get('replayDomainId') === 'string' ? String(formData.get('replayDomainId')) : null;
+    const replayMinFailedAgeMsRaw = typeof formData.get('replayMinFailedAgeMs') === 'string' ? String(formData.get('replayMinFailedAgeMs')) : null;
+
+    await retryFailedJobsDetailed(limit, {
+        mode,
+        dryRun: false,
+        jobTypes: parseReplayJobTypes(replayJobTypesRaw),
+        domainId: parseReplayDomainId(replayDomainIdRaw),
+        minFailedAgeMs: parseReplayMinFailedAgeMs(replayMinFailedAgeMsRaw),
+    });
+
     revalidatePath('/dashboard/queue');
 }
 
@@ -306,6 +332,38 @@ function parseLimit(value: string | undefined): number {
     const parsed = Number.parseInt(value ?? String(QUERY_LIMIT_DEFAULT), 10);
     if (!Number.isFinite(parsed)) return QUERY_LIMIT_DEFAULT;
     return Math.max(QUERY_LIMIT_MIN, Math.min(parsed, QUERY_LIMIT_MAX));
+}
+
+function parseReplayMode(value: string | null): 'all' | 'transient' {
+    return value === 'transient' ? 'transient' : 'all';
+}
+
+function parseReplayLimit(value: string | undefined): number {
+    const parsed = Number.parseInt(value ?? '25', 10);
+    if (!Number.isFinite(parsed)) return 25;
+    return Math.max(1, Math.min(parsed, 50));
+}
+
+function parseReplayJobTypes(value: string | string[] | undefined): string[] {
+    return toStringArrayValues(value)
+        .filter((item) => item.length <= 80 && /^[a-z0-9_]+$/i.test(item));
+}
+
+function parseReplayDomainId(value: string | null): string | undefined {
+    if (!value) return undefined;
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed)) {
+        return undefined;
+    }
+    return trimmed;
+}
+
+function parseReplayMinFailedAgeMs(value: string | null): number | undefined {
+    if (!value) return undefined;
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return undefined;
+    return Math.max(0, Math.min(parsed, 24 * 60 * 60 * 1000));
 }
 
 function buildQueueExportHref(input: {
@@ -458,6 +516,12 @@ export default async function QueuePage({
     const domainIdFilter = toStringValue(params.domainId);
     const queryFilter = toStringValue(params.q);
     const listLimit = parseLimit(params.limit);
+    const replayMode = parseReplayMode(toStringValue(params.replayMode));
+    const replayLimit = parseReplayLimit(params.replayLimit);
+    const replayJobTypes = parseReplayJobTypes(params.replayJobTypes);
+    const replayDomainId = parseReplayDomainId(toStringValue(params.replayDomainId));
+    const replayMinFailedAgeMs = parseReplayMinFailedAgeMs(toStringValue(params.replayMinFailedAgeMs));
+    const replayPreviewEnabled = params.replayPreview === '1';
     const exportHref = buildQueueExportHref({
         preset,
         statusFilter,
@@ -524,7 +588,7 @@ export default async function QueuePage({
 
     const whereClause = whereFilters.length > 0 ? and(...whereFilters) : sql`true`;
 
-    const [health, backend, recentJobs, totalMatchingRows, jobTypeOptionsRows, domainOptionRows, activityRows, failedDomainAggregateRows, domainJobTypeAggregateRows, staleProcessingRows] = await Promise.all([
+    const [health, backend, recentJobs, totalMatchingRows, jobTypeOptionsRows, domainOptionRows, activityRows, failedDomainAggregateRows, domainJobTypeAggregateRows, staleProcessingRows, replayPreviewSummary] = await Promise.all([
         getQueueHealth(),
         getContentQueueBackendHealth(),
         db.select()
@@ -597,6 +661,15 @@ export default async function QueuePage({
                 eq(contentQueue.status, 'processing'),
                 sql`coalesce(${contentQueue.startedAt}, ${contentQueue.createdAt}) <= ${staleCutoff}`,
             )),
+        replayPreviewEnabled
+            ? retryFailedJobsDetailed(replayLimit, {
+                mode: replayMode,
+                dryRun: true,
+                jobTypes: replayJobTypes,
+                domainId: replayDomainId,
+                minFailedAgeMs: replayMinFailedAgeMs,
+            })
+            : Promise.resolve(null),
     ]);
 
     const jobsByType = jobTypeOptionsRows
@@ -790,6 +863,88 @@ export default async function QueuePage({
                         Workflow
                     </Link>
                 </div>
+            </div>
+
+            <div className="bg-card rounded-lg border p-4 space-y-3">
+                <div>
+                    <h2 className="text-lg font-semibold">Dead Letter Replay Controls</h2>
+                    <p className="text-xs text-muted-foreground">
+                        Preview retry candidates before replaying. Supports mode, job type, domain, and failure-age filters.
+                    </p>
+                </div>
+                <form method="get" className="grid gap-3 md:grid-cols-6">
+                    <select name="replayMode" defaultValue={replayMode} className="rounded border px-3 py-2 text-sm" aria-label="Replay mode">
+                        <option value="all">All failed</option>
+                        <option value="transient">Transient only</option>
+                    </select>
+                    <input
+                        type="number"
+                        name="replayLimit"
+                        min={1}
+                        max={50}
+                        defaultValue={String(replayLimit)}
+                        className="rounded border px-3 py-2 text-sm"
+                        placeholder="Limit"
+                    />
+                    <input
+                        name="replayDomainId"
+                        defaultValue={replayDomainId ?? ''}
+                        className="rounded border px-3 py-2 text-sm"
+                        placeholder="Domain UUID (optional)"
+                    />
+                    <input
+                        type="number"
+                        name="replayMinFailedAgeMs"
+                        defaultValue={replayMinFailedAgeMs !== undefined ? String(replayMinFailedAgeMs) : ''}
+                        className="rounded border px-3 py-2 text-sm"
+                        placeholder="Min failed age ms"
+                    />
+                    <input
+                        name="replayJobTypes"
+                        defaultValue={replayJobTypes.join(',')}
+                        className="rounded border px-3 py-2 text-sm md:col-span-2"
+                        placeholder="job types (comma separated)"
+                    />
+                    <input type="hidden" name="replayPreview" value="1" />
+                    <div className="md:col-span-6 flex flex-wrap gap-2">
+                        <button type="submit" className="px-4 py-2 bg-foreground text-background rounded-lg text-sm hover:opacity-90">
+                            Preview Replay
+                        </button>
+                    </div>
+                </form>
+
+                {replayPreviewSummary && (
+                    <div className="rounded border p-3 space-y-2">
+                        <p className="text-sm">
+                            Preview found <span className="font-semibold">{replayPreviewSummary.selectedCount}</span> candidate
+                            {replayPreviewSummary.selectedCount === 1 ? '' : 's'}.
+                        </p>
+                        {replayPreviewSummary.candidates.length > 0 ? (
+                            <ul className="text-xs font-mono space-y-1 max-h-40 overflow-auto">
+                                {replayPreviewSummary.candidates.slice(0, 12).map((candidate) => (
+                                    <li key={candidate.id} className="rounded bg-muted/60 px-2 py-1">
+                                        {candidate.id} • {candidate.jobType ?? 'unknown'} • attempts {candidate.attempts}/{candidate.maxAttempts}
+                                    </li>
+                                ))}
+                            </ul>
+                        ) : (
+                            <p className="text-xs text-muted-foreground">No failed jobs matched the selected filters.</p>
+                        )}
+
+                        {replayPreviewSummary.selectedCount > 0 && (
+                            <form action={replayFailedAction} className="pt-1">
+                                <input type="hidden" name="replayMode" value={replayMode} />
+                                <input type="hidden" name="replayLimit" value={String(replayLimit)} />
+                                <input type="hidden" name="replayDomainId" value={replayDomainId ?? ''} />
+                                <input type="hidden" name="replayMinFailedAgeMs" value={replayMinFailedAgeMs !== undefined ? String(replayMinFailedAgeMs) : ''} />
+                                <input type="hidden" name="replayJobTypes" value={replayJobTypes.join(',')} />
+                                <button type="submit" className="px-4 py-2 bg-yellow-600 text-white rounded-lg text-sm hover:bg-yellow-700">
+                                    Replay {replayPreviewSummary.selectedCount} Candidate{replayPreviewSummary.selectedCount === 1 ? '' : 's'}
+                                </button>
+                            </form>
+                        )}
+                    </div>
+                )}
             </div>
 
             {queueSloAlerts.length > 0 && (

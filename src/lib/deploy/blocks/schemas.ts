@@ -826,6 +826,8 @@ export const LatestArticlesContentSchema = z.object({
     excerpt: z.string(),
     href: z.string(),
     image: z.string().optional(),
+    imageUrl: z.string().optional(),
+    date: z.string().optional(),
   })).default([]),
 });
 export const LatestArticlesConfigSchema = z.object({}).passthrough();

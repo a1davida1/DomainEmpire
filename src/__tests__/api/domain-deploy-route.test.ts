@@ -10,6 +10,7 @@ const mockSelectLimit = vi.fn();
 
 vi.mock('@/lib/auth', () => ({
     requireAuth: mockRequireAuth,
+    requireRole: mockRequireAuth,
 }));
 
 vi.mock('@/lib/api/idempotency', () => ({

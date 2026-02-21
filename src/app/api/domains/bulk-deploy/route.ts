@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, domains } from '@/lib/db';
-import { requireAuth } from '@/lib/auth';
+import { requireRole } from '@/lib/auth';
 import { and, inArray, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
@@ -16,7 +16,7 @@ const bulkDeploySchema = z.object({
 
 // POST /api/domains/bulk-deploy - Deploy multiple domains
 export async function POST(request: NextRequest) {
-    const authError = await requireAuth(request);
+    const authError = await requireRole(request, 'admin');
     if (authError) return authError;
 
     try {

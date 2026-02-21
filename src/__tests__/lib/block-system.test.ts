@@ -410,7 +410,7 @@ describe('Interactive Block Renderers', () => {
             ],
             formula: '{amount: amount * (1 + rate/100)}',
         }), ctx);
-        expect(html).toContain('calc-form');
+        expect(html).toContain('calc-split');
         expect(html).toContain('Amount');
         expect(html).toContain('type="range"');
         expect(html).toContain('calc-results');

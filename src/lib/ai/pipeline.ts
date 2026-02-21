@@ -221,6 +221,7 @@ async function evaluateWithAiReviewer(opts: {
 // Content type enum values matching schema
 type ContentType =
     | 'article'
+    | 'guide'
     | 'comparison'
     | 'calculator'
     | 'cost_guide'
@@ -239,6 +240,7 @@ type ContentType =
 
 const CONTENT_TYPE_VALUES: ReadonlySet<ContentType> = new Set([
     'article',
+    'guide',
     'comparison',
     'calculator',
     'cost_guide',

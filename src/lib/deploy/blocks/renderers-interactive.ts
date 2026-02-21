@@ -1685,21 +1685,26 @@ registerBlockRenderer('LatestArticles', (block, _ctx) => {
     const content = (block.content || {}) as Record<string, unknown>;
     const heading = (content.heading as string) || 'Latest Articles';
     const articles = (content.articles as Array<{
-        title: string; excerpt: string; href: string; image?: string;
+        title: string; excerpt: string; href: string; image?: string; imageUrl?: string; date?: string;
     }>) || [];
 
     if (articles.length === 0) return '';
 
     const cardsHtml = articles.map(article => {
+        const imageUrl = article.image || article.imageUrl;
         // Validate image URL: only allow http(s) or root-relative paths to prevent CSS injection
-        const isValidImage = article.image && /^(https?:\/\/|\/)[^'"()]+$/.test(article.image);
+        const isValidImage = imageUrl && /^(https?:\/\/|\/)[^'"()]+$/.test(imageUrl);
         const imgHtml = isValidImage
-            ? `<div class="article-card-img" style="background-image:url('${escapeAttr(article.image as string)}')"></div>`
+            ? `<div class="article-card-img" style="background-image:url('${escapeAttr(imageUrl as string)}')"></div>`
             : `<div class="article-card-img article-card-img--placeholder"></div>`;
+        const dateHtml = article.date
+            ? `<p class="article-card-date">${escapeHtml(article.date)}</p>`
+            : '';
         return `<a href="${escapeAttr(article.href)}" class="article-card">
   ${imgHtml}
   <div class="article-card-body">
     <h3 class="article-card-title">${escapeHtml(article.title)}</h3>
+    ${dateHtml}
     <p class="article-card-excerpt">${escapeHtml(article.excerpt)}</p>
   </div>
 </a>`;

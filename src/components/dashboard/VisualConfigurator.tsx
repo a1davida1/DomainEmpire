@@ -686,7 +686,7 @@ const BLOCK_FIELD_SCHEMAS: Record<string, FieldDef[]> = {
             { key: 'title', label: 'Title', type: 'text' },
             { key: 'excerpt', label: 'Excerpt', type: 'textarea' },
             { key: 'href', label: 'URL', type: 'url' },
-            { key: 'imageUrl', label: 'Image URL', type: 'url' },
+            { key: 'image', label: 'Image URL', type: 'url' },
             { key: 'date', label: 'Date', type: 'text', placeholder: 'YYYY-MM-DD' },
         ], itemLabel: (item) => String(item.title || 'Article') },
     ],

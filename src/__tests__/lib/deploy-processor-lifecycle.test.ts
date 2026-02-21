@@ -208,4 +208,13 @@ describe('deploy processor lifecycle automation', () => {
             reason: 'Deployment completed successfully',
         }));
     });
+
+    it('aborts immediately when signal is already aborted', async () => {
+        const controller = new AbortController();
+        controller.abort('timeout:600000');
+
+        await expect(processDeployJob('job-1', controller.signal)).rejects.toThrow('Deploy job aborted');
+        expect(mockCreateDirectUploadProject).not.toHaveBeenCalled();
+        expect(mockDirectUploadDeploy).not.toHaveBeenCalled();
+    });
 });

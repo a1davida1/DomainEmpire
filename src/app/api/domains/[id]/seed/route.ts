@@ -10,7 +10,7 @@ const MIN_PRIORITY = 1;
 const MAX_PRIORITY = 10;
 
 const CONTENT_TYPES = [
-    'article', 'comparison', 'calculator', 'cost_guide', 'lead_capture',
+    'article', 'guide', 'comparison', 'calculator', 'cost_guide', 'lead_capture',
     'health_decision', 'checklist', 'faq', 'review', 'wizard',
     'configurator', 'quiz', 'survey', 'assessment',
     'interactive_infographic', 'interactive_map',

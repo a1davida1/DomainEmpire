@@ -14,7 +14,7 @@ const generateArticleSchema = z.object({
     secondaryKeywords: z.array(z.string()).optional().default([]),
     priority: z.number().min(1).max(10).optional().default(5),
     contentType: z.enum([
-        'article', 'comparison', 'calculator', 'cost_guide', 'lead_capture',
+        'article', 'guide', 'comparison', 'calculator', 'cost_guide', 'lead_capture',
         'health_decision', 'checklist', 'faq', 'review', 'wizard',
         'configurator', 'quiz', 'survey', 'assessment',
         'interactive_infographic', 'interactive_map',

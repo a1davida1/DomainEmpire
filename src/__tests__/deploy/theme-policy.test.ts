@@ -120,19 +120,19 @@ describe('v2 theme policy resolution', () => {
             vertical: 'finance',
         });
         // Falls through to policy
-        expect(resolved.theme).toBe('bold');
-        expect(resolved.skin).toBe('ocean');
+        expect(resolved.theme).toBe('startup');
+        expect(resolved.skin).toBe('indigo');
         expect(resolved.source).toBe('policy_fallback');
     });
 
     // Priority 3: Policy-based vertical/niche fallback
     it('resolves vertical to v2 theme+skin via policy', () => {
         const cases: Array<{ vertical: string; theme: string; skin: string }> = [
-            { vertical: 'legal', theme: 'editorial', skin: 'slate' },
-            { vertical: 'insurance', theme: 'bold', skin: 'ocean' },
+            { vertical: 'legal', theme: 'corporate', skin: 'slate' },
+            { vertical: 'insurance', theme: 'corporate', skin: 'cobalt' },
             { vertical: 'health', theme: 'clean', skin: 'forest' },
-            { vertical: 'finance', theme: 'bold', skin: 'ocean' },
-            { vertical: 'real_estate', theme: 'editorial', skin: 'ember' },
+            { vertical: 'finance', theme: 'startup', skin: 'indigo' },
+            { vertical: 'real_estate', theme: 'editorial', skin: 'sand' },
             { vertical: 'medicare', theme: 'clean', skin: 'forest' },
             { vertical: 'technology', theme: 'minimal', skin: 'midnight' },
             { vertical: 'auto', theme: 'bold', skin: 'midnight' },
@@ -141,7 +141,7 @@ describe('v2 theme policy resolution', () => {
             { vertical: 'travel', theme: 'bold', skin: 'coral' },
             { vertical: 'pets', theme: 'bold', skin: 'ember' },
             { vertical: 'relationships', theme: 'bold', skin: 'coral' },
-            { vertical: 'business', theme: 'editorial', skin: 'ocean' },
+            { vertical: 'business', theme: 'corporate', skin: 'steel' },
         ];
         for (const c of cases) {
             const resolved = resolveV2DomainTheme({ vertical: c.vertical });
@@ -166,13 +166,13 @@ describe('v2 theme policy resolution', () => {
             vertical: 'Real Estate',
         });
         expect(resolved.theme).toBe('editorial');
-        expect(resolved.skin).toBe('ember');
+        expect(resolved.skin).toBe('sand');
 
         const resolved2 = resolveV2DomainTheme({
             vertical: 'REAL-ESTATE',
         });
         expect(resolved2.theme).toBe('editorial');
-        expect(resolved2.skin).toBe('ember');
+        expect(resolved2.skin).toBe('sand');
     });
 
     // Priority 4: Hard default

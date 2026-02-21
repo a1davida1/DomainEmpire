@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { getConfiguratorBridgeScript } from '../../lib/deploy/blocks/assembler';
 import { MAX_HISTORY, buildConfiguratorPreviewUrl } from '../../components/dashboard/VisualConfigurator';
 
-const EXPECTED_THEMES = ['clean', 'editorial', 'bold', 'minimal'] as const;
-const EXPECTED_SKINS = ['slate', 'ocean', 'forest', 'ember', 'midnight', 'coral'] as const;
+const EXPECTED_THEMES = ['clean', 'editorial', 'bold', 'minimal', 'magazine', 'brutalist', 'glass', 'retro', 'corporate', 'craft', 'academic', 'startup', 'noir'] as const;
+const EXPECTED_SKINS = ['slate', 'ocean', 'forest', 'ember', 'midnight', 'coral', 'sage', 'rose', 'indigo', 'sand', 'teal', 'wine', 'plum', 'steel', 'cobalt', 'copper', 'arctic', 'charcoal', 'dusk'] as const;
 
 // ============================================================
 // Unit tests for Visual Configurator logic (non-React)
@@ -205,8 +205,8 @@ describe('Visual Configurator', () => {
     });
 
     describe('theme labels', () => {
-        it('has 4 themes', () => {
-            expect(EXPECTED_THEMES).toHaveLength(4);
+        it('has 13 themes', () => {
+            expect(EXPECTED_THEMES).toHaveLength(13);
         });
 
         it('includes clean as default', () => {

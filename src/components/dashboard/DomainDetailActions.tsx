@@ -18,6 +18,7 @@ import { apiFetch } from '@/lib/api-fetch';
 const CONTENT_TYPE_OPTIONS = [
     { value: 'auto', label: 'Auto-detect' },
     { value: 'article', label: 'Article' },
+    { value: 'guide', label: 'Guide' },
     { value: 'calculator', label: 'Calculator' },
     { value: 'comparison', label: 'Comparison' },
     { value: 'cost_guide', label: 'Cost Guide' },
@@ -47,10 +48,9 @@ export function GenerateArticleButton({ domainId, hasArticles }: { domainId: str
             if (contentType !== 'auto') {
                 payload.contentType = contentType;
             }
-            const res = await fetch(`/api/domains/${domainId}/seed`, {
+            const res = await apiFetch(`/api/domains/${domainId}/seed`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
+                body: payload,
             });
             if (!res.ok) {
                 const data = await res.json().catch(() => ({}));
@@ -104,10 +104,9 @@ export function GenerateFirstArticleButton({ domainId }: { domainId: string }) {
     async function handleSeed() {
         setLoading(true);
         try {
-            const res = await fetch(`/api/domains/${domainId}/seed`, {
+            const res = await apiFetch(`/api/domains/${domainId}/seed`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ articleCount: 5, priority: 5 }),
+                body: { articleCount: 5, priority: 5 },
             });
             if (!res.ok) {
                 const data = await res.json().catch(() => ({}));
@@ -142,7 +141,7 @@ export function DeleteDomainButton({ domainId, domainName }: { domainId: string;
     async function handleDelete() {
         setLoading(true);
         try {
-            const res = await fetch(`/api/domains/${domainId}`, {
+            const res = await apiFetch(`/api/domains/${domainId}`, {
                 method: 'DELETE',
             });
             if (!res.ok) {
@@ -198,7 +197,7 @@ export function SeedPagesButton({ domainId }: { domainId: string }) {
     async function handlePrepare() {
         setLoading(true);
         try {
-            const res = await fetch(`/api/domains/${domainId}/prepare`, {
+            const res = await apiFetch(`/api/domains/${domainId}/prepare`, {
                 method: 'POST',
             });
             const data = await res.json().catch(() => ({}));
@@ -251,7 +250,7 @@ export function AssignThemeButton({ domainId }: { domainId: string }) {
         <Button size="sm" variant="outline" disabled={loading} onClick={async () => {
             setLoading(true);
             try {
-                const res = await fetch(`/api/domains/${domainId}/assign-theme`, { method: 'POST' });
+                const res = await apiFetch(`/api/domains/${domainId}/assign-theme`, { method: 'POST' });
                 const data = await res.json().catch(() => ({}));
                 if (res.ok) {
                     toast.success(`Theme: ${data.theme} / ${data.skin}`);

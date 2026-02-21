@@ -4070,7 +4070,7 @@ export async function retryFailedJobsDetailed(limit = 10, options: RetryFailedOp
 
     let whereClause = eq(contentQueue.status, 'failed');
     if (filteredJobTypes.length > 0) {
-        whereClause = and(whereClause, inArray(contentQueue.jobType, filteredJobTypes))!;
+        whereClause = and(whereClause, inArray(contentQueue.jobType, filteredJobTypes as [typeof contentQueue.jobType._.data, ...typeof contentQueue.jobType._.data[]]))!;
     }
     if (domainId) {
         whereClause = and(whereClause, eq(contentQueue.domainId, domainId))!;
