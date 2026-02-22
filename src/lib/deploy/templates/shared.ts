@@ -742,7 +742,7 @@ export function extractSiteTitle(domain: string): string {
             .replace(/(\d)([a-z])/gi, '$1 $2');
         if (!spaced.includes(' ')) {
             // Preprocess: split on known compound patterns before DP
-            let preprocessed = spaced.toLowerCase()
+            const preprocessed = spaced.toLowerCase()
                 .replace(/vs(?=[a-z])/g, 'vs ')    // "suvvssedan" → "suvvs sedan" → "suv vs sedan"
                 .replace(/(?<=[a-z])vs/g, ' vs')    // "armvsfixed" → "arm vsfixed" → "arm vs fixed"
                 .replace(/tradein/g, 'trade in')

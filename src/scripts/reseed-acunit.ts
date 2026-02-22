@@ -16,7 +16,6 @@ import { getRequiredCompliancePages } from '@/lib/deploy/compliance-templates';
 import {
     generateBlueprint,
     sectionSlotToBlockType,
-    headerStyleToBlock,
     footerStructureToVariant,
     heroStructureToVariant,
     ctaStyleToConfig,

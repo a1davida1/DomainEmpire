@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, previewBuilds } from '@/lib/db';
-import { and, eq, gt, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 
 const TOKEN_RE = /^[0-9a-f]{16}$/i;
 

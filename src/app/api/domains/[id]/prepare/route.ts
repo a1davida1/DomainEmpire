@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireRole } from '@/lib/auth';
 import { db, domains } from '@/lib/db';
 import { eq } from 'drizzle-orm';
-import { prepareDomain, updateDomain, type DomainStrategy, type PrepareMode } from '@/lib/deploy/prepare-domain';
+import { prepareDomain, type DomainStrategy, type PrepareMode } from '@/lib/deploy/prepare-domain';
 
 export async function POST(
     request: NextRequest,

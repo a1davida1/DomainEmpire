@@ -52,7 +52,7 @@ const STATUS_STYLES: Record<string, string> = {
     published: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
 };
 
-export function SiteGalleryClient({ domainId, domainName, pages }: SiteGalleryClientProps) {
+export function SiteGalleryClient({ domainId, domainName: _domainName, pages }: SiteGalleryClientProps) {
     const [viewport, setViewport] = useState<Viewport>('desktop');
     const [expandedPageId, setExpandedPageId] = useState<string | null>(null);
     const [sharing, setSharing] = useState<string | null>(null);
