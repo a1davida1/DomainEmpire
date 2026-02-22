@@ -487,9 +487,18 @@ export async function createDirectUploadProject(
             deploymentUrl: data.result.subdomain,
         };
     } catch (error) {
+        const errMsg = error instanceof Error ? error.message : 'Unknown error';
+        if (/already exists/i.test(errMsg)) {
+            console.log(`[CF] Project "${projectName}" already exists (caught), reusing.`);
+            return {
+                success: true,
+                projectName,
+                deploymentUrl: `${projectName}.pages.dev`,
+            };
+        }
         return {
             success: false,
-            error: error instanceof Error ? error.message : 'Unknown error',
+            error: errMsg,
         };
     }
 }
