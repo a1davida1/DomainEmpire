@@ -15,7 +15,7 @@ async function main() {
     const email = process.env.ADMIN_EMAIL || 'admin@google.com';
 
     if (users.length > 0) {
-        const adminUser = users.find((u: { role: string }) => u.role === 'admin') || users[0];
+        const adminUser = users.find((u) => (u as any).role === 'admin') || users[0];
         await sql`UPDATE users SET password_hash = ${hash}, email = ${email} WHERE id = ${adminUser.id}`;
         console.log('Updated password for user:', adminUser.email, '-> email now:', email);
     } else {
