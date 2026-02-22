@@ -696,6 +696,67 @@ function generateBlockId(): string {
     return `blk_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
 }
 
+type ContactOverrideInput = {
+    brandName?: string;
+    phone?: string;
+    email?: string;
+};
+
+function replaceAllLiteral(input: string, search: string, replaceWith: string): string {
+    if (!search) return input;
+    return input.split(search).join(replaceWith);
+}
+
+function applyContactValueByKey(key: string, input: string, overrides: ContactOverrideInput): string {
+    const normalizedKey = key.toLowerCase();
+
+    if (overrides.brandName && /^(sitename|companyname|brandname|businessname|organizationname|orgname)$/.test(normalizedKey)) {
+        return overrides.brandName;
+    }
+    if (overrides.phone && /(phone|telephone|tel|hotline|whatsapp|call)/.test(normalizedKey)) {
+        return overrides.phone;
+    }
+    if (overrides.email && /email/.test(normalizedKey)) {
+        return overrides.email;
+    }
+
+    return input;
+}
+
+function transformStringsRecursively(
+    value: unknown,
+    transform: (key: string, input: string) => string,
+    key = '',
+): [unknown, boolean] {
+    if (typeof value === 'string') {
+        const next = transform(key, value);
+        return [next, next !== value];
+    }
+
+    if (Array.isArray(value)) {
+        let changed = false;
+        const next = value.map((item) => {
+            const [transformed, didChange] = transformStringsRecursively(item, transform, key);
+            if (didChange) changed = true;
+            return transformed;
+        });
+        return [next, changed];
+    }
+
+    if (value && typeof value === 'object') {
+        let changed = false;
+        const next: Record<string, unknown> = {};
+        for (const [entryKey, entryValue] of Object.entries(value as Record<string, unknown>)) {
+            const [transformed, didChange] = transformStringsRecursively(entryValue, transform, entryKey);
+            next[entryKey] = transformed;
+            if (didChange) changed = true;
+        }
+        return [next, changed];
+    }
+
+    return [value, false];
+}
+
 // ============================================================
 // Undo/Redo Hook
 // ============================================================
@@ -770,12 +831,19 @@ export function VisualConfigurator({
     const [showPalette, setShowPalette] = useState(false);
     const [insertIndex, setInsertIndex] = useState<number | null>(null);
     const [paletteSearch, setPaletteSearch] = useState('');
+    const [paletteMode, setPaletteMode] = useState<'insert' | 'replace'>('insert');
+    const [replaceBlockId, setReplaceBlockId] = useState<string | null>(null);
     const [dragIndex, setDragIndex] = useState<number | null>(null);
     const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
     const [regenerating, setRegenerating] = useState<string | null>(null);
     const [successMsg, setSuccessMsg] = useState<string | null>(null);
     const [iframeLoading, setIframeLoading] = useState(true);
     const [jsonError, setJsonError] = useState<string | null>(null);
+    const [globalBrandName, setGlobalBrandName] = useState('');
+    const [globalPhone, setGlobalPhone] = useState('');
+    const [globalEmail, setGlobalEmail] = useState('');
+    const [findText, setFindText] = useState('');
+    const [replaceText, setReplaceText] = useState('');
 
     // --- Recommended blocks based on domain content types ---
     const recommendedBlockTypes: string[] = (() => {
@@ -850,6 +918,11 @@ export function VisualConfigurator({
     function updateBlocks(newBlocks: Block[]) {
         pushHistory(newBlocks);
         setDirty(true);
+    }
+
+    function showTransientSuccess(message: string) {
+        setSuccessMsg(message);
+        setTimeout(() => setSuccessMsg(null), 2500);
     }
 
     // --- Refresh preview ---
@@ -945,10 +1018,125 @@ export function VisualConfigurator({
         updateBlocks(blocks.filter((_, i) => i !== index));
     }
 
-    function openPalette(index: number) {
+    function removeAllSidebars() {
+        const nextBlocks = blocks.filter((block) => block.type !== 'Sidebar');
+        const removedCount = blocks.length - nextBlocks.length;
+        if (removedCount === 0) {
+            setError('No Sidebar blocks found in this page.');
+            return;
+        }
+        if (selectedBlockId && blocks.some((block) => block.id === selectedBlockId && block.type === 'Sidebar')) {
+            setSelectedBlockId(null);
+        }
+        setError(null);
+        updateBlocks(nextBlocks);
+        showTransientSuccess(`Removed ${removedCount} sidebar block${removedCount === 1 ? '' : 's'}.`);
+    }
+
+    function applyGlobalContactOverrides() {
+        const overrides: ContactOverrideInput = {
+            brandName: globalBrandName.trim() || undefined,
+            phone: globalPhone.trim() || undefined,
+            email: globalEmail.trim() || undefined,
+        };
+
+        if (!overrides.brandName && !overrides.phone && !overrides.email) {
+            setError('Enter at least one global contact value to apply.');
+            return;
+        }
+
+        let changedCount = 0;
+        const nextBlocks = blocks.map((block) => {
+            let blockChanged = false;
+            const nextBlock: Block = { ...block };
+
+            for (const target of ['content', 'config'] as const) {
+                const sourceValue = block[target];
+                if (!sourceValue || typeof sourceValue !== 'object') continue;
+                const [transformed, changed] = transformStringsRecursively(sourceValue, (key, value) => (
+                    applyContactValueByKey(key, value, overrides)
+                ));
+                if (changed) {
+                    nextBlock[target] = transformed as Record<string, unknown>;
+                    blockChanged = true;
+                }
+            }
+
+            if (blockChanged) {
+                changedCount += 1;
+                return nextBlock;
+            }
+            return block;
+        });
+
+        if (changedCount === 0) {
+            setError('No matching contact fields were found to update.');
+            return;
+        }
+
+        setError(null);
+        updateBlocks(nextBlocks);
+        showTransientSuccess(`Updated contact fields across ${changedCount} block${changedCount === 1 ? '' : 's'}.`);
+    }
+
+    function applyGlobalFindReplace() {
+        const needle = findText;
+        if (!needle) {
+            setError('Enter text to find before running replace.');
+            return;
+        }
+
+        let changedCount = 0;
+        const nextBlocks = blocks.map((block) => {
+            let blockChanged = false;
+            const nextBlock: Block = { ...block };
+
+            for (const target of ['content', 'config'] as const) {
+                const sourceValue = block[target];
+                if (!sourceValue || typeof sourceValue !== 'object') continue;
+                const [transformed, changed] = transformStringsRecursively(sourceValue, (_key, value) => (
+                    replaceAllLiteral(value, needle, replaceText)
+                ));
+                if (changed) {
+                    nextBlock[target] = transformed as Record<string, unknown>;
+                    blockChanged = true;
+                }
+            }
+
+            if (blockChanged) {
+                changedCount += 1;
+                return nextBlock;
+            }
+            return block;
+        });
+
+        if (changedCount === 0) {
+            setError('No matching text found in current block content/config.');
+            return;
+        }
+
+        setError(null);
+        updateBlocks(nextBlocks);
+        showTransientSuccess(`Applied text replacement in ${changedCount} block${changedCount === 1 ? '' : 's'}.`);
+    }
+
+    function closePalette() {
+        setShowPalette(false);
+        setInsertIndex(null);
+        setPaletteMode('insert');
+        setReplaceBlockId(null);
+    }
+
+    function openPalette(index: number, mode: 'insert' | 'replace' = 'insert', targetBlockId: string | null = null) {
         setInsertIndex(index);
+        setPaletteMode(mode);
+        setReplaceBlockId(targetBlockId);
         setShowPalette(true);
         setPaletteSearch('');
+    }
+
+    function openReplacePalette(index: number, targetBlockId: string) {
+        openPalette(index, 'replace', targetBlockId);
     }
 
     function addBlock(type: string, variantOverride?: string) {
@@ -960,17 +1148,26 @@ export function VisualConfigurator({
             config: defaults?.config ? { ...defaults.config } : {},
             content: defaults?.content ? JSON.parse(JSON.stringify(defaults.content)) : {},
         };
-        const idx = insertIndex ?? blocks.length;
+        const replaceIndex = paletteMode === 'replace' && replaceBlockId
+            ? blocks.findIndex((block) => block.id === replaceBlockId)
+            : -1;
+        const idx = replaceIndex >= 0 ? replaceIndex : (insertIndex ?? blocks.length);
         const updated = [...blocks];
-        updated.splice(idx, 0, newBlock);
+        if (replaceIndex >= 0) {
+            updated.splice(replaceIndex, 1, newBlock);
+        } else {
+            updated.splice(idx, 0, newBlock);
+        }
         updateBlocks(updated);
-        setShowPalette(false);
-        setInsertIndex(null);
+        closePalette();
         setSelectedBlockId(newBlock.id);
     }
 
     function addSectionTemplate(template: SectionTemplate) {
-        const idx = insertIndex ?? blocks.length;
+        const replaceIndex = paletteMode === 'replace' && replaceBlockId
+            ? blocks.findIndex((block) => block.id === replaceBlockId)
+            : -1;
+        const idx = replaceIndex >= 0 ? replaceIndex : (insertIndex ?? blocks.length);
         const newBlocks = template.blocks.map(b => {
             const defaults = DEFAULT_BLOCK_CONTENT[b.type];
             return {
@@ -982,10 +1179,13 @@ export function VisualConfigurator({
             };
         });
         const updated = [...blocks];
-        updated.splice(idx, 0, ...newBlocks);
+        if (replaceIndex >= 0) {
+            updated.splice(replaceIndex, 1, ...newBlocks);
+        } else {
+            updated.splice(idx, 0, ...newBlocks);
+        }
         updateBlocks(updated);
-        setShowPalette(false);
-        setInsertIndex(null);
+        closePalette();
         if (newBlocks.length > 0) setSelectedBlockId(newBlocks[0].id);
     }
 
@@ -1206,6 +1406,85 @@ export function VisualConfigurator({
                     </div>
                 </div>
 
+                <div className="border-b px-3 py-2 space-y-2">
+                    <div className="flex items-center justify-between">
+                        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Global Content Controls</h3>
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-6 px-2 text-[10px] text-destructive hover:text-destructive"
+                            onClick={removeAllSidebars}
+                            type="button"
+                        >
+                            Remove All Sidebars
+                        </Button>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-1.5">
+                        <input
+                            type="text"
+                            className="w-full rounded border bg-background px-2 py-1 text-xs"
+                            placeholder="Brand/site name (optional)"
+                            value={globalBrandName}
+                            onChange={(e) => setGlobalBrandName(e.target.value)}
+                        />
+                        <div className="grid grid-cols-2 gap-1.5">
+                            <input
+                                type="text"
+                                className="w-full rounded border bg-background px-2 py-1 text-xs"
+                                placeholder="Phone number"
+                                value={globalPhone}
+                                onChange={(e) => setGlobalPhone(e.target.value)}
+                            />
+                            <input
+                                type="email"
+                                className="w-full rounded border bg-background px-2 py-1 text-xs"
+                                placeholder="Email address"
+                                value={globalEmail}
+                                onChange={(e) => setGlobalEmail(e.target.value)}
+                            />
+                        </div>
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-xs"
+                            onClick={applyGlobalContactOverrides}
+                            type="button"
+                        >
+                            Apply Contact Info To Matching Fields
+                        </Button>
+                    </div>
+
+                    <div className="space-y-1">
+                        <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Find & Replace Across Blocks</div>
+                        <div className="grid grid-cols-2 gap-1.5">
+                            <input
+                                type="text"
+                                className="w-full rounded border bg-background px-2 py-1 text-xs"
+                                placeholder="Find text"
+                                value={findText}
+                                onChange={(e) => setFindText(e.target.value)}
+                            />
+                            <input
+                                type="text"
+                                className="w-full rounded border bg-background px-2 py-1 text-xs"
+                                placeholder="Replace with"
+                                value={replaceText}
+                                onChange={(e) => setReplaceText(e.target.value)}
+                            />
+                        </div>
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 w-full text-xs"
+                            onClick={applyGlobalFindReplace}
+                            type="button"
+                        >
+                            Run Find & Replace
+                        </Button>
+                    </div>
+                </div>
+
                 {/* Block List */}
                 <div className="flex-1 overflow-y-auto" ref={blockListRef}>
                     <div className="p-2 space-y-0.5">
@@ -1308,10 +1587,32 @@ export function VisualConfigurator({
                                     <Badge variant="default" className="text-[10px]">{selectedBlock.type}</Badge>
                                     <span className="text-[10px] text-muted-foreground">#{selectedBlockIndex + 1}</span>
                                 </div>
-                                <button
-                                    className="text-[10px] text-muted-foreground hover:text-foreground"
-                                    onClick={() => setSelectedBlockId(null)}
-                                >{'\u2715'} Close</button>
+                                <div className="flex items-center gap-1">
+                                    {selectedBlockIndex >= 0 && (
+                                        <>
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                className="h-6 px-2 text-[10px]"
+                                                onClick={() => openReplacePalette(selectedBlockIndex, selectedBlock.id)}
+                                            >
+                                                Replace
+                                            </Button>
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                className="h-6 px-2 text-[10px] text-destructive hover:text-destructive"
+                                                onClick={() => removeBlock(selectedBlockIndex)}
+                                            >
+                                                Remove
+                                            </Button>
+                                        </>
+                                    )}
+                                    <button
+                                        className="text-[10px] text-muted-foreground hover:text-foreground"
+                                        onClick={() => setSelectedBlockId(null)}
+                                    >{'\u2715'} Close</button>
+                                </div>
                             </div>
 
                             {/* Variant selector */}
@@ -1653,15 +1954,19 @@ export function VisualConfigurator({
 
             {/* ====== Block Palette Modal ====== */}
             {showPalette && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={(e) => { if (e.target === e.currentTarget) { setShowPalette(false); setInsertIndex(null); } }}>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={(e) => { if (e.target === e.currentTarget) { closePalette(); } }}>
                     <div className="max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-xl border bg-background shadow-2xl flex flex-col">
                         {/* Modal header */}
                         <div className="flex items-center justify-between border-b px-5 py-3">
                             <div>
-                                <h3 className="text-base font-semibold">Add Component</h3>
-                                <p className="text-xs text-muted-foreground">Choose a section template or individual block</p>
+                                <h3 className="text-base font-semibold">{paletteMode === 'replace' ? 'Replace Component' : 'Add Component'}</h3>
+                                <p className="text-xs text-muted-foreground">
+                                    {paletteMode === 'replace'
+                                        ? 'Choose what should replace the selected block'
+                                        : 'Choose a section template or individual block'}
+                                </p>
                             </div>
-                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => { setShowPalette(false); setInsertIndex(null); }}>
+                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={closePalette}>
                                 {'\u2715'}
                             </Button>
                         </div>

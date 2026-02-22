@@ -3,8 +3,7 @@ import { requireRole } from '@/lib/auth';
 import { db, domains } from '@/lib/db';
 import { and, inArray, isNull } from 'drizzle-orm';
 import { prepareDomain, type DomainStrategy } from '@/lib/deploy/prepare-domain';
-import { enqueueContentJob } from '@/lib/queue/content-queue';
-import { randomUUID } from 'node:crypto';
+import { deployDomainInline } from '@/lib/deploy/processor';
 import { z } from 'zod';
 import { withIdempotency } from '@/lib/api/idempotency';
 
@@ -48,7 +47,7 @@ interface BatchResult {
  * Body: { domainIds: string[], strategy?: DomainStrategy, skipDeploy?: boolean }
  *
  * Runs prepareDomain for up to 50 domains in parallel batches of 5.
- * Deploys are enqueued asynchronously per domain and processed by workers.
+ * Deploys run inline per domain (no queue wait).
  */
 async function postBatchPrepareDeploy(request: NextRequest): Promise<NextResponse> {
     const authError = await requireRole(request, 'admin');
@@ -93,27 +92,14 @@ async function postBatchPrepareDeploy(request: NextRequest): Promise<NextRespons
             let deployJobId: string | undefined;
 
             if (!skipDeploy) {
-                const jobId = randomUUID();
-                try {
-                    await enqueueContentJob({
-                        id: jobId,
-                        domainId: row.id,
-                        jobType: 'deploy',
-                        priority: 1,
-                        payload: { domain: row.domain, triggerBuild: true, addCustomDomain: true },
-                        status: 'pending',
-                        scheduledFor: new Date(),
-                        maxAttempts: 3,
-                    });
-                    deployStatus = 'queued';
-                    deployJobId = jobId;
-                } catch (enqueueErr: unknown) {
-                    if (enqueueErr instanceof Error && 'code' in enqueueErr && (enqueueErr as { code: string }).code === '23505') {
-                        deployStatus = 'already_running';
-                    } else {
-                        throw enqueueErr;
-                    }
-                }
+                const deployResult = await deployDomainInline({
+                    domainId: row.id,
+                    domain: row.domain,
+                    triggerBuild: true,
+                    addCustomDomain: true,
+                });
+                deployJobId = deployResult.jobId;
+                deployStatus = deployResult.success ? 'queued' : 'skipped';
             }
 
             return {

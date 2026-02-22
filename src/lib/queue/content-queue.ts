@@ -127,6 +127,30 @@ function parseScheduledFor(value: ContentQueueInsert['scheduledFor']): Date | nu
     }
 }
 
+/**
+ * Auto-assign a queue channel based on job type.
+ * - 'build': AI content pipeline jobs (initial site creation)
+ * - 'maintain': scheduled recurring content updates
+ * - null: inline jobs (deploy runs inline), legacy, or admin tasks
+ */
+function resolveChannel(job: ContentQueueInsert): 'build' | 'maintain' | null {
+    // If caller explicitly set a channel, respect it
+    if (job.channel) return job.channel;
+
+    const buildJobTypes = new Set([
+        'generate_outline', 'generate_draft', 'humanize',
+        'seo_optimize', 'resolve_external_links', 'generate_meta',
+        'keyword_research', 'bulk_seed', 'research', 'evaluate',
+        'generate_block_content', 'ai_detection_check',
+    ]);
+
+    if (buildJobTypes.has(job.jobType)) return 'build';
+
+    // Deploy and site review run inline now — no channel
+    // Maintenance jobs will be explicitly tagged by the scheduler
+    return null;
+}
+
 function isReadyForImmediateDispatch(job: ContentQueueInsert): boolean {
     const scheduledFor = parseScheduledFor(job.scheduledFor);
     if (!scheduledFor) {
@@ -141,6 +165,7 @@ async function insertPostgres(job: ContentQueueInsert, executor: QueueInsertExec
         .insert(contentQueue)
         .values({
             ...job,
+            channel: resolveChannel(job),
             status: job.status ?? 'pending',
         })
         .returning({ id: contentQueue.id });
@@ -161,6 +186,7 @@ async function insertPostgresMany(jobs: ContentQueueInsert[], executor: QueueIns
         .insert(contentQueue)
         .values(jobs.map((job) => ({
             ...job,
+            channel: resolveChannel(job),
             status: job.status ?? 'pending',
         })))
         .returning({ id: contentQueue.id });

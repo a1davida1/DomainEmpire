@@ -250,6 +250,7 @@ export async function checkContentSchedule() {
             id: randomUUID(),
             jobType: 'keyword_research', // Start of pipeline
             domainId: domain.id,
+            channel: 'maintain', // Scheduled content goes to maintain lane
             payload: {
                 domain: domain.domain,
                 niche: domain.niche,

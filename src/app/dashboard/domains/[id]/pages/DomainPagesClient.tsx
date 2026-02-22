@@ -84,6 +84,7 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, contentT
     const [newSkin, setNewSkin] = useState('slate');
     const [newPreset, setNewPreset] = useState<'article' | 'homepage'>('article');
     const [quickDeploySeed, setQuickDeploySeed] = useState<number | null>(initialSeed);
+    const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
     const pageStats = useMemo(() => {
         const published = pages.filter(p => p.status === 'published').length;
@@ -106,6 +107,11 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, contentT
         }));
         return computeChecklist(snapshots, siteTemplate);
     }, [pages, siteTemplate]);
+
+    const configuratorPage = useMemo(() => {
+        if (pages.length === 0) return null;
+        return pages.find((page) => page.route === '/') ?? pages[0];
+    }, [pages]);
 
     async function applyRandomizePlan(seed: number) {
         setLoading('randomize');
@@ -645,8 +651,6 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, contentT
         );
     }
 
-    const [openMenuId, setOpenMenuId] = useState<string | null>(null);
-
     function statusBadge(status: string) {
         switch (status) {
             case 'published': return <Badge className="bg-green-600 text-white">Published</Badge>;
@@ -660,7 +664,7 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, contentT
         if (page.status === 'draft') return { label: 'Submit for Review', action: () => handleStatusTransition(page.id, 'review') };
         if (page.status === 'review') return { label: 'Approve', action: () => handleStatusTransition(page.id, 'approved') };
         if (page.status === 'approved') return { label: 'Publish', action: () => handleStatusTransition(page.id, 'published') };
-        return { label: 'Edit Blocks', action: () => openBlockEditor(page.id) };
+        return { label: 'Open Configurator', action: () => openBlockEditor(page.id) };
     }
 
     return (
@@ -695,6 +699,11 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, contentT
 
             {/* Quick Actions — collapsed into a clean row */}
             <div className="flex flex-wrap items-center gap-2">
+                {configuratorPage && (
+                    <Button variant="outline" size="sm" onClick={() => openBlockEditor(configuratorPage.id)} disabled={!!loading}>
+                        Visual Configurator
+                    </Button>
+                )}
                 <Button onClick={handleRandomize} disabled={!!loading} size="sm">
                     {loading === 'randomize' ? 'Applying...' : quickDeploySeed ? 'Re-apply Design' : 'Auto-Design All Pages'}
                 </Button>
@@ -873,7 +882,7 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, contentT
                                                 Preview
                                             </a>
                                             <Button size="sm" onClick={() => openBlockEditor(page.id)} disabled={!!loading}>
-                                                Edit Blocks
+                                                Visual Configurator
                                             </Button>
                                             <Button variant="outline" size="sm" onClick={pa.action} disabled={!!loading || loading === `status-${page.id}`}>
                                                 {loading === `status-${page.id}` ? '...' : pa.label}

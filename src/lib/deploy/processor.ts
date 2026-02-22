@@ -690,6 +690,188 @@ export async function processDeployJob(jobId: string, signal?: AbortSignal): Pro
     }
 }
 
+// ---------------------------------------------------------------------------
+// Inline deploy — runs synchronously, bypasses the worker queue entirely.
+// Creates an audit record in content_queue so deploy history is preserved.
+// ---------------------------------------------------------------------------
+
+export interface InlineDeployOptions {
+    domainId: string;
+    domain: string;
+    triggerBuild?: boolean;
+    addCustomDomain?: boolean;
+    cloudflareAccount?: string | null;
+    deployTarget?: 'production' | 'staging';
+}
+
+export interface InlineDeployResult {
+    success: boolean;
+    jobId: string;
+    steps: DeployStep[];
+    cfProject?: string;
+    stagingUrl?: string;
+    fileCount: number;
+    dnsVerified?: boolean;
+    dnsUpdateResult?: string;
+    error?: string;
+    durationMs: number;
+}
+
+export async function deployDomainInline(options: InlineDeployOptions): Promise<InlineDeployResult> {
+    const start = Date.now();
+    const jobId = crypto.randomUUID();
+
+    // Validate domain exists and has content
+    const domainRecord = await db.select().from(domains).where(eq(domains.id, options.domainId)).limit(1);
+    if (domainRecord.length === 0) {
+        return { success: false, jobId, steps: [], fileCount: 0, error: 'Domain not found', durationMs: Date.now() - start };
+    }
+    const domain = domainRecord[0];
+
+    const articleCount = await db.select({ count: count() }).from(articles).where(eq(articles.domainId, options.domainId));
+    const pageDefCount = await db.select({ count: count() }).from(pageDefinitions)
+        .where(and(eq(pageDefinitions.domainId, options.domainId), eq(pageDefinitions.isPublished, true)));
+
+    if ((articleCount[0]?.count || 0) === 0 && (pageDefCount[0]?.count || 0) === 0) {
+        return { success: false, jobId, steps: [], fileCount: 0, error: `No published content to deploy for ${options.domain}`, durationMs: Date.now() - start };
+    }
+
+    // Resolve Cloudflare host shard
+    const hostShardPlan = await resolveCloudflareHostShardPlan({
+        domain: options.domain,
+        cloudflareAccount: options.cloudflareAccount ?? domain.cloudflareAccount ?? null,
+        domainNiche: domain.niche ?? null,
+        maxFallbacks: 3,
+    });
+    const hostShard = hostShardPlan.primary;
+
+    const credentialErrors = validateDeployCredentials(hostShardPlan.all);
+    if (credentialErrors.length > 0) {
+        return { success: false, jobId, steps: [], fileCount: 0, error: `Missing credentials: ${credentialErrors.join(', ')}`, durationMs: Date.now() - start };
+    }
+
+    const deployTarget = options.deployTarget || 'production';
+    const isStaging = deployTarget === 'staging';
+    const payload: DeployPayload = {
+        domain: options.domain,
+        triggerBuild: options.triggerBuild ?? true,
+        addCustomDomain: options.addCustomDomain ?? false,
+        cloudflareAccount: options.cloudflareAccount,
+        deployTarget,
+    };
+
+    const steps: DeployStep[] = isStaging
+        ? [
+            { step: 'Generate Files', status: 'pending' },
+            { step: 'Upload to Cloudflare (staging)', status: 'pending' },
+        ]
+        : [
+            { step: 'Generate Files', status: 'pending' },
+            { step: 'Upload to Cloudflare', status: 'pending' },
+            { step: 'Add Custom Domain', status: 'pending' },
+            { step: 'Configure DNS Record', status: 'pending' },
+            { step: 'Update Nameservers', status: 'pending' },
+            { step: 'Verify DNS', status: 'pending' },
+            { step: 'Ping Search Engines', status: 'pending' },
+        ];
+
+    // Create audit record (processing immediately — no queue wait)
+    await db.insert(contentQueue).values({
+        id: jobId,
+        domainId: options.domainId,
+        jobType: 'deploy',
+        payload,
+        status: 'processing',
+        priority: 10, // highest — inline
+        startedAt: new Date(),
+        maxAttempts: 1,
+    });
+
+    const ctx: DeployContext = {
+        jobId,
+        domainId: options.domainId,
+        payload,
+        projectName: sanitizeProjectName(options.domain),
+        hostShardPlan: hostShardPlan.all,
+        hostShard,
+        deployTarget,
+        steps,
+    };
+
+    try {
+        const files = await stepGenerateFiles(ctx);
+        await stepDirectUpload(ctx, files);
+
+        if (isStaging) {
+            await db.update(contentQueue).set({
+                status: 'completed',
+                completedAt: new Date(),
+                result: { steps: ctx.steps, cfProject: ctx.cfProject, filesDeployed: files.length, deployTarget: 'staging', stagingUrl: ctx.stagingUrl || null, completedAt: new Date().toISOString() },
+            }).where(eq(contentQueue.id, jobId));
+
+            return { success: true, jobId, steps: ctx.steps, cfProject: ctx.cfProject, stagingUrl: ctx.stagingUrl, fileCount: files.length, durationMs: Date.now() - start };
+        }
+
+        const customDomainLinked = await stepAddCustomDomain(ctx);
+        await stepConfigureDnsRecord(ctx, customDomainLinked);
+        const dnsUpdateResult = await stepUpdateDns(ctx, customDomainLinked);
+        const dnsVerified = await stepVerifyDns(ctx);
+
+        const shouldMarkDeployed = dnsUpdateResult === 'updated' || dnsVerified;
+        if (shouldMarkDeployed) {
+            await stepPingSearchEngines(ctx);
+        } else {
+            await doneStep(ctx, 6, 'Skipped (DNS not yet pointing to Cloudflare)');
+        }
+
+        // Mark audit record complete
+        await db.update(contentQueue).set({
+            status: 'completed',
+            completedAt: new Date(),
+            result: { steps: ctx.steps, cfProject: ctx.cfProject, filesDeployed: files.length, dnsVerified, dnsUpdateResult, completedAt: new Date().toISOString() },
+        }).where(eq(contentQueue.id, jobId));
+
+        // Update domain record
+        const deployUpdate: Record<string, unknown> = { lastDeployedAt: new Date(), updatedAt: new Date() };
+        if (shouldMarkDeployed) {
+            deployUpdate.isDeployed = true;
+        } else if (!domain.isDeployed) {
+            deployUpdate.isDeployed = false;
+        }
+        await db.update(domains).set(deployUpdate).where(eq(domains.id, ctx.domainId));
+
+        try {
+            await advanceDomainLifecycleForAcquisition({
+                domainId: ctx.domainId,
+                targetState: 'build',
+                actorId: null,
+                actorRole: 'admin',
+                reason: 'Inline deployment completed successfully',
+                metadata: { source: 'deploy_inline', jobId, cloudflareProject: ctx.cfProject ?? null },
+            });
+        } catch (lifecycleError) {
+            console.error('Failed to auto-advance lifecycle after inline deploy:', lifecycleError instanceof Error ? lifecycleError.message : String(lifecycleError));
+        }
+
+        return { success: true, jobId, steps: ctx.steps, cfProject: ctx.cfProject, fileCount: files.length, dnsVerified, dnsUpdateResult, durationMs: Date.now() - start };
+    } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        await db.update(contentQueue).set({
+            status: 'failed',
+            errorMessage: errorMsg,
+            attempts: 1,
+            completedAt: new Date(),
+            result: { steps: ctx.steps, failedAt: new Date().toISOString() },
+        }).where(eq(contentQueue.id, jobId));
+
+        if (!domain.isDeployed) {
+            await db.update(domains).set({ isDeployed: false, updatedAt: new Date() }).where(eq(domains.id, ctx.domainId));
+        }
+
+        return { success: false, jobId, steps: ctx.steps, cfProject: ctx.cfProject, fileCount: 0, error: errorMsg, durationMs: Date.now() - start };
+    }
+}
+
 /**
  * Process a staging-only deploy. Generates files and uploads to a 'staging' branch
  * on CF Pages, returning a preview URL without touching DNS or custom domains.

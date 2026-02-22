@@ -2065,7 +2065,7 @@ async function recoverStaleLocks(): Promise<number> {
  * Acquires pending jobs that are ready to process using atomic UPDATE...RETURNING
  * to prevent race conditions between multiple workers.
  */
-async function acquireJobs(limit: number, jobTypes?: string[]) {
+async function acquireJobs(limit: number, jobTypes?: string[], channel?: string | null) {
     const now = new Date();
     const lockUntil = new Date(now.getTime() + LOCK_DURATION_MS);
     const nowIso = now.toISOString();
@@ -2075,6 +2075,15 @@ async function acquireJobs(limit: number, jobTypes?: string[]) {
     // This prevents race conditions between multiple workers entirely.
     const jobTypeFilter = jobTypes?.length
         ? sql`AND ${contentQueue.jobType} IN (${sql.join(jobTypes.map(t => sql`${t}`), sql`, `)})`
+        : sql``;
+
+    // Channel filter: if specified, only pick jobs from that channel.
+    // channel=null means pick jobs with no channel (inline/legacy).
+    // channel=undefined means pick any job (backwards compat).
+    const channelFilter = channel !== undefined
+        ? (channel === null
+            ? sql`AND ${contentQueue.channel} IS NULL`
+            : sql`AND ${contentQueue.channel} = ${channel}`)
         : sql``;
 
     const lockedJobs = await db.execute<{ id: string }>(sql`
@@ -2088,6 +2097,7 @@ async function acquireJobs(limit: number, jobTypes?: string[]) {
               AND (scheduled_for IS NULL OR scheduled_for <= ${nowIso}::timestamp)
               AND (locked_until IS NULL OR locked_until <= ${nowIso}::timestamp)
               ${jobTypeFilter}
+              ${channelFilter}
             ORDER BY priority DESC, created_at ASC
             LIMIT ${limit}
             FOR UPDATE SKIP LOCKED
@@ -3368,17 +3378,29 @@ export async function runWorkerOnce(options: WorkerOptions = {}): Promise<Worker
     const staleLocksCleaned = await recoverStaleLocks();
     const transientRetriesQueued = await retryTransientFailedJobs(Math.min(maxJobs, 25));
 
-    // Step 2: Acquire and process jobs.
-    // In Redis mode, consume Redis-dispatched IDs first; otherwise (or on empty/degraded),
-    // fall back to PostgreSQL scanning.
+    // Step 2: Acquire and process jobs from independent channel lanes.
+    // Each channel gets its own slot allocation so build work never starves maintain.
+    const buildSlots = Math.max(2, maxJobs - 2);       // most slots go to build
+    const maintainSlots = Math.min(2, Math.max(1, Math.floor(maxJobs / 4))); // 1-2 slots for maintain
+    const legacySlots = 2; // catch-all for uncategorized/legacy jobs
+
     let jobs: typeof contentQueue.$inferSelect[] = [];
+
+    // Redis mode: consume dispatched IDs first (channel-agnostic)
     const redisIds = await dequeueContentJobIds(maxJobs * 3);
     if (redisIds.length > 0) {
         jobs = await acquireJobsByIds(redisIds, maxJobs, options.jobTypes);
         await requeueUnacquiredPendingIds(redisIds, jobs.map((job) => job.id));
     }
+
+    // Postgres fallback / primary: acquire from each channel independently
     if (jobs.length === 0) {
-        jobs = await acquireJobs(maxJobs, options.jobTypes);
+        const [buildJobs, maintainJobs, legacyJobs] = await Promise.all([
+            acquireJobs(buildSlots, options.jobTypes, 'build'),
+            acquireJobs(maintainSlots, options.jobTypes, 'maintain'),
+            acquireJobs(legacySlots, options.jobTypes),
+        ]);
+        jobs = [...buildJobs, ...maintainJobs, ...legacyJobs];
     }
 
     let processed = 0;

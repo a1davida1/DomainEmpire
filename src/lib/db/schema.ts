@@ -650,6 +650,11 @@ export const monetizationProfiles = pgTable('monetization_profiles', {
 export const contentQueue = pgTable('content_queue', {
     id: uuid('id').primaryKey().defaultRandom(),
 
+    // Queue channel: build (AI content pipeline), maintain (scheduled updates), or null (inline/legacy)
+    channel: text('channel', {
+        enum: ['build', 'maintain']
+    }),
+
     // Job definition
     jobType: text('job_type', {
         enum: [
@@ -710,15 +715,14 @@ export const contentQueue = pgTable('content_queue', {
     scheduledFor: timestamp('scheduled_for'), // For future scheduling
     lockedUntil: timestamp('locked_until'), // For worker locking
 }, (t) => ({
+    channelIdx: index('content_queue_channel_idx').on(t.channel),
     scheduledForIdx: index('content_queue_scheduled_for_idx').on(t.scheduledFor),
     statusIdx: index('content_queue_status_idx').on(t.status),
     priorityIdx: index('content_queue_priority_idx').on(t.priority),
     lockedUntilIdx: index('content_queue_locked_until_idx').on(t.lockedUntil),
     jobTypeIdx: index('content_queue_job_type_idx').on(t.jobType),
-    // Composite index matching the worker's FOR UPDATE SKIP LOCKED query exactly:
-    // WHERE status='pending' AND (locked_until IS NULL OR ...) AND (scheduled_for IS NULL OR ...)
-    // ORDER BY priority DESC, created_at ASC
-    workerPollIdx: index('content_queue_worker_poll_idx').on(t.status, t.lockedUntil, t.scheduledFor, t.priority, t.createdAt),
+    // Composite index for channel-aware worker polling
+    workerPollIdx: index('content_queue_worker_poll_idx').on(t.channel, t.status, t.lockedUntil, t.scheduledFor, t.priority, t.createdAt),
     // Partial unique index: only one active deploy job per domain at a time.
     // Prevents TOCTOU race in the deploy API endpoint.
     deployOnceIdx: uniqueIndex('content_queue_deploy_once_uidx')

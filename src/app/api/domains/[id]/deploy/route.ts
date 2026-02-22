@@ -3,10 +3,9 @@ import { db, domains } from '@/lib/db';
 import { requireAuth, requireRole } from '@/lib/auth';
 import { eq, and, isNull } from 'drizzle-orm';
 import { z } from 'zod';
-import { randomUUID } from 'node:crypto';
 import { checkIdempotencyKey, storeIdempotencyResult } from '@/lib/api/idempotency';
-import { enqueueContentJob } from '@/lib/queue/content-queue';
 import { type DeployPreflightResult, runDeployPreflight } from '@/lib/deploy/preflight';
+import { deployDomainInline } from '@/lib/deploy/processor';
 
 const deploySchema = z.object({
     triggerBuild: z.boolean().default(true),
@@ -99,44 +98,27 @@ export async function POST(request: NextRequest, { params }: PageProps) {
             );
         }
 
-        // Enqueue deploy job.  The partial unique index
-        // (content_queue_deploy_once_uidx) ensures at most one pending/processing
-        // deploy per domain — this replaces the old racy SELECT-then-INSERT check.
-        const jobId = randomUUID();
-        try {
-            await enqueueContentJob({
-                id: jobId,
-                domainId: id,
-                jobType: 'deploy',
-                priority: 2,
-                payload: {
-                    domain: domain.domain,
-                    triggerBuild: options.triggerBuild,
-                    addCustomDomain: options.addCustomDomain,
-                    cloudflareAccount: domain.cloudflareAccount ?? null,
-                },
-                status: 'pending',
-                scheduledFor: new Date(),
-                maxAttempts: 3,
-            });
-        } catch (enqueueErr: unknown) {
-            // Postgres error 23505 = unique_violation from the deploy_once partial index
-            if (enqueueErr instanceof Error && 'code' in enqueueErr && (enqueueErr as { code: string }).code === '23505') {
-                return NextResponse.json(
-                    { error: 'A deployment is already in progress for this domain' },
-                    { status: 409 },
-                );
-            }
-            throw enqueueErr;
-        }
+        // Run deploy inline — no queue wait, instant execution
+        const result = await deployDomainInline({
+            domainId: id,
+            domain: domain.domain,
+            triggerBuild: options.triggerBuild,
+            addCustomDomain: options.addCustomDomain,
+            cloudflareAccount: domain.cloudflareAccount ?? null,
+        });
 
         const response = NextResponse.json({
-            success: true,
-            jobId,
+            success: result.success,
+            jobId: result.jobId,
             domain: domain.domain,
-            message: 'Deployment queued',
+            message: result.success ? 'Deployed successfully' : `Deploy failed: ${result.error}`,
+            steps: result.steps,
+            cfProject: result.cfProject,
+            fileCount: result.fileCount,
+            dnsVerified: result.dnsVerified,
+            durationMs: result.durationMs,
             preflightWarnings: preflight.issues.filter((issue) => issue.severity === 'warning'),
-        });
+        }, { status: result.success ? 200 : 500 });
         await storeIdempotencyResult(request, response);
         return response;
     } catch (error) {
