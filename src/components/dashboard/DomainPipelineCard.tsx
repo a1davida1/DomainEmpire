@@ -29,7 +29,7 @@ interface PipelineState {
 const STAGES = [
     { key: 'classify', label: 'Classify', desc: 'AI assigns niche, tier, template', tip: 'AI analyzes the domain name and assigns a niche (e.g. "health"), content tier (1–3), site template, and theme style. This determines all downstream content decisions.' },
     { key: 'keywords', label: 'Keywords', desc: 'Research target keywords', tip: 'AI researches high-value search keywords in this domain\'s niche. These keywords become the basis for each article\'s topic and SEO targeting.' },
-    { key: 'content', label: 'Content', desc: 'Generate articles via pipeline', tip: 'Each article goes through a multi-step AI pipeline: outline → draft → humanize → SEO optimize → meta tags. Articles start as "draft" and move through review before publishing.' },
+    { key: 'content', label: 'Content', desc: 'Generate articles via pipeline', tip: 'Each article goes through a multi-step AI pipeline: outline → draft → polish writing → SEO optimize → title & description. Articles start as "draft" and move through review before publishing.' },
     { key: 'deploy', label: 'Deploy', desc: 'Push to Cloudflare Pages', tip: 'Generates a static site from all published articles and uploads it to Cloudflare Pages. After deploy, the site is live at the domain\'s URL (requires nameservers pointed to Cloudflare).' },
 ] as const;
 

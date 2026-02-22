@@ -27,7 +27,7 @@ export default async function DomainPagesPage({ params }: PageProps) {
             <div className="flex flex-col gap-2">
                 <h1 className="text-2xl font-bold tracking-tight">Pages: {domain.domain}</h1>
                 <p className="text-muted-foreground">
-                    Manage v2 block-based page definitions for this domain.
+                    Manage pages, layouts, and design for this domain.
                 </p>
             </div>
             <DomainDetailTabs domainId={id} />

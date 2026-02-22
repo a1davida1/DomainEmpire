@@ -5,8 +5,19 @@ import postgres from 'postgres';
 async function main() {
     const sql = postgres(process.env.DATABASE_URL!, { ssl: 'require' });
 
-    await sql`ALTER TABLE domains ADD COLUMN IF NOT EXISTS site_settings jsonb DEFAULT '{}'::jsonb`;
-    console.log('Migration applied: site_settings column added');
+    // Cancel all pending/processing jobs
+    const cancelled = await sql`
+        UPDATE content_queue 
+        SET status = 'cancelled', completed_at = NOW(), error_message = 'Bulk cleared by admin'
+        WHERE status IN ('pending', 'processing')
+        RETURNING id`;
+    console.log(`Cancelled ${cancelled.length} pending/processing jobs`);
+
+    // Count remaining by status
+    const stats = await sql`
+        SELECT status, count(*) as cnt FROM content_queue GROUP BY status ORDER BY cnt DESC`;
+    console.log('\n=== QUEUE AFTER CLEAR ===');
+    for (const s of stats) console.log(`  ${s.status}: ${s.cnt}`);
     await sql.end();
 }
 main().catch(e => { console.error(e); process.exit(1); });

@@ -91,7 +91,7 @@ export function GenerateArticleButton({ domainId, hasArticles }: { domainId: str
                         {hasArticles ? 'Generate More' : 'Generate Articles'}
                     </Button>
                 </TooltipTrigger>
-                <TooltipContent className="max-w-xs">Queue 5 new articles through the AI pipeline (keyword research → outline → draft → humanize → SEO → meta tags).</TooltipContent>
+                <TooltipContent className="max-w-xs">Queue 5 new articles through the AI pipeline (keyword research → outline → draft → polish writing → SEO → title &amp; description).</TooltipContent>
             </Tooltip>
         </div>
     );

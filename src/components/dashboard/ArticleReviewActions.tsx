@@ -111,10 +111,10 @@ export function ArticleReviewActions({ articleId, currentStatus }: ArticleReview
 }
 
 const PIPELINE_STAGES = [
-    { jobType: 'humanize', label: 'Re-Humanize' },
-    { jobType: 'seo_optimize', label: 'Re-SEO' },
-    { jobType: 'generate_meta', label: 'Regen Meta' },
-    { jobType: 'ai_detection_check', label: 'AI Detection' },
+    { jobType: 'humanize', label: 'Re-Polish Writing' },
+    { jobType: 'seo_optimize', label: 'Re-Optimize SEO' },
+    { jobType: 'generate_meta', label: 'Regenerate Title & Description' },
+    { jobType: 'ai_detection_check', label: 'AI Detection Check' },
 ] as const;
 
 export function ArticlePipelineActions({ articleId }: { articleId: string }) {

@@ -152,12 +152,12 @@ export default function AnalyticsPage() {
 
     const stageLabels: Record<string, string> = {
         keyword_research: 'Keyword Research',
-        outline: 'Outline',
-        draft: 'Draft',
-        humanize: 'Humanize',
-        seo: 'SEO Optimize',
-        meta: 'Meta Gen',
-        classify: 'Classify',
+        outline: 'Create Outline',
+        draft: 'Write Draft',
+        humanize: 'Polish Writing',
+        seo: 'SEO Optimization',
+        meta: 'Title & Description',
+        classify: 'Classify Domain',
     };
 
     function formatAge(ms: number | null): string {
