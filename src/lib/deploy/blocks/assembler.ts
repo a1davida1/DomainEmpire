@@ -67,6 +67,21 @@ export interface RenderContext {
     thinPageWordThreshold?: number;
     /** Domain niche for contextual copy (e.g. newsletter popup heading) */
     niche?: string;
+    /** Site-level settings from the dashboard (phone, sidebar toggle, footer, CTA, etc.) */
+    siteSettings?: {
+        siteName?: string;
+        siteDescription?: string;
+        phone?: string;
+        contactEmail?: string;
+        showSidebar?: boolean;
+        sidebarAboutText?: string;
+        footerText?: string;
+        ctaHeading?: string;
+        ctaButtonText?: string;
+        ctaButtonUrl?: string;
+        socialLinks?: Array<{ platform: string; url: string }>;
+        customCss?: string;
+    };
 }
 
 // ============================================================
@@ -964,8 +979,8 @@ registerBlockRenderer('Header', (block, ctx) => {
     const config = (block.config || {}) as Record<string, unknown>;
     const variant = block.variant || config.variant || 'topbar';
     const sticky = config.sticky ? ' style="position:sticky;top:0;z-index:50"' : '';
-    const siteName = (content.siteName as string) || ctx.siteTitle;
-    const phone = (content.phone as string) || '';
+    const siteName = (content.siteName as string) || ctx.siteSettings?.siteName || ctx.siteTitle;
+    const phone = (content.phone as string) || ctx.siteSettings?.phone || '';
     const navLinks = (content.navLinks as Array<{
         label: string;
         href: string;

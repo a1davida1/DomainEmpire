@@ -55,6 +55,21 @@ import sanitizeHtml from 'sanitize-html';
 
 // extractSiteTitle imported from './templates/shared'
 
+interface SiteSettings {
+    siteName?: string;
+    siteDescription?: string;
+    phone?: string;
+    contactEmail?: string;
+    showSidebar?: boolean;
+    sidebarAboutText?: string;
+    footerText?: string;
+    ctaHeading?: string;
+    ctaButtonText?: string;
+    ctaButtonUrl?: string;
+    socialLinks?: Array<{ platform: string; url: string }>;
+    customCss?: string;
+}
+
 interface SiteConfig {
     domainId: string;
     domain: string;
@@ -65,6 +80,7 @@ interface SiteConfig {
     template: string;
     scripts: { head: string; body: string };
     theme?: string;
+    siteSettings?: SiteSettings;
 }
 
 interface GeneratedFile {
@@ -150,16 +166,18 @@ export async function generateSiteFiles(
         console.warn(`[deploy] Unknown theme "${domain.themeStyle}" for ${domain.domain}; using "${resolvedTheme.theme}"`);
     }
 
+    const ss = (domain.siteSettings || {}) as SiteSettings;
     const config: SiteConfig = {
         domainId,
         domain: domain.domain,
-        title: extractSiteTitle(domain.domain),
-        description: `Expert guides about ${domain.niche || 'various topics'}`,
+        title: ss.siteName || extractSiteTitle(domain.domain),
+        description: ss.siteDescription || `Expert guides about ${domain.niche || 'various topics'}`,
         niche: domain.niche || 'general',
         subNiche: domain.subNiche || undefined,
         template: domain.siteTemplate || 'authority',
         theme: resolvedTheme.theme,
         scripts,
+        siteSettings: ss,
     };
 
     // Load disclosure config for trust elements
@@ -239,7 +257,8 @@ async function generateV2SiteFiles(
     scripts: { head: string; body: string },
     _datasetsByArticle: Map<string, ArticleDatasetInfo[]>,
 ): Promise<GeneratedFile[]> {
-    const siteTitle = (domain as Record<string, unknown>).siteNameOverride as string || extractSiteTitle(domain.domain);
+    const v2ss = (domain.siteSettings || {}) as SiteSettings;
+    const siteTitle = v2ss.siteName || (domain as Record<string, unknown>).siteNameOverride as string || extractSiteTitle(domain.domain);
 
     // Resolve v2 theme + skin with policy-based fallback for vertical/niche
     const homeDef = pageDefs.find(p => p.route === '/') || pageDefs[0];
@@ -332,6 +351,7 @@ async function generateV2SiteFiles(
                 ? `${process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, '')}/api/collect`
                 : undefined,
             niche: niche !== 'general' ? niche : undefined,
+            siteSettings: v2ss,
         };
 
         const blocks = (pageDef.blocks || []) as BlockEnvelope[];
@@ -438,11 +458,14 @@ function buildPageShell(
         : '';
 
     // --- Sidebar ---
+    const ss = config.siteSettings || {};
     let sidebarHtml = '';
-    if (layout.grid === 'sidebar-right' || layout.grid === 'sidebar-left') {
+    const sidebarEnabled = ss.showSidebar !== false;
+    if (sidebarEnabled && (layout.grid === 'sidebar-right' || layout.grid === 'sidebar-left')) {
         const recentItems = articleList.slice(0, 5).map(a =>
             `<li><a href="/${escapeAttr(a.slug || '')}">${escapeHtml(a.title)}</a></li>`
         ).join('\n          ');
+        const aboutText = ss.sidebarAboutText || config.description;
         sidebarHtml = `
       <aside class="sidebar">
         <div class="sidebar-section">
@@ -451,7 +474,7 @@ function buildPageShell(
         </div>
         <div class="sidebar-section">
             <h3>About</h3>
-            <p style="font-size:0.875rem;color:#64748b">${escapeHtml(config.description)}</p>
+            <p style="font-size:0.875rem;color:#64748b">${escapeHtml(aboutText)}</p>
         </div>
       </aside>`;
     }
@@ -462,11 +485,11 @@ function buildPageShell(
         case 'cta-bar':
             footerContent = `<footer>
   <div class="footer-cta">
-    <h3>Ready to get started?</h3>
+    <h3>${escapeHtml(ss.ctaHeading || 'Ready to get started?')}</h3>
     <p>Explore our guides and tools to make informed decisions.</p>
-    <a href="/">Browse All Guides</a>
+    <a href="${escapeAttr(ss.ctaButtonUrl || '/')}">${escapeHtml(ss.ctaButtonText || 'Browse All Guides')}</a>
   </div>
-  <div class="footer-bottom">${footerLinksHtml}<p>&copy; ${new Date().getFullYear()} ${escapeHtml(config.title)}</p></div>
+  <div class="footer-bottom">${footerLinksHtml}<p>${escapeHtml(ss.footerText || `\u00A9 ${new Date().getFullYear()} ${config.title}`)}</p></div>
 </footer>`;
             break;
         case 'newsletter': {
@@ -531,14 +554,18 @@ function buildPageShell(
         default: // minimal or multi-column
             footerContent = `<footer>
   ${footerLinksHtml}
-  <p>&copy; ${new Date().getFullYear()} ${escapeHtml(config.title)}</p>
+  <p>${escapeHtml(ss.footerText || `\u00A9 ${new Date().getFullYear()} ${config.title}`)}</p>
 </footer>`;
             break;
     }
 
+    const phoneHtml = ss.phone
+        ? `<a href="tel:${escapeAttr(ss.phone.replace(/[^\d+]/g, ''))}" class="header-phone">${escapeHtml(ss.phone)}</a>`
+        : '';
     const headerHtml = `<header>
   <nav>
     <a href="/" class="logo">${escapeHtml(config.title)}</a>
+    ${phoneHtml}
     ${navLinksHtml}
   </nav>
 </header>`;

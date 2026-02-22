@@ -645,362 +645,327 @@ export function DomainPagesClient({ domainId, domainName, siteTemplate, contentT
         );
     }
 
+    const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+
+    function statusBadge(status: string) {
+        switch (status) {
+            case 'published': return <Badge className="bg-green-600 text-white">Published</Badge>;
+            case 'approved': return <Badge className="bg-emerald-600 text-white">Approved</Badge>;
+            case 'review': return <Badge className="bg-amber-500 text-white">In Review</Badge>;
+            default: return <Badge variant="secondary">Draft</Badge>;
+        }
+    }
+
+    function primaryAction(page: PageDef) {
+        if (page.status === 'draft') return { label: 'Submit for Review', action: () => handleStatusTransition(page.id, 'review') };
+        if (page.status === 'review') return { label: 'Approve', action: () => handleStatusTransition(page.id, 'approved') };
+        if (page.status === 'approved') return { label: 'Publish', action: () => handleStatusTransition(page.id, 'published') };
+        return { label: 'Edit Blocks', action: () => openBlockEditor(page.id) };
+    }
+
     return (
-        <div className="space-y-4">
+        <div className="space-y-6">
+            {/* Alerts */}
             {error && (
-                <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+                <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
                     {error}
                 </div>
             )}
             {success && (
-                <div className="rounded-md border border-green-500/50 bg-green-500/10 p-3 text-sm text-green-700 dark:text-green-400">
+                <div className="rounded-lg border border-green-500/50 bg-green-500/10 px-4 py-3 text-sm text-green-700 dark:text-green-400">
                     {success}
                     {stagingUrl && (
-                        <div className="mt-1">
-                            <a
-                                href={stagingUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="font-medium underline"
-                            >
-                                {stagingUrl}
-                            </a>
-                        </div>
+                        <a href={stagingUrl} target="_blank" rel="noopener noreferrer" className="mt-1 block font-medium underline">
+                            {stagingUrl}
+                        </a>
                     )}
                 </div>
             )}
 
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-                <div className="rounded border p-2 text-xs"><span className="text-muted-foreground">Total</span><div className="text-lg font-semibold">{pages.length}</div></div>
-                <div className="rounded border p-2 text-xs"><span className="text-muted-foreground">Published</span><div className="text-lg font-semibold text-green-600">{pageStats.published}</div></div>
-                <div className="rounded border p-2 text-xs"><span className="text-muted-foreground">Review</span><div className="text-lg font-semibold text-amber-600">{pageStats.review}</div></div>
-                <div className="rounded border p-2 text-xs"><span className="text-muted-foreground">Draft</span><div className="text-lg font-semibold">{pageStats.draft}</div></div>
-                <div className="rounded border p-2 text-xs"><span className="text-muted-foreground">Blocks</span><div className="text-lg font-semibold">{pageStats.totalBlocks}</div></div>
-            </div>
-
-            {/* Featured Site Checklist + Quick Deploy */}
-            <div className="grid gap-4 lg:grid-cols-2">
-                <div className="rounded-lg border p-4">
-                    <div className="mb-3 flex items-center justify-between">
-                        <h3 className="text-sm font-semibold">Featured Site Checklist</h3>
-                        <span className="text-xs font-medium text-muted-foreground">
-                            {checklist.mustHaveMet}/{checklist.mustHaveTotal} required
-                        </span>
-                    </div>
-                    <div className="mb-3 h-2 overflow-hidden rounded-full bg-muted">
-                        <div
-                            className={`h-full rounded-full transition-all ${
-                                checklist.score >= 80 ? 'bg-green-500' :
-                                checklist.score >= 50 ? 'bg-amber-500' : 'bg-red-500'
-                            }`}
-                            role="progressbar"
-                            aria-valuenow={checklist.score}
-                            aria-valuemin={0}
-                            aria-valuemax={100}
-                            aria-label={`Checklist score: ${checklist.score}%`}
-                            style={{ width: `${checklist.score}%` }}
-                        />
-                    </div>
-                    <ul className="space-y-1.5">
-                        {checklist.items.map((item, i) => (
-                            <li key={i} className="flex items-start gap-2 text-xs">
-                                <span className={`mt-0.5 flex-shrink-0 ${item.met ? 'text-green-500' : 'text-muted-foreground'}`}>
-                                    {item.met ? '✓' : '○'}
-                                </span>
-                                <span className={item.met ? 'text-muted-foreground' : 'text-foreground'}>
-                                    {item.label}
-                                    {item.priority === 'must' && !item.met && (
-                                        <Badge variant="destructive" className="ml-1.5 px-1 py-0 text-[10px]">Required</Badge>
-                                    )}
-                                    {item.priority === 'should' && !item.met && (
-                                        <Badge variant="secondary" className="ml-1.5 px-1 py-0 text-[10px]">Recommended</Badge>
-                                    )}
-                                </span>
-                            </li>
-                        ))}
-                    </ul>
-                </div>
-
-                <div className="rounded-lg border p-4">
-                    <h3 className="mb-3 text-sm font-semibold">Quick Deploy</h3>
-                    <p className="mb-3 text-xs text-muted-foreground">
-                        Apply a unique design profile (theme, skin, block variants) across all pages.
-                        Fills missing must-have pages and publishes everything for staging deploy.
-                    </p>
-                    <div className="flex flex-wrap items-center gap-2">
-                        <Button
-                            onClick={handleRandomize}
-                            disabled={!!loading}
-                            size="sm"
-                        >
-                            {loading === 'randomize' ? 'Applying...' : quickDeploySeed ? 'Re-apply Design' : 'Randomize & Deploy'}
-                        </Button>
-                        <Button
-                            variant="outline"
-                            onClick={handleReroll}
-                            disabled={!!loading}
-                            size="sm"
-                        >
-                            {loading === 'randomize' ? '...' : 'Reroll (New Identity)'}
-                        </Button>
-                        {quickDeploySeed && (
-                            <span className="text-xs text-muted-foreground">
-                                Seed: <code className="rounded bg-muted px-1">{quickDeploySeed}</code>
-                            </span>
-                        )}
-                    </div>
-                    {checklist.score < 50 && pages.length === 0 && (
-                        <p className="mt-2 text-xs text-amber-600">
-                            No pages yet — Randomize will seed pages first, then apply a design.
-                        </p>
-                    )}
+            {/* Stats bar */}
+            <div className="flex items-center gap-6 rounded-lg border px-5 py-3">
+                <div className="text-sm"><span className="text-muted-foreground">Pages:</span> <strong>{pages.length}</strong></div>
+                <div className="text-sm"><span className="text-green-600">Published:</span> <strong>{pageStats.published}</strong></div>
+                <div className="text-sm"><span className="text-amber-600">Review:</span> <strong>{pageStats.review}</strong></div>
+                <div className="text-sm"><span className="text-muted-foreground">Draft:</span> <strong>{pageStats.draft}</strong></div>
+                <div className="ml-auto text-xs text-muted-foreground">
+                    Template: <code className="rounded bg-muted px-1.5 py-0.5">{siteTemplate}</code>
                 </div>
             </div>
 
-            <div className="rounded-lg border p-3">
-                <div className="grid gap-2 md:grid-cols-4">
-                    <input
-                        className="rounded border bg-background px-2 py-1 text-sm"
-                        aria-label="Search pages"
-                        placeholder="Search route/title/theme/skin"
-                        value={query}
-                        onChange={(e) => setQuery(e.target.value)}
-                    />
-                    <select
-                        className="rounded border bg-background px-2 py-1 text-sm"
-                        aria-label="Filter pages by status"
-                        value={statusFilter}
-                        onChange={(e) => setStatusFilter(e.target.value)}
-                    >
-                        <option value="all">All statuses</option>
-                        <option value="draft">Draft</option>
-                        <option value="review">Review</option>
-                        <option value="approved">Approved</option>
-                        <option value="published">Published</option>
-                    </select>
-                    <select
-                        className="rounded border bg-background px-2 py-1 text-sm"
-                        aria-label="Sort pages"
-                        value={sortBy}
-                        onChange={(e) => setSortBy(e.target.value as SortOption)}
-                    >
-                        <option value="updated-desc">Last updated (newest)</option>
-                        <option value="updated-asc">Last updated (oldest)</option>
-                        <option value="route-asc">Route A-Z</option>
-                        <option value="route-desc">Route Z-A</option>
-                        <option value="blocks-desc">Most blocks</option>
-                    </select>
-                    <Button variant="outline" size="sm" onClick={() => setShowCreateForm((v) => !v)}>
-                        {showCreateForm ? 'Hide Create Form' : 'Create New Page'}
-                    </Button>
-                </div>
-
-                {showCreateForm && (
-                    <div className="mt-3 grid gap-2 md:grid-cols-6">
-                        <input
-                            className="rounded border bg-background px-2 py-1 text-sm md:col-span-2"
-                            aria-label="New page route"
-                            placeholder="Route (e.g. /pricing)"
-                            value={newRoute}
-                            onChange={(e) => setNewRoute(e.target.value)}
-                        />
-                        <input
-                            className="rounded border bg-background px-2 py-1 text-sm md:col-span-2"
-                            aria-label="New page title"
-                            placeholder="Title (optional)"
-                            value={newTitle}
-                            onChange={(e) => setNewTitle(e.target.value)}
-                        />
-                        <select aria-label="New page theme" className="rounded border bg-background px-2 py-1 text-sm" value={newTheme} onChange={(e) => setNewTheme(e.target.value)}>
-                            <option value="clean">clean</option>
-                            <option value="editorial">editorial</option>
-                            <option value="bold">bold</option>
-                            <option value="minimal">minimal</option>
-                        </select>
-                        <select aria-label="New page skin" className="rounded border bg-background px-2 py-1 text-sm" value={newSkin} onChange={(e) => setNewSkin(e.target.value)}>
-                            <option value="slate">slate</option>
-                            <option value="ocean">ocean</option>
-                            <option value="forest">forest</option>
-                            <option value="ember">ember</option>
-                            <option value="midnight">midnight</option>
-                            <option value="coral">coral</option>
-                        </select>
-                        <select aria-label="New page preset" className="rounded border bg-background px-2 py-1 text-sm" value={newPreset} onChange={(e) => setNewPreset(e.target.value as 'article' | 'homepage')}>
-                            <option value="article">Article preset</option>
-                            <option value="homepage">Homepage preset</option>
-                        </select>
-                        <Button size="sm" onClick={handleCreatePage} disabled={!!loading}>Create Page</Button>
-                    </div>
+            {/* Quick Actions — collapsed into a clean row */}
+            <div className="flex flex-wrap items-center gap-2">
+                <Button onClick={handleRandomize} disabled={!!loading} size="sm">
+                    {loading === 'randomize' ? 'Applying...' : quickDeploySeed ? 'Re-apply Design' : 'Auto-Design All Pages'}
+                </Button>
+                <Button variant="outline" onClick={handleReroll} disabled={!!loading} size="sm">
+                    {loading === 'randomize' ? '...' : 'New Random Design'}
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleStagingDeploy} disabled={!!loading}>
+                    {loading === 'staging' ? 'Deploying...' : 'Preview Staging'}
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setShowCreateForm(v => !v)}>
+                    + Add Page
+                </Button>
+                {quickDeploySeed && (
+                    <span className="text-xs text-muted-foreground">
+                        Design seed: <code className="rounded bg-muted px-1">{quickDeploySeed}</code>
+                    </span>
                 )}
             </div>
 
+            {/* Create new page form */}
+            {showCreateForm && (
+                <div className="rounded-lg border bg-muted/30 p-4">
+                    <h4 className="mb-3 text-sm font-semibold">Create New Page</h4>
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                        <div className="space-y-1 sm:col-span-2">
+                            <label htmlFor="newRoute" className="text-xs font-medium text-muted-foreground">Route</label>
+                            <input id="newRoute" className="w-full rounded-md border bg-background px-3 py-2 text-sm" placeholder="/pricing" value={newRoute} onChange={(e) => setNewRoute(e.target.value)} />
+                        </div>
+                        <div className="space-y-1 sm:col-span-2">
+                            <label htmlFor="newTitle" className="text-xs font-medium text-muted-foreground">Title (optional)</label>
+                            <input id="newTitle" className="w-full rounded-md border bg-background px-3 py-2 text-sm" placeholder="Pricing Guide" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} />
+                        </div>
+                        <div className="space-y-1">
+                            <label htmlFor="newTheme" className="text-xs font-medium text-muted-foreground">Theme</label>
+                            <select id="newTheme" className="w-full rounded-md border bg-background px-3 py-2 text-sm" value={newTheme} onChange={(e) => setNewTheme(e.target.value)}>
+                                <option value="clean">Clean</option>
+                                <option value="editorial">Editorial</option>
+                                <option value="bold">Bold</option>
+                                <option value="minimal">Minimal</option>
+                            </select>
+                        </div>
+                        <div className="space-y-1">
+                            <label htmlFor="newSkin" className="text-xs font-medium text-muted-foreground">Color Skin</label>
+                            <select id="newSkin" className="w-full rounded-md border bg-background px-3 py-2 text-sm" value={newSkin} onChange={(e) => setNewSkin(e.target.value)}>
+                                <option value="slate">Slate</option>
+                                <option value="ocean">Ocean</option>
+                                <option value="forest">Forest</option>
+                                <option value="ember">Ember</option>
+                                <option value="midnight">Midnight</option>
+                                <option value="coral">Coral</option>
+                            </select>
+                        </div>
+                        <div className="space-y-1">
+                            <label htmlFor="newPreset" className="text-xs font-medium text-muted-foreground">Page Type</label>
+                            <select id="newPreset" className="w-full rounded-md border bg-background px-3 py-2 text-sm" value={newPreset} onChange={(e) => setNewPreset(e.target.value as 'article' | 'homepage')}>
+                                <option value="article">Article Page</option>
+                                <option value="homepage">Homepage</option>
+                            </select>
+                        </div>
+                        <div className="flex items-end">
+                            <Button className="w-full" onClick={handleCreatePage} disabled={!!loading}>
+                                {loading === 'create' ? 'Creating...' : 'Create Page'}
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Search & filter */}
+            <div className="flex flex-wrap items-center gap-2">
+                <input
+                    className="min-w-[200px] flex-1 rounded-md border bg-background px-3 py-2 text-sm"
+                    aria-label="Search pages"
+                    placeholder="Search pages..."
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                />
+                <select className="rounded-md border bg-background px-3 py-2 text-sm" aria-label="Filter by status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+                    <option value="all">All Statuses</option>
+                    <option value="draft">Draft</option>
+                    <option value="review">In Review</option>
+                    <option value="approved">Approved</option>
+                    <option value="published">Published</option>
+                </select>
+                <select className="rounded-md border bg-background px-3 py-2 text-sm" aria-label="Sort pages" value={sortBy} onChange={(e) => setSortBy(e.target.value as SortOption)}>
+                    <option value="updated-desc">Newest first</option>
+                    <option value="updated-asc">Oldest first</option>
+                    <option value="route-asc">Route A-Z</option>
+                    <option value="route-desc">Route Z-A</option>
+                    <option value="blocks-desc">Most blocks</option>
+                </select>
+            </div>
+
+            {/* Bulk actions — only visible when items selected */}
+            {selectedIds.length > 0 && (
+                <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 dark:border-blue-800 dark:bg-blue-950">
+                    <span className="text-sm font-medium">{selectedIds.length} selected</span>
+                    <span className="text-muted-foreground">|</span>
+                    <Button variant="ghost" size="sm" onClick={handleBulkGenerate} disabled={!!loading}>Generate Content</Button>
+                    <Button variant="ghost" size="sm" onClick={() => handleBulkStatus('review')} disabled={!!loading}>Submit for Review</Button>
+                    <Button variant="ghost" size="sm" onClick={() => handleBulkStatus('published')} disabled={!!loading}>Publish All</Button>
+                    <Button variant="ghost" size="sm" onClick={() => setSelectedIds([])}>Clear</Button>
+                </div>
+            )}
+
+            {/* Page list */}
             {pages.length === 0 ? (
-                <div className="rounded-lg border-2 border-dashed p-8 text-center">
-                    <h3 className="text-lg font-semibold">No v2 page definitions yet</h3>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                        Seed block-based pages from the <code className="rounded bg-muted px-1">{siteTemplate}</code> preset for <strong>{domainName}</strong>.
+                <div className="rounded-lg border-2 border-dashed p-12 text-center">
+                    <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+                        <span className="text-2xl">+</span>
+                    </div>
+                    <h3 className="text-lg font-semibold">No pages yet</h3>
+                    <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
+                        Get started by auto-generating pages for <strong>{domainName}</strong>, or create one manually.
                     </p>
-                    <Button
-                        className="mt-4"
-                        onClick={handleSeed}
-                        disabled={loading === 'seed'}
-                    >
-                        {loading === 'seed' ? 'Seeding...' : 'Seed Page Definitions'}
-                    </Button>
+                    <div className="mt-4 flex justify-center gap-3">
+                        <Button onClick={handleSeed} disabled={loading === 'seed'}>
+                            {loading === 'seed' ? 'Generating...' : 'Auto-Generate Pages'}
+                        </Button>
+                        <Button variant="outline" onClick={() => setShowCreateForm(true)}>
+                            Create Manually
+                        </Button>
+                    </div>
                 </div>
             ) : (
-                <>
+                <div className="space-y-2">
                     <div className="flex items-center justify-between">
                         <p className="text-sm text-muted-foreground">
-                            Showing {filteredPages.length} of {pages.length} page definition{pages.length !== 1 ? 's' : ''} — template: <code className="rounded bg-muted px-1">{siteTemplate}</code>
+                            {filteredPages.length} of {pages.length} page{pages.length !== 1 ? 's' : ''}
                         </p>
                         <div className="flex items-center gap-2">
-                            <Button variant="outline" size="sm" onClick={toggleSelectAllFiltered} disabled={filteredPages.length === 0}>
-                                {allFilteredSelected ? 'Unselect Visible' : 'Select Visible'}
+                            <Button variant="ghost" size="sm" onClick={toggleSelectAllFiltered} disabled={filteredPages.length === 0}>
+                                {allFilteredSelected ? 'Deselect all' : 'Select all'}
                             </Button>
-                            <Button variant="outline" size="sm" onClick={handleBulkGenerate} disabled={selectedIds.length === 0 || !!loading}>
-                                Generate Selected ({selectedIds.length})
-                            </Button>
-                            <Button variant="outline" size="sm" onClick={() => handleBulkStatus('review')} disabled={selectedIds.length === 0 || !!loading}>
-                                Submit Selected
-                            </Button>
-                            <Button variant="outline" size="sm" onClick={() => handleBulkStatus('published')} disabled={selectedIds.length === 0 || !!loading}>
-                                Publish Selected
-                            </Button>
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={handleStagingDeploy}
-                                disabled={!!loading}
-                            >
-                                {loading === 'staging' ? 'Deploying...' : 'Staging Deploy'}
-                            </Button>
-                            <Button variant="outline" size="sm" onClick={handleSeed} disabled={!!loading}>
-                                Re-seed
+                            <Button variant="ghost" size="sm" onClick={handleSeed} disabled={!!loading}>
+                                Re-generate
                             </Button>
                         </div>
                     </div>
 
-                    <div className="divide-y rounded-lg border">
-                        {filteredPages.map(page => (
-                            <div key={page.id} className="flex items-center justify-between gap-4 p-4">
-                                <div className="min-w-0 flex-1">
-                                    <div className="flex items-center gap-2">
+                    <div className="space-y-2">
+                        {filteredPages.map(page => {
+                            const pa = primaryAction(page);
+                            const menuOpen = openMenuId === page.id;
+                            return (
+                                <div key={page.id} className="group rounded-lg border p-4 transition-colors hover:bg-muted/30">
+                                    <div className="flex items-start gap-3">
                                         <input
                                             type="checkbox"
+                                            className="mt-1 h-4 w-4 rounded border"
                                             checked={selectedSet.has(page.id)}
                                             onChange={() => toggleSelected(page.id)}
                                             aria-label={`Select ${page.route}`}
                                         />
-                                        <span className="font-mono text-sm font-medium">{page.route}</span>
-                                        {page.status === 'published' ? (
-                                            <Badge variant="default" className="bg-green-600">Published</Badge>
-                                        ) : page.status === 'approved' ? (
-                                            <Badge variant="default" className="bg-emerald-600">Approved</Badge>
-                                        ) : page.status === 'review' ? (
-                                            <Badge variant="default" className="bg-amber-500">In Review</Badge>
-                                        ) : (
-                                            <Badge variant="secondary">Draft</Badge>
-                                        )}
-                                        <span className="text-xs text-muted-foreground">v{page.version}</span>
-                                    </div>
-                                    <div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground">
-                                        {page.title && <span>{page.title}</span>}
-                                        <span>{page.blockCount} blocks</span>
-                                        <span>theme: {page.theme}</span>
-                                        <span>skin: {page.skin}</span>
-                                        <span>updated: {formatDateLabel(page.updatedAt)}</span>
+                                        <div className="min-w-0 flex-1">
+                                            <div className="flex items-center gap-2">
+                                                <span className="font-mono text-sm font-semibold">{page.route}</span>
+                                                {statusBadge(page.status)}
+                                            </div>
+                                            {page.title && (
+                                                <p className="mt-0.5 text-sm text-muted-foreground">{page.title}</p>
+                                            )}
+                                            <div className="mt-1.5 flex items-center gap-4 text-xs text-muted-foreground">
+                                                <span>{page.blockCount} block{page.blockCount !== 1 ? 's' : ''}</span>
+                                                <span className="capitalize">{page.theme} / {page.skin}</span>
+                                                <span>{formatDateLabel(page.updatedAt)}</span>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <a
+                                                href={`/api/pages/${page.id}/preview`}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+                                            >
+                                                Preview
+                                            </a>
+                                            <Button size="sm" onClick={() => openBlockEditor(page.id)} disabled={!!loading}>
+                                                Edit Blocks
+                                            </Button>
+                                            <Button variant="outline" size="sm" onClick={pa.action} disabled={!!loading || loading === `status-${page.id}`}>
+                                                {loading === `status-${page.id}` ? '...' : pa.label}
+                                            </Button>
+                                            {/* More actions dropdown */}
+                                            <div className="relative">
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="px-2"
+                                                    onClick={() => setOpenMenuId(menuOpen ? null : page.id)}
+                                                    aria-label="More actions"
+                                                >
+                                                    &#8943;
+                                                </Button>
+                                                {menuOpen && (
+                                                    <div
+                                                        className="absolute right-0 top-full z-20 mt-1 w-48 rounded-lg border bg-background py-1 shadow-lg"
+                                                        onMouseLeave={() => setOpenMenuId(null)}
+                                                    >
+                                                        <button className="w-full px-3 py-2 text-left text-sm hover:bg-muted" onClick={() => { handleGenerate(page.id); setOpenMenuId(null); }}>
+                                                            Generate Content
+                                                        </button>
+                                                        <button className="w-full px-3 py-2 text-left text-sm hover:bg-muted" onClick={() => { handleDuplicate(page.id); setOpenMenuId(null); }}>
+                                                            Duplicate Page
+                                                        </button>
+                                                        <button className="w-full px-3 py-2 text-left text-sm hover:bg-muted" onClick={() => { handleCreateSnapshot(page.id); setOpenMenuId(null); }}>
+                                                            Create Snapshot
+                                                        </button>
+                                                        {page.status !== 'draft' && (
+                                                            <button className="w-full px-3 py-2 text-left text-sm hover:bg-muted" onClick={() => { handleStatusTransition(page.id, 'draft'); setOpenMenuId(null); }}>
+                                                                Revert to Draft
+                                                            </button>
+                                                        )}
+                                                        <hr className="my-1 border-border" />
+                                                        <button className="w-full px-3 py-2 text-left text-sm text-destructive hover:bg-destructive/10" onClick={() => { handleDelete(page.id); setOpenMenuId(null); }}>
+                                                            Delete Page
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
-
-                                <div className="flex items-center gap-2">
-                                    <a
-                                        href={`/api/pages/${page.id}/preview`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-xs text-blue-600 hover:underline dark:text-blue-400"
-                                    >
-                                        Preview
-                                    </a>
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => handleCreateSnapshot(page.id)}
-                                        disabled={!!loading}
-                                    >
-                                        {loading === `snap-${page.id}` ? '...' : 'Snapshot'}
-                                    </Button>
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => openBlockEditor(page.id)}
-                                        disabled={!!loading}
-                                    >
-                                        Edit Blocks
-                                    </Button>
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => handleDuplicate(page.id)}
-                                        disabled={!!loading}
-                                    >
-                                        {loading === `dup-${page.id}` ? '...' : 'Duplicate'}
-                                    </Button>
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => handleGenerate(page.id)}
-                                        disabled={!!loading}
-                                    >
-                                        {loading === `gen-${page.id}` ? 'Generating...' : 'Generate'}
-                                    </Button>
-                                    {page.status === 'draft' && (
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={() => handleStatusTransition(page.id, 'review')}
-                                            disabled={!!loading}
-                                        >
-                                            {loading === `status-${page.id}` ? '...' : 'Submit for Review'}
-                                        </Button>
-                                    )}
-                                    {page.status === 'approved' && (
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={() => handleStatusTransition(page.id, 'published')}
-                                            disabled={!!loading}
-                                        >
-                                            {loading === `status-${page.id}` ? '...' : 'Publish'}
-                                        </Button>
-                                    )}
-                                    {(page.status === 'published' || page.status === 'review') && (
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={() => handleStatusTransition(page.id, 'draft')}
-                                            disabled={!!loading}
-                                        >
-                                            {loading === `status-${page.id}` ? '...' : 'Back to Draft'}
-                                        </Button>
-                                    )}
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="text-destructive hover:text-destructive"
-                                        onClick={() => handleDelete(page.id)}
-                                        disabled={!!loading}
-                                    >
-                                        {loading === `del-${page.id}` ? '...' : 'Delete'}
-                                    </Button>
-                                </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                         {filteredPages.length === 0 && (
-                            <div className="p-8 text-center text-sm text-muted-foreground">No pages match current filters.</div>
+                            <div className="rounded-lg border-2 border-dashed p-8 text-center text-sm text-muted-foreground">
+                                No pages match your filters.
+                            </div>
                         )}
                     </div>
-                </>
+                </div>
+            )}
+
+            {/* Checklist — collapsed at the bottom as a details disclosure */}
+            {pages.length > 0 && (
+                <details className="rounded-lg border">
+                    <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
+                        Site Readiness Checklist
+                        <span className="ml-2 text-xs text-muted-foreground">
+                            {checklist.mustHaveMet}/{checklist.mustHaveTotal} required
+                            {checklist.score >= 80 && ' — Ready!'}
+                        </span>
+                        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                            <div
+                                className={`h-full rounded-full transition-all ${
+                                    checklist.score >= 80 ? 'bg-green-500' :
+                                    checklist.score >= 50 ? 'bg-amber-500' : 'bg-red-500'
+                                }`}
+                                style={{ width: `${checklist.score}%` }}
+                            />
+                        </div>
+                    </summary>
+                    <div className="border-t px-4 py-3">
+                        <ul className="space-y-1.5">
+                            {checklist.items.map((item, i) => (
+                                <li key={i} className="flex items-start gap-2 text-xs">
+                                    <span className={`mt-0.5 flex-shrink-0 ${item.met ? 'text-green-500' : 'text-muted-foreground'}`}>
+                                        {item.met ? '✓' : '○'}
+                                    </span>
+                                    <span className={item.met ? 'text-muted-foreground line-through' : 'text-foreground'}>
+                                        {item.label}
+                                        {item.priority === 'must' && !item.met && (
+                                            <Badge variant="destructive" className="ml-1.5 px-1 py-0 text-[10px]">Required</Badge>
+                                        )}
+                                    </span>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                </details>
             )}
         </div>
     );

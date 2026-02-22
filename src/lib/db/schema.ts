@@ -115,6 +115,22 @@ export const domains = pgTable('domains', {
     /** Per-site custom tags injected into <head> (e.g. Ahrefs verification, analytics). Raw HTML. */
     customHeadTags: text('custom_head_tags'),
 
+    /** Editable site-level settings: phone, sidebar, footer, CTA, contact info, etc. */
+    siteSettings: jsonb('site_settings').$type<{
+        siteName?: string;
+        siteDescription?: string;
+        phone?: string;
+        contactEmail?: string;
+        showSidebar?: boolean;
+        sidebarAboutText?: string;
+        footerText?: string;
+        ctaHeading?: string;
+        ctaButtonText?: string;
+        ctaButtonUrl?: string;
+        socialLinks?: Array<{ platform: string; url: string }>;
+        customCss?: string;
+    }>().default({}),
+
     // Site Review (AI QA)
     lastReviewResult: jsonb('last_review_result').$type<SiteReviewReport | null>(),
     lastReviewScore: integer('last_review_score'),

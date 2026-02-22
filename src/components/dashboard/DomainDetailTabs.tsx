@@ -10,6 +10,7 @@ const TABS = [
     { label: 'Monetization', href: '/monetization' },
     { label: 'Disclosures', href: '/disclosures' },
     { label: 'Edit', href: '/edit' },
+    { label: 'Settings', href: '/settings' },
 ] as const;
 
 export function DomainDetailTabs({ domainId }: { domainId: string }) {

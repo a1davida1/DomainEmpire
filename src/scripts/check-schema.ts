@@ -5,10 +5,8 @@ import postgres from 'postgres';
 async function main() {
     const sql = postgres(process.env.DATABASE_URL!, { ssl: 'require' });
 
-    const resp = await fetch('https://bracescost.org/');
-    const html = await resp.text();
-    const hasAhrefs = html.includes('analytics.ahrefs.com');
-    console.log(hasAhrefs ? '✅ Ahrefs tag is LIVE on bracescost.org' : '❌ Ahrefs tag still missing');
+    await sql`ALTER TABLE domains ADD COLUMN IF NOT EXISTS site_settings jsonb DEFAULT '{}'::jsonb`;
+    console.log('Migration applied: site_settings column added');
     await sql.end();
 }
 main().catch(e => { console.error(e); process.exit(1); });
