@@ -559,7 +559,7 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                 <div>
                     <h1 className="text-2xl font-bold tracking-tight">Domains</h1>
                     <p className="text-sm text-muted-foreground">
-                        {unfilteredDomains.length} total &middot; {deployActionDomainIds.length} deploy candidates &middot; {dnsActionDomainIds.length} DNS automation
+                        {unfilteredDomains.length} total &middot; <strong className="text-green-600">{totalDeployed} deployed</strong> &middot; {unfilteredDomains.length - totalDeployed} not deployed
                     </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -579,7 +579,55 @@ export default async function DomainsPage(props: Readonly<DomainsPageProps>) {
                 </div>
             </div>
 
-            {/* Status Summary Cards */}
+            {/* Deployment Summary — primary metrics */}
+            <div className="grid gap-4 md:grid-cols-4">
+                <Card className="border-green-200 dark:border-green-900">
+                    <CardContent className="p-4">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <p className="text-sm font-medium text-muted-foreground">Deployed &amp; Live</p>
+                                <p className="text-2xl font-bold text-green-600">{totalDeployed}</p>
+                            </div>
+                            <div className="h-3 w-3 rounded-full bg-green-500" />
+                        </div>
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardContent className="p-4">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <p className="text-sm font-medium text-muted-foreground">Not Deployed</p>
+                                <p className="text-2xl font-bold">{unfilteredDomains.length - totalDeployed}</p>
+                            </div>
+                            <div className="h-3 w-3 rounded-full bg-gray-300" />
+                        </div>
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardContent className="p-4">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <p className="text-sm font-medium text-muted-foreground">Ready to Deploy</p>
+                                <p className="text-2xl font-bold text-amber-600">{deployActionDomainIds.length}</p>
+                            </div>
+                            <div className="h-3 w-3 rounded-full bg-amber-500" />
+                        </div>
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardContent className="p-4">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <p className="text-sm font-medium text-muted-foreground">DNS Pending</p>
+                                <p className="text-2xl font-bold">{dnsActionDomainIds.length}</p>
+                            </div>
+                            <div className="h-3 w-3 rounded-full bg-blue-500" />
+                        </div>
+                    </CardContent>
+                </Card>
+            </div>
+
+            {/* Status Breakdown */}
             <div className="grid gap-4 md:grid-cols-5">
                 {['active', 'parked', 'redirect', 'forsale', 'defensive'].map((status) => {
                     const cfg = statusConfig[status] || { color: 'bg-gray-500', label: status };

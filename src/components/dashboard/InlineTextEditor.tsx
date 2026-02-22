@@ -30,6 +30,49 @@ interface EditTarget {
     rect: { top: number; left: number; width: number; height: number };
 }
 
+function replaceFirstTextOccurrence(value: unknown, fromText: string, toText: string): [unknown, boolean] {
+    let replaced = false;
+    const exactNeedle = fromText;
+    const trimmedNeedle = fromText.trim();
+
+    function transform(node: unknown): unknown {
+        if (typeof node === 'string') {
+            if (replaced) return node;
+
+            const tryNeedles = [exactNeedle, trimmedNeedle].filter((needle, idx, arr) => needle.length > 0 && arr.indexOf(needle) === idx);
+            for (const needle of tryNeedles) {
+                if (node === needle || node.trim() === needle) {
+                    replaced = true;
+                    return toText;
+                }
+                const at = node.indexOf(needle);
+                if (at >= 0) {
+                    replaced = true;
+                    return node.replace(needle, toText);
+                }
+            }
+            return node;
+        }
+
+        if (Array.isArray(node)) {
+            return node.map((item) => transform(item));
+        }
+
+        if (node && typeof node === 'object') {
+            const out: Record<string, unknown> = {};
+            for (const [key, child] of Object.entries(node as Record<string, unknown>)) {
+                out[key] = transform(child);
+            }
+            return out;
+        }
+
+        return node;
+    }
+
+    const next = transform(value);
+    return [next, replaced];
+}
+
 const EDITABLE_FIELDS: Record<string, Array<{ selector: string; field: string; isArray?: boolean; arrayField?: string }>> = {
     Hero: [
         { selector: 'h1', field: 'heading' },
@@ -190,6 +233,7 @@ export function InlineTextEditor({ blocks, onBlocksChange, iframeRef, enabled, o
     function saveEdit() {
         if (!editTarget) return;
 
+        let didUpdate = false;
         const updatedBlocks = blocks.map(b => {
             if (b.id !== editTarget.blockId) return b;
             const content = { ...(b.content || {}) } as Record<string, unknown>;
@@ -199,13 +243,28 @@ export function InlineTextEditor({ blocks, onBlocksChange, iframeRef, enabled, o
                 if (arr[editTarget.arrayIndex]) {
                     arr[editTarget.arrayIndex] = { ...arr[editTarget.arrayIndex], [editTarget.arrayField]: editValue };
                     content[editTarget.field] = arr;
+                    didUpdate = true;
                 }
             } else if (editTarget.field !== '_text') {
                 content[editTarget.field] = editValue;
+                didUpdate = true;
+            } else {
+                const [nextContent, changed] = replaceFirstTextOccurrence(content, editTarget.currentValue, editValue);
+                if (!changed) {
+                    return b;
+                }
+                didUpdate = true;
+                return { ...b, content: nextContent as Record<string, unknown> };
             }
 
             return { ...b, content };
         });
+
+        if (!didUpdate) {
+            toast.error('Could not map that text to a known editable field. Use the block form on the left for this element.');
+            setEditTarget(null);
+            return;
+        }
 
         onBlocksChange(updatedBlocks);
         setEditTarget(null);
