@@ -11,6 +11,7 @@ import { QueueSelectAllCheckbox } from '@/components/dashboard/QueueSelectAllChe
 import { ProcessNowButton } from '@/components/dashboard/ProcessNowButton';
 import { QueueHealthPoller } from '@/components/dashboard/QueueHealthPoller';
 import { getOperationsSettings } from '@/lib/settings/operations';
+import { jobTypeLabel } from '@/lib/format-utils';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -1210,7 +1211,7 @@ export default async function QueuePage({
                     <div className="flex flex-wrap gap-2">
                         {jobsByType.map(j => (
                             <span key={j.jobType} className="px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-sm">
-                                {j.jobType}: {j.count}
+                                {jobTypeLabel(j.jobType)}: {j.count}
                             </span>
                         ))}
                     </div>
@@ -1242,7 +1243,7 @@ export default async function QueuePage({
                                 >
                                     <div className="min-w-0">
                                         <p className="truncate text-sm font-medium">{row.domain}</p>
-                                        <p className="text-xs text-muted-foreground font-mono">{row.jobType}</p>
+                                        <p className="text-xs text-muted-foreground">{jobTypeLabel(row.jobType)}</p>
                                     </div>
                                     <div className="flex flex-wrap items-center gap-1 text-xs">
                                         <span className="rounded-full border px-2 py-0.5">Total {row.totalCount}</span>
@@ -1420,7 +1421,7 @@ export default async function QueuePage({
                                             />
                                         </td>
                                         <td className="p-3 font-mono text-xs">{job.id.slice(0, 8)}</td>
-                                        <td className="p-3 font-mono text-xs">{job.jobType}</td>
+                                        <td className="p-3 text-xs">{jobTypeLabel(job.jobType)}</td>
                                         <td className="p-3 text-xs">
                                             {resolvedDomainId ? (
                                                 <Link href={`/dashboard/domains/${resolvedDomainId}`} className="hover:underline">
@@ -1505,7 +1506,7 @@ export default async function QueuePage({
                                                             href={`/dashboard/queue?preset=failures&jobTypes=${encodeURIComponent(job.jobType)}`}
                                                             className="text-[11px] text-blue-600 hover:underline"
                                                         >
-                                                            Open all failed {job.jobType} jobs
+                                                            Open all failed {jobTypeLabel(job.jobType)} jobs
                                                         </Link>
                                                     </div>
                                                     <div>

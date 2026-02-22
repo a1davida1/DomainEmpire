@@ -369,7 +369,7 @@ export default async function ReviewQueuePage() {
             {reviewPages.length > 0 && (
                 <div id="pages" className="space-y-4">
                     <div className="flex items-center justify-between">
-                        <h2 className="text-lg font-semibold">Page Definitions Review</h2>
+                        <h2 className="text-lg font-semibold">Pages Review</h2>
                         <span className="text-xs text-muted-foreground tabular-nums">
                             {reviewPages.length} total &middot; {reviewPages.filter(p => p.status === 'review').length} pending &middot; {reviewPages.filter(p => p.status === 'approved').length} approved
                         </span>

@@ -356,7 +356,7 @@ export function DomainPipelineCard({ state }: { state: PipelineState }) {
                             </Button>
                         </TooltipTrigger>
                         <TooltipContent side="bottom" className="max-w-xs">
-                            Seeds 5 article stubs linked to researched keywords, then queues them through the full AI pipeline (outline → draft → humanize → SEO optimize → meta).
+                            Seeds 5 articles linked to researched keywords, then queues them through the full AI pipeline (outline → draft → polish writing → SEO optimize → title &amp; description).
                         </TooltipContent>
                     </Tooltip>
 
